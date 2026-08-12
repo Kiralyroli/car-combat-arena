@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="hu">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Car Combat Arena -- 0. lepcso spike</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1117; }
+      canvas { display: block; }
+
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        padding: 12px 14px;
+        background: rgba(13, 17, 23, 0.82);
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        color: #e6edf3;
+        font-size: 12px;
+        line-height: 1.7;
+        min-width: 260px;
+        pointer-events: none;
+        user-select: none;
+      }
+      #hud h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #7d8590;
+      }
+      #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+      #hud .label { color: #7d8590; }
+      #hud .val { color: #e6edf3; font-variant-numeric: tabular-nums; }
+      #hud hr { border: 0; border-top: 1px solid #30363d; margin: 8px 0; }
+
+      .wheel-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .wheel {
+        padding: 4px 6px;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        font-size: 11px;
+        text-align: center;
+      }
+      .wheel.ok { border-color: #2ea043; color: #3fb950; }
+      .wheel.hurt { border-color: #9e6a03; color: #d29922; }
+      .wheel.broken { border-color: #da3633; color: #f85149; text-decoration: line-through; }
+      .wheel.air { opacity: 0.45; }
+
+      #help {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        padding: 10px 14px;
+        background: rgba(13, 17, 23, 0.82);
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        color: #7d8590;
+        font-size: 11px;
+        line-height: 1.8;
+        pointer-events: none;
+        user-select: none;
+      }
+      #help b { color: #e6edf3; font-weight: 600; }
+
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #7d8590;
+        font-size: 13px;
+        background: #0d1117;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Fizikai motor betoltese...</div>
+    <div id="hud" hidden></div>
+    <div id="help" hidden>
+      <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
+      <b>Space</b> kezifek &nbsp; <b>Shift</b> boost &nbsp; <b>R</b> reset<br />
+      <b>1 2 3 4</b> kerek kiloves (FL FR RL RR) &nbsp; <b>0</b> kerekek javitasa
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

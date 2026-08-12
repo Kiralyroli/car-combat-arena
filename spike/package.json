@@ -1,0 +1,27 @@
+{
+  "name": "cca-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "0. lepcso - technikai spike: jarmu-fizika ertekeles (Rapier vs Jolt)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check:node": "tsx scripts/node-physics-check.ts",
+    "check:selfright": "tsx scripts/check-selfright.ts",
+    "screenshot": "tsx scripts/screenshot.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/three": "^0.170.0",
+    "playwright": "^1.62.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}
