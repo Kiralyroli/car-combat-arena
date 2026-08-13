@@ -1,5 +1,6 @@
 import { RapierBackend } from "./backends/rapier";
 import { FIXED_DT, MAX_STEPS_PER_FRAME } from "./config";
+import { initDebugPanel } from "./debugPanel";
 import { hideLoading, Hud, showError } from "./hud";
 import { Input } from "./input";
 import { SceneView } from "./scene";
@@ -20,9 +21,10 @@ async function main(): Promise<void> {
   const backend: VehicleBackend = new RapierBackend();
   await backend.init();
 
-  const view = new SceneView();
+  const view = await SceneView.create();
   const input = new Input();
   const hud = new Hud(backend.name, backend.version);
+  initDebugPanel();
 
   input.onAction((action) => {
     if (action === "reset") {

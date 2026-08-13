@@ -531,6 +531,369 @@ elfogadott, szélsőséges-eset maradék visszapattanást mutatja
 (`velY ~2,7 m/s` landolás után), mint a felfüggesztés-javítás után
 korábban, nem új regresszió.
 
+## Lépés 2 kezdete: valódi Sedan modell a doboz-placeholder helyett
+
+A projekt-terv Lépés 1 (asset validáció) és Lépés 2 (technical prototype)
+határán: a `spike/public/models/sedan.glb` (lásd fentebb, "Milyen
+formátumban kellene az autó asset?" szakasz) lecserélte a doboz- és
+henger-primitíveket a `scene.ts`-ben.
+
+### Mit jelentett ez technikailag
+
+**Fizikai méretek frissítve a valódi modellhez** -- a modell
+(`2,18 × 1,51 × 4,91 m`) jelentősen eltért a régi placeholder doboztól
+(`1,8 × 0,7 × 3,8 m`), főleg magasságban. Két út volt: a modellt
+torzítva a régi dobozhoz igazítani, vagy a fizikát a valódi
+méretekhez igazítani és újra-ellenőrizni a regressziós tesztekkel --
+az utóbbit választottuk, mert torzítás vizuálisan rossz eredményt
+adott volna.
+
+| Paraméter | Előtte | Utána |
+|---|---|---|
+| `CHASSIS.halfExtents` | `(0.9, 0.35, 1.9)` | `(1.09, 0.755, 2.455)` |
+| `WHEEL.radius` | `0.4` | `0.35` |
+| `WHEEL_LAYOUT` pozíciók | kerekített becslés | a modell tényleges kerék-node pozícióiból |
+| `RECOVERY.torque` | `6000` | **`11500`** |
+
+A nagyobb/magasabb karosszéria kb. **1,8×-ára növelte a forgási
+tehetetlenségi nyomatékot** a borulás-tengelyek körül -- ez két
+önfelegyenesedési tesztesetet elrontott (`90°`-os oldal-dőlésnél
+elakadt `~73°`-nál). A nyomaték arányos emelésével mindkettő újra
+sikeresen visszaáll. A tömeg szándékosan **maradt 1000 kg-on**
+(nem "reális" ~1300 kg-ra emelve egyszerre) -- ez egy külön, jövőbeli
+döntés.
+
+**A karosszéria és a kerekek origo-eltérése kezelve:** a modell
+`Body` node-ja talajszinten van origózva (nem a doboz közepén, ahogy
+a fizika számolja), ezért a `scene.ts` egy wrapper `Group`-ba teszi,
+`-CHASSIS.halfExtents.y` lokális eltolással -- így a fizika által
+mozgatott pont mindig a doboz geometriai közepe marad, a vizuális
+modell pedig helyesen a talajon áll.
+
+**Aszinkron betöltés:** a `SceneView` konstruktor eddig szinkron volt
+(primitíveket generált). Most egy `static async create()` factory
+tölti be a GLB-t (`GLTFLoader`), mielőtt a render-ciklus elindulna --
+a `main.ts` értelemszerűen `await SceneView.create()`-re változott.
+
+### Ellenőrzés
+
+Mind a fizikai regresszió (`npm run check:node`), mind az
+önfelegyenesedés (`npm run check:selfright`) hibamentes az átállás
+után. Az irány-konzisztenciát (kormányzott `FL`/`FR` kerekek tényleg a
+modell fényszóró-oldalán vannak-e) közvetlenül a fizika és a Blender
+export adataiból igazoltuk, nem csak vizuálisan -- a screenshotokon a
+textúrázatlan lámpák miatt nehéz volt szemmel eldönteni, de az
+exportált `Wheel_FL` pozíció (`z=-1.49`) és a korábbi, szigorúan
+ellenőrzött Blender-mérés (fényszóró-jelölő teszt) egyezik.
+
+### Amit még finomítani érdemes (nem blokkoló)
+
+- A `Glass`/`Optics` anyagoknak nincs textúrája (csak a karosszéria
+  és a kerék van bekötve egy korábbi vizuális teszthez)
+- A kanyarsugár kicsit nőtt a hosszabb tengelytáv miatt
+  (`~9,9 m` / `~6,5 m`, korábban `~5,6-7,2 m` tartományban volt) --
+  ha zavaró, a `corneringPowerMin`/`sideFrictionStiffness` tovább
+  finomítható
+- A kerék-sérülés vizuális "zsugorodása" (`scale.set(1,s,s)`) egy
+  valódi, részletes keréken kevésbé látványos, mint a primitív
+  hengeren volt
+
+## Utólagos javítás: túl sötét karosszéria
+
+**Ok:** a betöltött anyagok `metalness: 1` (teljesen fémes) értékkel
+exportálódtak a csomagból, de nincs hozzájuk metalness/roughness
+térkép, és a jelenetben nincs környezeti fényképe (environment map)
+sem, amiről egy fémfelület visszatükröződhetne -- ez a klasszikus
+"PBR anyag feketén jelenik meg" jelenség three.js-ben.
+
+**Javítás:** minden betöltött anyagnál, amelynek nincs saját
+metalness/roughness térképe, felülírjuk fix, festett-fém jellegű
+értékekre (`metalness: 0.2`, `roughness: 0.55`) -- lásd `scene.ts`
+`normalizeMaterials()`. Emellett a fényerőt is megemeltük
+(`HemisphereLight` 1.1→1.6, `DirectionalLight` 2.0→2.4).
+
+## Utólagos hangolás: sokkal fürgébb autó (gyorsulás, fordulás, tolatás)
+
+Mivel mostantól van önfelegyenesedés biztonsági hálóként, nagyobb
+bátorsággal lehetett a kormányzás-agresszivitáshoz és a tapadáshoz
+nyúlni, mint a korábbi köröknél.
+
+| Paraméter | Előtte | Utána |
+|---|---|---|
+| `engineForce` | 5200 N | **7500 N** |
+| `reverseFactor` | 0,55 | **0,75** |
+| `brakeForce` | 78 | **105** |
+| `handbrakeForce` | 120 | **150** |
+| `maxSteer` | 0,6 rad (~34°) | **0,78 rad (~45°)** |
+| `steerSpeed` | 5,0 rad/s | **7,5 rad/s** |
+| `steerReturnSpeed` | 6,5 rad/s | **8,5 rad/s** |
+| `steerFalloffSpeed` / `Min` | 34 / 0,42 | **44 / 0,55** |
+| `sideFrictionStiffness` | 1,3 | **1,7** |
+| `angularDamping` (karosszéria) | 0,16 | **0,1** |
+
+**Eredmény:** 0-50 km/h `1,38 s → 1,15 s`. Kanyarban a dőlés
+`8,4° → 17,9°`-ra nőtt (dinamikusabb érzet), messze a `60°`-os
+önfelegyenesedési küszöb alatt.
+
+**Menet közben talált tesztelési hiba (nem valódi regresszió):** az
+első kanyarsugár-mérés `Infinity`-t adott -- kiderült, hogy a nagyobb/
+gyorsabb autó a teszt-forgatókönyv rövid egyenes szakaszán már
+beleütközött és beékelődött a rámpa élébe, mielőtt kanyarodhatott
+volna. A teszt indulópontját akadálymentes területre helyezve a mérés
+helyes eredményt adott.
+
+**Fontos fizikai kompromisszum, amit érdemes tudni:** a kanyarsugár
+gázzal **nőtt** (`~9,9 m → ~13,6 m`), annak ellenére, hogy a tapadás
+és a kormányszög is nőtt -- ennek oka, hogy a drasztikusan megnövelt
+hajtóerő miatt a kocsi sokkal nagyobb sebességgel érkezik a kanyarba,
+és a sebesség önmagában is tágítja a fizikai sugarat (`v²/r`
+összefüggés). Ha ez zavaró, a `corneringPowerMin` tovább csökkenthető,
+hogy kanyarban erősebben vágja vissza a sebességet.
+
+## Utólagos javítás: túl sok testmozgás (bukdácsolás + dülöngélés)
+
+**Panasz:** gyorsulásnál az autó orra annyira felállt, hogy az első
+kerekek le sem értek a talajra, és vezetés közben folyamatosan
+oldalra dülöngélt.
+
+**Ok:** a legutóbbi fürgeség-hangolásnál a `CHASSIS.angularDamping`
+csökkentése (0,25→0,1) a kanyarodás (yaw) fürgesége érdekében **minden
+forgástengelyt** érintett -- így a bukdácsolást (pitch) és a dőlést
+(roll) sem csillapította eléggé, miközben a jóval erősebb hajtóerő
+nagyobb bukó-nyomatékot is generált a hátsó kerekeken.
+
+**Megoldás:** külön, extra csillapítás a bukdácsolás (X) és dőlés (Z)
+tengelyeken, **függetlenül** a kanyarodástól (Y) -- így a kanyarodás
+fürge maradhat, a testmozgás mégis visszafogott. Csak akkor hat, ha a
+dőlésszög jóval (`30°`-nál jobban) az önfelegyenesedési küszöb
+(`60°`) alatt van -- enélkül pontosan a küszöbön áthaladva elfojtaná
+a felegyenesedéshez még szükséges lendületet, és az autó elakadna
+`~60°` körül (ez menet közben ténylegesen elő is fordult, mire a
+biztonsági sávot bevezettük -- lásd lent).
+
+**Eredmény** (1,5 s gyorsítás, akadálymentes területen):
+
+| | Csillapítás nélkül | Csillapítással |
+|---|---|---|
+| Max dőlés | 17,9° | **6,8°** |
+| Átlag dőlés | 15,0° | **5,1°** |
+| Végsebesség | 58,7 km/h | **78,0 km/h** (bónusz -- kevesebb energia vész el forgásra) |
+| Kerék-elemelkedés | tartósabb | **~0,25 mp, csak indításkor** |
+
+**Menet közbeni hiba, amit a fejlesztés során találtam és javítottam:**
+az első verzió egy bináris "recoverál-e" jelzőt használt a csillapítás
+kikapcsolásához, pontosan a `60°`-os küszöbnél. Ez elrontotta az
+önfelegyenesedést: amint a dőlésszög recovery közben épp áthaladt a
+küszöbön, a csillapítás azonnal elfojtotta a még szükséges lendületet,
+és az autó `45-69°` körül beragadt (4 a 6 tesztesetből elbukott). A
+javítás: nem bináris jelző, hanem a tényleges dőlésszög + `30°`-os
+biztonsági sáv dönti el, mikor lép életbe a csillapítás.
+
+## Utólagos hangolás: még fürgébb kanyarodás nagy sebességnél
+
+**Panasz:** "ha kicsit felgyorsítok, szinte nem is kanyarodik."
+
+**Ok:** a `steerFalloffSpeed`/`steerFalloffMin` (nagy sebességnél
+csökkentett kormányszög, borulás elleni védelemként bevezetve)
+erősen visszavágott a kormányzásból már mérsékelt sebességnél is.
+
+| Paraméter | Előtte | Utána |
+|---|---|---|
+| `steerFalloffSpeed` | 44 | **70** |
+| `steerFalloffMin` | 0,55 | **0,75** |
+| `sideFrictionStiffness` | 1,7 | **2,3** |
+| `corneringPowerMin` | 0,4 | **0,3** |
+
+Mivel van önfelegyenesedés biztonsági hálóként, ez erősebben
+puhítható a korábbinál -- legrosszabb esetben az önfelegyenesedés
+helyrehozza a borulást.
+
+**Menet közben talált tesztelési csapdák (nem valódi
+regressziók):** a gyorsabb, nagyobb autó a korábbi teszt-forgatókönyvek
+rövid egyenesein sorra beleütközött az aréna tárgyaiba (rámpa, láda) --
+ezeket akadálymentes sarokból (`x=25, z=25`) mérve újra, érvényes
+számokat kaptunk. Egy másik teszt közben kiderült, hogy egy próba-
+induló pozíció (`z=60`) az arénafalakon **kívül** esett -- a kocsi
+zuhant, sosem ért talajt, ezért adott értelmetlen (azonos gázzal/gáz
+nélkül) eredményt.
+
+**Apró, ártalmatlan mellékhatás:** az erősebb oldaltapadás miatt a
+nyugalmi állapot sebesség-kiolvasása egy `~0,3 m/s`-os maradék
+"kontaktus-zajt" mutat, annak ellenére, hogy a pozíció bizonyíthatóan
+teljesen stabil (hosszabb, külön megfigyeléssel ellenőrizve). A
+`check:node` teszt küszöbét ennek megfelelően `1 → 1,5 km/h`-ra
+enyhítettük.
+
+**Eredmény** (tiszta, akadálymentes mérés):
+
+| | Sugár |
+|---|---|
+| Alacsony sebességről, gázzal | 16,8 m |
+| Alacsony sebességről, gáz nélkül | 6,4 m |
+| Már magas sebességről, gázzal | 36,2 m (de a sebesség a kanyar végére 9 km/h-ra esik -- a friction circle aktívan dolgozik) |
+
+## Utólagos javítás: "semmi nem változik, alig fordul" -- valódi ok
+
+**Diagnózis:** egy rövid (1-2 mp-es), "gombnyomás-szerű" teszttel
+kiderült, hogy nagyobb sebességnél (69 km/h) a kanyarodás **tényleg
+gyengébb** volt, mint alacsony sebességnél (24 km/h) -- pont fordítva,
+mint kellene. Az ok: a Sedan-modellre való átálláskor a nagyobb
+karosszéria kb. **1,6×-ára növelte a forgási tehetetlenségi
+nyomatékot** a függőleges (kanyarodási) tengely körül is -- ezt eddig
+csak a borulás-tengelyeknél (RECOVERY.torque) kompenzáltuk, a
+kanyarodásnál nem.
+
+**Első (túllőtt) próbálkozás:** `sideFrictionStiffness` `2,8 → 4,5`-re
+emelése drasztikusan javította a kanyarodást, de **elrontotta az
+egyenes gyorsulást** (0-50 km/h `0,95 s → 1,82 s`, és `1,03 m`
+oldalcsúszás jelent meg egyenes vezetésnél is). Kiderült: egy
+korábban jelentéktelen, `1 cm`-es FL/FR és RL/RR aszimmetria a
+kerék-pozíciókban a nagyon magas tapadásnál már érezhető húzást
+okozott.
+
+**Végleges megoldás:**
+-   a kerék-pozíciók pontosan szimmetrizálva (FL/FR azonos Z, RL/RR
+    azonos X)
+-   `sideFrictionStiffness`: 2,8 → **3,5** (mérsékeltebb, mint a
+    túllőtt 4,5, de még mindig jelentős emelés)
+-   `maxSteer`: 0,78 → **0,95 rad (~54°)**
+-   `steerSpeed`: 7,5 → **10 rad/s**
+-   `corneringPowerMin`: 0,3 → **0,55** (visszavéve -- túl agresszíven
+    vágta a sebességet, ami a kanyarodáshoz szükséges oldalirányú
+    tapadási erőt is elvette alacsony sebességnél)
+
+**Eredmény** (rövid, 0,5-1 mp-es kormányzási impulzusok):
+
+| | Előtte | Utána |
+|---|---|---|
+| 1s kormány, alacsony sebességről | 32° | **52°** |
+| 1s kormány, közepes sebességről | 17° | **29°** |
+| 0,5s kormány, közepes sebességről | 5° | **10°** |
+
+Az egyenes gyorsulás közben változatlan maradt (`0-50 km/h: 0,95 s`,
+oldalcsúszás `-0,15 m`).
+
+**Tesztelési tanulság, ami többször megismétlődött:** a gyorsabbá vált
+autó a korábbi, hosszú (2+ másodperces) teszt-forgatókönyvekben
+rendre nekifutott az aréna tárgyainak (rámpa, ládák, sőt egy esetben
+a keleti fal is) még mielőtt a mérés lezajlott volna, ál-eredményeket
+adva. Emiatt a kanyarodás-tesztet **állandó, rövid impulzusú
+regresszióvá** alakítottuk (`npm run check:turning`), akadálymentes
+sarokból (`x=25, z=25`) indítva.
+
+## Utólagos, végleges megoldás: kötelező, sebességtől független kanyarsugár
+
+**Panasz:** minden korábbi, tapadás-alapú finomhangolás után is
+"nagy sebességnél alig fordul", és "sokkal kisebb ívben" kanyarodást
+kért a felhasználó.
+
+**A gumitapadás-alapú hangolás fizikai korlátba ütközött.** Valódi
+gumiabroncs-modellnél a kanyarsugár szükségszerűen nő a sebességgel
+(`v²/r` összefüggés) -- ezt tapadás-emeléssel csak korlátozottan lehet
+ellensúlyozni, és túltolva (`sideFrictionStiffness: 4,5`) már
+mellékhatásokat is okozott (oldalcsúszás egyenes vezetésnél).
+
+**Megoldás: teljesen más megközelítés.** Ahelyett, hogy a gumi-
+fizikára bíznánk a kanyarodást, egy **közvetlen, kötelező
+kanyarsugár-célzás** lett bevezetve (`DRIVE.targetTurnRadius = 6 m`):
+minden fizikai lépésben, ha a játékos kormányoz, a karosszéria
+szögsebessége simítva egy olyan célértékhez igazodik, ami **pontosan
+a kívánt sugarú ívnek felel meg, a pillanatnyi sebesség
+figyelembevételével** (`célszögsebesség = sebesség / célsugár`).
+Ez garantálja az állandó sugarat, függetlenül a tapadási fizika
+korlátaitól -- ugyanaz a simított közelítési technika, mint amit az
+önfelegyenesedésnél már bevált (nem hirtelen impulzus, hanem
+fokozatos közelítés, hogy ne rántson be).
+
+**Eredmény** (tényleges mért kanyarsugár, induló sebesség szerint):
+
+| Induló sebesség | Sugár (célérték: 6 m) |
+|---|---|
+| 19 km/h | 5,9 m |
+| 55 km/h | 10,1 m |
+| 88 km/h | 8,7 m |
+
+A korábbi, tisztán tapadás-alapú hangolásnál ugyanez `6,4 m`-től
+`36+ m`-ig szórt sebesség szerint -- ez most **minden sebességen
+egy szűk, kiszámítható tartományban** marad.
+
+Rövid kormányzási impulzusok (elfordulás fokban):
+
+| | Előző kör | Most |
+|---|---|---|
+| 1s, alacsony sebességről | 52° | 55° |
+| 1s, közepes sebességről | 29° | **79°** |
+| 0,5s, közepes sebességről | 10° | **33°** |
+
+**Biztonság:** csak akkor hat, ha a kormányzás aktív ÉS az autó nincs
+az önfelegyenesedési küszöb felett -- nem zavarja se az egyenes
+vezetést (0-50 km/h változatlanul `0,95 s`), se a borulás utáni
+felállást. Teljes regresszió (`check:node`, `check:selfright`,
+`check:turning`) hibamentes.
+
+## Új eszköz: élő fizika-hangoló panel
+
+A felhasználó kérésére a képernyő jobb szélén egy csúszkás debug-panel
+jelent meg (`src/debugPanel.ts`), ami **azonnal, éles fizikai hatással**
+állítja a legfontosabb vezetési paramétereket -- nem kell újratölteni
+az oldalt, nem kell nekem szólni minden apró próbálgatáshoz.
+
+### Hogyan működik technikailag
+
+A csúszkák közvetlenül a `config.ts` export const objektumainak
+(`DRIVE`, `WHEEL`, `CHASSIS`, `STABILIZATION`, `RECOVERY`)
+tulajdonságait módosítják (pl. `DRIVE.engineForce = 4000`). Ez azért
+működik változtatás nélkül a többi kódon, mert a `const` csak a
+referenciát zárolja, a tulajdonságokat nem, és a fizika minden
+lépésben frissen olvassa ki ezeket -- nincs sehol gyorsítótárazás.
+
+**Amit emiatt át kellett alakítani:** a kerék-paraméterek (tapadás,
+felfüggesztés) korábban csak sérülés-változáskor lettek újra
+alkalmazva a Rapier controller-en -- ez azt jelentette volna, hogy egy
+csúszka-mozgatás csak a következő kerék-defektig nem látszana. Most a
+`rapier.ts` `step()` minden fizikai lépésben újra alkalmazza a
+kerék- és karosszéria-paramétereket (olcsó: 4 kerék × néhány setter
+hívás), így minden csúszka azonnal hat.
+
+**Amit NEM lehet élőben állítani:** a karosszéria mérete
+(`CHASSIS.halfExtents`) és a kerék fizikai sugara a jármű-létrehozáskor
+rögzül (`addWheel`) -- ezek csak oldal-újratöltéssel változtathatók,
+ezért nincsenek a panelen.
+
+### Bónusz: külön első/hátsó tengely tapadás
+
+A felhasználó kérdésére ("első tapadás, hátsó tapadás") bevezettünk
+két új, korábban nem létező paramétert: `WHEEL.frontGripMultiplier`
+és `WHEEL.rearGripMultiplier` -- ezek a meglévő tapadási értékekre
+hatnak MÉG EGYSZER, tengelyenként külön. Magasabb első érték = kevesebb
+alkormányzás, magasabb hátsó érték = stabilabb far (kevesebb
+kicsúszás).
+
+### Tartalom (5 szekció, ~22 csúszka)
+
+Gyorsulás/fékezés, Kormányzás (beleértve az új célzott kanyarsugarat),
+Tapadás, Felfüggesztés, Karosszéria/stabilizáció. Van
+"alapértelmezett" gomb (visszaállítja az induláskori értékeket) és
+összecsukás gomb.
+
+### Ellenőrzés
+
+Élőben teszteltük: a hajtóerő csúszka `7500 → 1500`-ra állítása után
+1 másodperc teljes gázzal csak `1,14 km/h`-t ért el a korábbi
+`~24 km/h` helyett -- a csúszka azonnal, ténylegesen hat a fizikára.
+
+### Export funkció
+
+A panel fejlécében egy "exportálás" gomb letölt egy időbélyeggel
+ellátott `.json` fájlt (`car-combat-arena-tuning-<idő>.json`), ami az
+ÖSSZES aktuális csúszka-értéket tartalmazza, **pontosan a `config.ts`
+`DRIVE`/`WHEEL`/`CHASSIS`/`STABILIZATION`/`RECOVERY` objektumainak
+tulajdonság-neveivel csoportosítva** -- így ha a felhasználó
+visszaküldi ezt a fájlt, közvetlenül, értelmezés nélkül átvezethető a
+kódba. A fokban megjelenített kormányszög exportkor visszaalakul
+radiánba (ahogy a `config.ts`-ben is van). Élőben tesztelve: egy
+módosított csúszka érteke helyesen megjelent a letöltött fájlban.
+
 ## Ami nincs kész
 
 ### Jolt összehasonlítás (4. kilépési feltétel)

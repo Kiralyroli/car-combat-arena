@@ -5,6 +5,7 @@ import {
   DRIVE,
   GRAVITY,
   RECOVERY,
+  STABILIZATION,
   WHEEL,
   WHEEL_LAYOUT,
 } from "../config";
@@ -136,15 +137,23 @@ export class RapierBackend implements VehicleBackend {
     const d = this.damage[i];
     const c = this.controller;
     const grip = d.broken ? 0 : d.gripMultiplier;
+    // Tengelyenkenti (elso/hatso) tapadas-szorzo -- lasd config.ts.
+    const axleGrip = WHEEL_LAYOUT[i].steered
+      ? WHEEL.frontGripMultiplier
+      : WHEEL.rearGripMultiplier;
 
-    c.setWheelFrictionSlip(i, Math.max(0.08, WHEEL.frictionSlip * grip));
+    c.setWheelFrictionSlip(
+      i,
+      Math.max(0.08, WHEEL.frictionSlip * grip * axleGrip),
+    );
     c.setWheelSideFrictionStiffness(
       i,
-      Math.max(0.02, WHEEL.sideFrictionStiffness * grip),
+      Math.max(0.02, WHEEL.sideFrictionStiffness * grip * axleGrip),
     );
     c.setWheelSuspensionCompression(i, WHEEL.suspensionCompression);
     c.setWheelSuspensionRelaxation(i, WHEEL.suspensionRelaxation);
     c.setWheelMaxSuspensionTravel(i, WHEEL.maxSuspensionTravel);
+    c.setWheelSuspensionRestLength(i, WHEEL.suspensionRestLength);
 
     if (d.broken) {
       // Nincs felfuggesztesi ero -> az auto ledol erre a sarokra.
@@ -172,6 +181,15 @@ export class RapierBackend implements VehicleBackend {
   step(dt: number, input: DriveInput): void {
     const t0 = performance.now();
 
+    // A debug-panel csuszkai kozvetlenul a config objektumokat
+    // mutaljak -- ezert minden lepesben ujra kell alkalmazni a
+    // kerek- es karosszeria-parametereket, kulonben csak a kovetkezo
+    // serules-valtozaskor ervenyesulnenek. Olcso (4 kerek, nehany
+    // setter hivas + 2 chassis setter), nem szamit a teljesitmenyben.
+    for (let i = 0; i < WHEEL_LAYOUT.length; i++) this.applyWheelTuning(i);
+    this.chassis.setAngularDamping(CHASSIS.angularDamping);
+    this.chassis.setLinearDamping(CHASSIS.linearDamping);
+
     const speed = this.speedMs();
     // Pozitiv = az orr fele halad (lasd FORWARD_SIGN).
     const forwardSpeed = this.controller.currentVehicleSpeed() * FORWARD_SIGN;
@@ -191,7 +209,13 @@ export class RapierBackend implements VehicleBackend {
     const steeredWheelsHealthy = WHEEL_LAYOUT.some(
       (w, i) => w.steered && !this.damage[i].broken,
     );
-    const corneringDemand = steeredWheelsHealthy ? Math.abs(input.steer) : 0;
+    // Alacsony sebessegnel (pl. induraskor) meg nincs valodi tapadasi
+    // konfliktus -- a korlatozas csak corneringPowerRampSpeed felett
+    // fut fel fokozatosan a teljes mertekere.
+    const speedRamp = clamp(speed / DRIVE.corneringPowerRampSpeed, 0, 1);
+    const corneringDemand = steeredWheelsHealthy
+      ? Math.abs(input.steer) * speedRamp
+      : 0;
     const enginePowerScale = lerp(1, DRIVE.corneringPowerMin, corneringDemand);
 
     // --- Hajtoero es fek ---
@@ -256,10 +280,29 @@ export class RapierBackend implements VehicleBackend {
       this.controller.setWheelBrake(i, broken ? 0 : brake);
     }
 
-    this.applySelfRighting(dt);
+    const tiltAngle = this.applySelfRighting(dt);
 
     this.controller.updateVehicle(dt);
     this.world.step();
+
+    let wheelsOnGround = 0;
+    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
+      if (this.controller.wheelIsInContact(i)) wheelsOnGround++;
+    }
+
+    const skipAbove = (STABILIZATION.skipAboveDeg * Math.PI) / 180;
+    if (tiltAngle < skipAbove) {
+      this.applyPitchRollStabilization();
+      // Levegoben (egy kerek sincs a talajon) a kanyarsugar-asszisztens
+      // kikapcsol -- kormanyzassal amugy sem lehetne forgatni a kocsit,
+      // ha egyik kerek sem er talajt, ez csak reala kene juttatna.
+      if (wheelsOnGround > 0) {
+        // A haladasi irany igazitasa (applyVelocityAlignment) az
+        // applyTurnRadiusAssist BELSEJEBOL fut, ugyanazon feltetelek
+        // mellett (steer/sebesseg-kuszob) -- lasd ott a dokumentaciot.
+        this.applyTurnRadiusAssist(dt, speed, input.steer);
+      }
+    }
 
     const elapsed = performance.now() - t0;
     this.stepMsAvg = this.stepMsAvg * 0.9 + elapsed * 0.1;
@@ -280,7 +323,8 @@ export class RapierBackend implements VehicleBackend {
    * vezetesi dolest (kanyar, kerek-serules) ne erintse -- azok
    * jellemzoen jokkal a kuszob alatt maradnak.
    */
-  private applySelfRighting(dt: number): void {
+  /** @returns az aktualis dolesszog (radian) -- lasd applyPitchRollStabilization. */
+  private applySelfRighting(dt: number): number {
     const q = this.chassis.rotation();
     const localUpWorld = rotateVec(q, { x: 0, y: 1, z: 0 });
     const worldUp = { x: 0, y: 1, z: 0 };
@@ -291,7 +335,7 @@ export class RapierBackend implements VehicleBackend {
     const startAngle = (RECOVERY.startAngleDeg * Math.PI) / 180;
     if (tiltAngle <= startAngle) {
       this.tiltedSince = null;
-      return;
+      return tiltAngle;
     }
 
     // Idobeli eszkalacio: minel tovabb ragad a dolesszog a kuszob
@@ -343,6 +387,124 @@ export class RapierBackend implements VehicleBackend {
         x: av.x * RECOVERY.angularDampingDuringRecovery,
         y: av.y * RECOVERY.angularDampingDuringRecovery,
         z: av.z * RECOVERY.angularDampingDuringRecovery,
+      },
+      true,
+    );
+    return tiltAngle;
+  }
+
+  /**
+   * Extra csillapitas a bukdacsolas (X) es dontes (Z) tengelyeken,
+   * FUGGETLENUL a kanyarodastol (Y) -- lasd STABILIZATION.pitchRollDamping
+   * dokumentacioja config.ts-ben. Csak akkor hat, ha a doles jokkal a
+   * felegyenesedesi kuszob (RECOVERY.startAngleDeg) ALATT van -- egy
+   * biztonsagi savval (STABILIZATION.skipAboveDeg), kulonben pontosan
+   * a kuszobon atlepve elfojtana a felegyenesedeshez meg szukseges
+   * lenduletet, es az auto elakadna a kuszob kozeleben.
+   */
+  private applyPitchRollStabilization(): void {
+    const av = this.chassis.angvel();
+    this.chassis.setAngvel(
+      {
+        x: av.x * STABILIZATION.pitchRollDamping,
+        y: av.y,
+        z: av.z * STABILIZATION.pitchRollDamping,
+      },
+      true,
+    );
+  }
+
+  /**
+   * Kozvetlen, sebessegtol fuggetlen kanyarsugar-celzas -- lasd
+   * DRIVE.targetTurnRadius dokumentacioja config.ts-ben. A valos
+   * gumitapadas-alapu kanyarodas fizikailag korlatozott nagy
+   * sebessegnel (v^2/r); ez a mechanizmus felulirja azt egy kozvetlen
+   * celzott szogsebesseggel, hogy a kanyarsugar kb. allando maradjon
+   * barmilyen sebessegnel.
+   *
+   * A cel-szogsebesseget SIMITVA kozelitjuk meg (nem egyszeri
+   * impulzussal), hogy ne lokjön/rango be a kormanyzas kezdetekor --
+   * ugyanaz a mintazat, mint az onfelegyenesedesnel korabban bevalt.
+   */
+  private applyTurnRadiusAssist(dt: number, speed: number, steerInput: number): void {
+    if (Math.abs(steerInput) < 0.01) return;
+    // Alacsony sebessegnel (pl. inditaskor) kikapcsol, ne fojtsa el a
+    // termeszetes, gumitapadas-alapu forgast -- lasd config.ts.
+    if (speed < DRIVE.turnRadiusMinSpeed) return;
+
+    // FORWARD_SIGN: ugyanaz az elojel-logika, mint a kormanyszognel
+    // (lasd fent) -- igy a celzott forgas mindig a tenyleges
+    // kormanyzas iranyaba mutat, nem ellene dolgozik.
+    const targetYawRate =
+      (FORWARD_SIGN * steerInput * speed) / DRIVE.targetTurnRadius;
+
+    const av = this.chassis.angvel();
+    const blend = clamp(DRIVE.turnRadiusBlendRate * dt, 0, 1);
+    const newYawRate = lerp(av.y, targetYawRate, blend);
+    this.chassis.setAngvel({ x: av.x, y: newYawRate, z: av.z }, true);
+
+    this.applyVelocityAlignment(dt, steerInput);
+  }
+
+  /**
+   * A fenti szogsebesseg-celzas CSAK a karosszeria FORGASAT allitja be
+   * -- a linearis lendulet (a kocsi tenyleges HALADASI iranya) magatol
+   * nem kovetne ezt gyorsan, mert ahhoz valodi oldalirányu gumitapadasi
+   * ero kellene. Enelkul nagy sebessegnel/eles kormanynal az orr gyorsan
+   * az uj irany fele fordul, de a kocsi meg a REGI iranyba csuszik tovabb
+   * -- ez "keresztbe csuszasnak" tunt eles kanyarban. Itt a linearis
+   * sebesseg-vektor iranyat SIMITVA az orr vilagkoordinata-iranyahoz
+   * igazitjuk (a nagysagat valtozatlanul hagyva), hogy a mozgas iranya
+   * kovesse a kanyarodast.
+   *
+   * KIPROBALVA, DE ELVETVE: a tomegkozeppont helyett a HATSO TENGELY
+   * sebesseget igazitani (merevtest-kinematikaval visszaszamolva a
+   * tomegkozeppontra) fizikailag pontosabb lenne (a fordulas a hatso
+   * tengely korul pivotalna, nem a karosszeria kozepen -- ez adna a
+   * valodi "elso kerekek huznak be" erzetet). A gyakorlatban viszont
+   * MEG KIS (0.3-0.5 kozotti) reszleges hatso-eltolassal is kaotikusan
+   * instabil volt: a rakenyszeritett oldalirányu tomegkozeppont-sebesseg
+   * tulzott csuszast okoz az ELSO kerekeknel, amit a Rapier sajat
+   * gumitapadas-modellje (DynamicRayCastVehicleController) minden
+   * lepesben ellensulyozni probal -- ez a ket rendszer egymassal
+   * "harcolva" energiat pumpal a rendszerbe. A legrosszabb resz: a
+   * stabilitasi hatar KESNYES volt -- pusztan 5 extra fizikai lepes
+   * (0.08 mp tobblet kanyarodas) egy addig stabilnak tuno beallitast
+   * hirtelen osszeomlasba vitt. Ez jatszhato jatekban (valtozo
+   * kormanyzasi idotartammal) elfogadhatatlanul kiszamithatatlan lenne.
+   * A "kerekek forditsak be, ne a test" erzetet ezert INKABB a valodi
+   * gumitapadas-fizikan keresztul erjuk el -- lasd WHEEL.frontGripMultiplier
+   * / rearGripMultiplier config.ts-ben -- ami nem kenyszerit semmit,
+   * csak a mar amugy is stabil Rapier-szimulaciot allitja arrebb.
+   */
+  private applyVelocityAlignment(dt: number, steerInput: number): void {
+    if (Math.abs(steerInput) < 0.01) return;
+
+    const lv = this.chassis.linvel();
+    const horizSpeedSq = lv.x * lv.x + lv.z * lv.z;
+    if (horizSpeedSq < 0.25) return;
+    const horizSpeed = Math.sqrt(horizSpeedSq);
+
+    // Orr iranya vilagkoordinatakban: a chassis lokalis -Z tengelye
+    // (lasd config.ts orr-konvencio dokumentacioja).
+    const nose = rotateVec(this.chassis.rotation(), { x: 0, y: 0, z: -1 });
+    const noseLen = Math.hypot(nose.x, nose.z) || 1;
+    const noseX = nose.x / noseLen;
+    const noseZ = nose.z / noseLen;
+
+    const dirX = lv.x / horizSpeed;
+    const dirZ = lv.z / horizSpeed;
+
+    const blend = clamp(DRIVE.velocityAlignRate * dt, 0, 1);
+    const newDirX = lerp(dirX, noseX, blend);
+    const newDirZ = lerp(dirZ, noseZ, blend);
+    const newLen = Math.hypot(newDirX, newDirZ) || 1;
+
+    this.chassis.setLinvel(
+      {
+        x: (newDirX / newLen) * horizSpeed,
+        y: lv.y,
+        z: (newDirZ / newLen) * horizSpeed,
       },
       true,
     );
