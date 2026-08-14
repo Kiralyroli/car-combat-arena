@@ -43,7 +43,7 @@ export const CHASSIS = {
 export const WHEEL = {
   /** A Sedan modell kerekeinek tenyleges sugara (~0.345 m, kerekitve). */
   radius: 0.35,
-  suspensionRestLength: 0.25,
+  suspensionRestLength: 0.3,
   suspensionStiffness: 24,
   /**
    * FONTOS: a relaxation (visszaengedeskori csillapitas) NE legyen

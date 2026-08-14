@@ -429,7 +429,8 @@ export class RapierBackend implements VehicleBackend {
         // A haladasi irany igazitasa (applyVelocityAlignment) az
         // applyTurnRadiusAssist BELSEJEBOL fut, ugyanazon feltetelek
         // mellett (steer/sebesseg-kuszob) -- lasd ott a dokumentaciot.
-        this.applyTurnRadiusAssist(dt, speed, input.steer);
+        // ELOJELES sebesseg: tolatasnal negativ (lasd ott).
+        this.applyTurnRadiusAssist(dt, forwardSpeed, input.steer);
       }
     }
 
@@ -555,24 +556,53 @@ export class RapierBackend implements VehicleBackend {
    * impulzussal), hogy ne lokjön/rango be a kormanyzas kezdetekor --
    * ugyanaz a mintazat, mint az onfelegyenesedesnel korabban bevalt.
    */
-  private applyTurnRadiusAssist(dt: number, speed: number, steerInput: number): void {
+  private applyTurnRadiusAssist(
+    dt: number,
+    forwardSpeed: number,
+    steerInput: number,
+  ): void {
     if (Math.abs(steerInput) < 0.01) return;
     // Alacsony sebessegnel (pl. inditaskor) kikapcsol, ne fojtsa el a
     // termeszetes, gumitapadas-alapu forgast -- lasd config.ts.
-    if (speed < DRIVE.turnRadiusMinSpeed) return;
+    if (Math.abs(forwardSpeed) < DRIVE.turnRadiusMinSpeed) return;
 
+    // FONTOS: ELOJELES haladasi sebesseg, nem a sebesseg nagysaga.
+    // Tolatasnal negativ, igy a celzott forgas iranya magatol
+    // megfordul -- ahogy egy valodi autonal is (hatramenetben ugyanaz a
+    // kormanyallas az ellenkezo iranyba forgatja a kocsit). Elojel
+    // nelkul az asszisztens tolatas kozben a ROSSZ iranyba eroltette a
+    // forgast, es a termeszetes fizika ellen dolgozva lefekezte az
+    // autot: meresben 42.6 km/h helyett csak 9.3 km/h maradt.
+    //
     // FORWARD_SIGN: ugyanaz az elojel-logika, mint a kormanyszognel
-    // (lasd fent) -- igy a celzott forgas mindig a tenyleges
-    // kormanyzas iranyaba mutat, nem ellene dolgozik.
+    // (lasd fent) -- igy a celzott forgas a tenyleges kormanyzas
+    // iranyaba mutat, nem ellene.
     const targetYawRate =
-      (FORWARD_SIGN * steerInput * speed) / DRIVE.targetTurnRadius;
+      (FORWARD_SIGN * steerInput * forwardSpeed) / DRIVE.targetTurnRadius;
 
     const av = this.chassis.angvel();
+
+    // Az asszisztens CSAK HOZZAADHAT forgast, elvenni nem.
+    //
+    // A feladata az volt, hogy NAGY sebessegnel megszoritsa a kanyart,
+    // ahol a gumitapadas fizikailag korlatoz (v^2/r). Alacsony
+    // sebessegen -- es kulonosen TOLATASNAL -- a termeszetes fordulas
+    // amugy is elesebb a celzottnal (meresben 1.11 vs 0.83 rad/s), ott
+    // tehat csak visszafogna, mikozben az iranyigazitas a gumik ellen
+    // dolgozna: a tolatas + kormanyzas igy 19.4 km/h helyett 10.6-ra
+    // esett vissza. Ez volt a "beakadas".
+    if (
+      Math.sign(targetYawRate) === Math.sign(av.y) &&
+      Math.abs(av.y) >= Math.abs(targetYawRate)
+    ) {
+      return;
+    }
+
     const blend = clamp(DRIVE.turnRadiusBlendRate * dt, 0, 1);
     const newYawRate = lerp(av.y, targetYawRate, blend);
     this.chassis.setAngvel({ x: av.x, y: newYawRate, z: av.z }, true);
 
-    this.applyVelocityAlignment(dt, steerInput);
+    this.applyVelocityAlignment(dt, steerInput, forwardSpeed);
   }
 
   /**
@@ -606,7 +636,11 @@ export class RapierBackend implements VehicleBackend {
    * / rearGripMultiplier config.ts-ben -- ami nem kenyszerit semmit,
    * csak a mar amugy is stabil Rapier-szimulaciot allitja arrebb.
    */
-  private applyVelocityAlignment(dt: number, steerInput: number): void {
+  private applyVelocityAlignment(
+    dt: number,
+    steerInput: number,
+    forwardSpeed: number,
+  ): void {
     if (Math.abs(steerInput) < 0.01) return;
 
     const lv = this.chassis.linvel();
@@ -614,12 +648,15 @@ export class RapierBackend implements VehicleBackend {
     if (horizSpeedSq < 0.25) return;
     const horizSpeed = Math.sqrt(horizSpeedSq);
 
-    // Orr iranya vilagkoordinatakban: a chassis lokalis -Z tengelye
-    // (lasd config.ts orr-konvencio dokumentacioja).
+    // A HALADAS iranya, nem feltetlenul az orre: tolatasnal a kocsi a
+    // farka fele megy. Enelkul az igazitas tolatas kozben 180 fokkal
+    // vissza akarna forditani a mozgast, tehat kozvetlenul a tolatas
+    // ellen dolgozna -- ez okozta a "beakadast".
+    const travelSign = forwardSpeed < 0 ? -1 : 1;
     const nose = rotateVec(this.chassis.rotation(), { x: 0, y: 0, z: -1 });
     const noseLen = Math.hypot(nose.x, nose.z) || 1;
-    const noseX = nose.x / noseLen;
-    const noseZ = nose.z / noseLen;
+    const noseX = (nose.x / noseLen) * travelSign;
+    const noseZ = (nose.z / noseLen) * travelSign;
 
     const dirX = lv.x / horizSpeed;
     const dirZ = lv.z / horizSpeed;

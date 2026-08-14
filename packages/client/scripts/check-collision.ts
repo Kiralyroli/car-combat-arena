@@ -283,10 +283,19 @@ async function main(): Promise<void> {
     `legnagyobb visszahuzas ${imp.worstPullback.toFixed(2)} m`,
   );
 
-  // Az utkozes utan a testnek vissza kell allnia a hiteles poziciora --
-  // kulonben a szolver es a halozat "harcolna" egymassal, es a test
-  // tartosan elcsuszna a kirajzolt autotol.
-  await sleep(1500);
+  // Az ERINTKEZES UTAN a testnek vissza kell allnia a hiteles
+  // poziciora -- kulonben a szolver es a halozat "harcolna" egymassal,
+  // es a test tartosan elcsuszna a kirajzolt autotol.
+  //
+  // Eloszor SZETVALASZTJUK a ket autot. Amig egymasnak feszulnek, a
+  // joglat jogosan tart (ez a lokes lathatosaganak ara), tehat ott meg
+  // nem is szabadna teljes egyezest varni -- e nelkul a lepes nelkul a
+  // meres neha 1.5 m-es "hibat" jelzett, holott csak azt latta, hogy a
+  // ket auto meg mindig osszeer.
+  await a.keyboard.down("s");
+  await sleep(900);
+  await a.keyboard.up("s");
+  await sleep(1800);
   const recoveredError = await trackError();
   check(
     "utkozes utan visszaall a hiteles poziciora",

@@ -9,6 +9,7 @@
  *   npx tsx scripts/check-multiplayer.ts
  */
 import { chromium, type Browser, type Page } from "playwright";
+import { WHEEL } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
@@ -236,7 +237,7 @@ async function main(): Promise<void> {
     posDuring[2] - posBefore[2],
   );
   const rollDelta = wsBefore && wsDuring ? Math.abs(wsDuring.roll - wsBefore.roll) : 0;
-  const expectedRoll = distance / 0.35; // WHEEL.radius
+  const expectedRoll = distance / WHEEL.radius;
   check(
     "tavoli kerekek gordulese aranyos a megtett uttal",
     expectedRoll > 1 && Math.abs(rollDelta - expectedRoll) / expectedRoll < 0.3,
@@ -290,7 +291,11 @@ async function main(): Promise<void> {
       .map((w: any) => w.suspensionLength as number),
   );
   const wsNow = await wheelState(a);
-  const REST = 0.25; // WHEEL.suspensionRestLength
+  // A KONFIGBOL vesszuk, nem beegetve: korabban itt egy masolt 0.25
+  // allt, es amikor a nyugalmi hossz 0.30-ra valtozott, a teszt
+  // pontosan 0.05 m-es "hibat" jelzett minden keréknel -- a termekben
+  // viszont semmi baj nem volt.
+  const REST = WHEEL.suspensionRestLength;
   const suspErrors: number[] =
     wsNow?.wheelY.map((y: number, i: number) => {
       const expected = wsNow.restY[i] - (bSusp[i] - REST);
