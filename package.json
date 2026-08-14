@@ -1,0 +1,36 @@
+{
+  "name": "car-combat-arena",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Bongeszos 3D multiplayer autos harcjatek",
+  "workspaces": [
+    "packages/shared",
+    "packages/client",
+    "packages/server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @cca/client",
+    "dev:server": "npm run dev --workspace @cca/server",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check:node": "npm run check:node --workspace @cca/shared",
+    "check:selfright": "npm run check:selfright --workspace @cca/shared",
+    "check:turning": "npm run check:turning --workspace @cca/shared",
+    "check:spawns": "npm run check:spawns --workspace @cca/shared",
+    "check:all": "npm run check:node && npm run check:selfright && npm run check:turning && npm run check:spawns",
+    "check:net": "npm run check:net --workspace @cca/server",
+    "check:mp": "npm run check:mp --workspace @cca/client",
+    "check:collision": "npm run check:collision --workspace @cca/client",
+    "screenshot": "npm run screenshot --workspace @cca/client"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@cca/server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Node.js authoritative jatekszerver",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "check:net": "tsx scripts/smoke-two-clients.ts"
+  },
+  "dependencies": {
+    "@cca/shared": "*",
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

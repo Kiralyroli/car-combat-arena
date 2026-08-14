@@ -1,0 +1,22 @@
+{
+  "name": "@cca/shared",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Kozos fizika, tipusok, konstansok es halozati protokoll (kliens + szerver)",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check:node": "tsx scripts/node-physics-check.ts",
+    "check:selfright": "tsx scripts/check-selfright.ts",
+    "check:turning": "tsx scripts/check-turning.ts",
+    "check:spawns": "tsx scripts/check-spawns.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.20.0"
+  }
+}

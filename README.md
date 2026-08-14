@@ -9,27 +9,93 @@ egy arénában, arcade vezetéssel, fizikai ütközésekkel, fegyverekkel
 
 ## Állapot
 
-**Tervezési fázis.** Kód még nincs -- a következő lépés a 0. lépcső
-technikai spike (lásd a tervben).
+**3. lépcső -- hálózati alapok, folyamatban.**
+
+-   **0. lépcső kész:** jármű-fizika (Rapier raycast kerekek),
+    irányítás, önfelegyenesedés, per-kerék sérülés, élő hangoló panel
+-   **1--2. lépcső kész:** Sedan modell, követő kamera, aréna
+    rámpákkal, boost
+-   **3. lépcső folyamatban:** szerver, szobák, snapshot-szinkronizáció
+    és interpoláció megvan; hátra van a plauzibilitás-ellenőrzés, a
+    mesterséges késleltetéssel való tesztelés és a lecsatlakozás
+    finomítása
+
+## Indítás
+
+```bash
+npm install
+```
+
+A szerver és a kliens **külön** fut:
+
+```bash
+npm run dev:server
+```
+
+```bash
+npm run dev
+```
+
+A kliens ezután a <http://localhost:5173> címen érhető el. Az első lap
+nyit egy szobát, és a szobakódot beírja az URL-be (`#ABCD`) -- ezt a
+linket megosztva csatlakoznak a többiek ugyanabba a szobába.
+
+## Struktúra
+
+Monorepo, npm workspace-ekkel (részletek a tervben, 15.6):
+
+| Csomag | Tartalom |
+|---|---|
+| `packages/shared` | fizika, típusok, konstansok, hálózati protokoll |
+| `packages/client` | Three.js böngésző-kliens |
+| `packages/server` | Node.js authoritative játékszerver |
+
+A `shared` a kulcs: a fizikai konstansoknak egy helyen kell lenniük,
+különben a kliens és a szerver eltérően számolna. Szándékosan
+DOM- és Three.js-mentes, hogy Node alatt is futtatható legyen -- ezt a
+`tsconfig.json` a `lib` beállításával ki is kényszeríti.
+
+## Ellenőrzések
+
+```bash
+npm run typecheck
+```
+
+```bash
+npm run check:all
+```
+
+Fizikai regressziós tesztek (gyorsulás, stabilitás, sérülés,
+önfelegyenesedés, kanyarodás) -- headless, Node alatt futnak.
+
+```bash
+npm run check:net
+```
+
+Szerver füst-teszt: két kliens, szoba, snapshot-ráta, lecsatlakozás.
+Futó szervert igényel.
+
+```bash
+npm run check:mp
+```
+
+Végponttól végpontig teszt két böngészőlappal. Futó szervert **és**
+klienst igényel.
 
 ## Dokumentáció
 
 -   [projekt-terv.md](projekt-terv.md) -- teljes projektterv: koncepció,
     játékmenet, autó- és damage-rendszer, arénák, asset stratégia,
     technológiai terv és a fejlesztési lépcsők sorrendje
+-   [EREDMENYEK.md](EREDMENYEK.md) -- a fizikai hangolás mérési
+    eredményei és a meghozott döntések indoklása
 
-## Tervezett technológia
+## Technológia
 
 | Terület | Választás |
 |---|---|
 | Renderelés | Three.js (WebGL), TypeScript, Vite |
-| Fizika | Rapier vagy Jolt -- a 0. lépcső spike dönti el |
-| Szerver | Node.js, authoritative game state |
-| Hálózat | WebSocket cserélhető `Transport` interfész mögött |
-| Modellek | GLB / GLTF, stylized low-poly |
-
-## Következő lépés
-
-**0. lépcső -- technikai spike:** doboz + 4 raycast kerék, két fizikai
-motorral összehasonlítva, mielőtt bármilyen asset- vagy tartalom-döntés
-születne. Részletek a [projekt-tervben](projekt-terv.md#0-lépcső--technikai-spike-24-nap-tartalom-nélkül).
+| Fizika | Rapier 0.20 (`DynamicRayCastVehicleController`) |
+| Szerver | Node.js, authoritative game state, fix 60 Hz |
+| Hálózat | WebSocket cserélhető `Transport` interfész mögött, 20 Hz snapshot |
+| Modellek | GLB / GLTF |

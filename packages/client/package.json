@@ -1,0 +1,26 @@
+{
+  "name": "@cca/client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Three.js bongeszo-kliens",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "screenshot": "tsx scripts/screenshot.ts",
+    "check:mp": "tsx scripts/check-multiplayer.ts",
+    "check:collision": "tsx scripts/check-collision.ts"
+  },
+  "dependencies": {
+    "@cca/shared": "*",
+    "@dimforge/rapier3d-compat": "^0.20.0",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "playwright": "^1.62.1",
+    "vite": "^6.0.3"
+  }
+}

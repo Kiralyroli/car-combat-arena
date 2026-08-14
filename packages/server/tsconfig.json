@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Ugyanaz az elv, mint a shared-nel: a szerveren nincs DOM.
+    "lib": ["ES2022"]
+  },
+  "include": ["src"]
+}

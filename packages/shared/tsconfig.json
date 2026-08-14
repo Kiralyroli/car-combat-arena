@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // SZANDEKOSAN nincs "DOM" a lib-ek kozott: a shared csomagnak
+    // headless, Node.js alatt is futtathatonak kell maradnia (a
+    // szerver is ezt hasznalja). Ha valaki veletlenul DOM-ra
+    // (window, document, HTMLElement) hivatkozna itt, a typecheck
+    // elbukik -- ez a strukturalis garancia, nem csak konvencio.
+    "lib": ["ES2022"]
+  },
+  "include": ["src", "scripts"]
+}
