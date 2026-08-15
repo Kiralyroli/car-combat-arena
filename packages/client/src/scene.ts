@@ -4,6 +4,7 @@ import {
   ARENA,
   CAMERA,
   CHASSIS,
+  EXPLOSION_RADIUS,
   MAX_HP,
   WHEEL,
   WHEEL_LAYOUT,
@@ -417,6 +418,119 @@ export class SceneView {
   /** A SAJAT autonk vetőjenek beallitasa a celzas szerint. */
   setOwnAim(aimYaw: number, aimPitch: number): void {
     this.aimLauncher(this.launcher, this.chassisMesh.quaternion, aimYaw, aimPitch);
+  }
+
+  // --- Robbanas-effekt ---
+
+  /**
+   * Mennyi ideig (ms) tart a robbanas latvanya.
+   *
+   * Rovid: a jatekos a talalatot akarja latni, nem egy hosszan alldogalo
+   * felhot. A lokes (EXPLOSION_MAX_PUSH) ennel is gyorsabban lezajlik.
+   */
+  private static readonly EXPLOSION_VFX_MS = 650;
+
+  private readonly explosions: {
+    group: THREE.Group;
+    core: THREE.Mesh;
+    shock: THREE.Mesh;
+    startedAt: number;
+  }[] = [];
+
+  private explosionGeometry: {
+    core: THREE.SphereGeometry;
+    shock: THREE.RingGeometry;
+  } | null = null;
+
+  /**
+   * Robbanas a megadott pontban.
+   *
+   * A meret a VALODI hatosugarhoz (EXPLOSION_RADIUS) igazodik, nem egy
+   * kulon "latvany-merethez": igy a jatekos abbol, amit lat, meg tudja
+   * itelni, mi esett bele a robbanasba es mi nem. Egy tetszolegesen
+   * valasztott sugar itt aktivan felrevezetne.
+   */
+  spawnExplosion(position: [number, number, number], now: number): void {
+    if (!this.explosionGeometry) {
+      this.explosionGeometry = {
+        core: new THREE.SphereGeometry(1, 16, 12),
+        // A lokeshullam a talajon terjed szet -- vizszintes gyuru.
+        shock: new THREE.RingGeometry(0.86, 1, 32),
+      };
+    }
+
+    const group = new THREE.Group();
+    group.position.set(...position);
+
+    // Kulon anyag effektenkent: az atlatszosagot es a szint egyedileg
+    // animaljuk, tehat nem lehet kozos (az osztott anyag minden
+    // egyidejuleg futo robbanast egyszerre halvanyitana).
+    const core = new THREE.Mesh(
+      this.explosionGeometry.core,
+      new THREE.MeshBasicMaterial({
+        color: 0xffb040,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+      }),
+    );
+    group.add(core);
+
+    const shock = new THREE.Mesh(
+      this.explosionGeometry.shock,
+      new THREE.MeshBasicMaterial({
+        color: 0xffd890,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    shock.rotation.x = -Math.PI / 2;
+    group.add(shock);
+
+    this.scene.add(group);
+    this.explosions.push({ group, core, shock, startedAt: now });
+  }
+
+  /** Hany robbanas-effekt fut eppen -- a tesztek ezt figyelik. */
+  explosionCount(): number {
+    return this.explosions.length;
+  }
+
+  /**
+   * A futo robbanasok leptetese. A render-ciklusbol hivando.
+   *
+   * IDOFUGGO, nem kepkocka-fuggo: a headless teszt ~9 fps-en fut, a
+   * jatek 60+ fps-en -- kepkockankenti lepessel a kettő teljesen mas
+   * hosszu robbanast adna.
+   */
+  updateExplosions(now: number): void {
+    for (let i = this.explosions.length - 1; i >= 0; i--) {
+      const fx = this.explosions[i];
+      const t = (now - fx.startedAt) / SceneView.EXPLOSION_VFX_MS;
+
+      if (t >= 1) {
+        this.scene.remove(fx.group);
+        (fx.core.material as THREE.Material).dispose();
+        (fx.shock.material as THREE.Material).dispose();
+        this.explosions.splice(i, 1);
+        continue;
+      }
+
+      // A mag gyorsan felfujodik, majd elhal: a felfutas az elso
+      // negyedben tortenik, hogy a becsapodas pillanata legyen a
+      // leghangsulyosabb.
+      const coreGrow = Math.min(t / 0.25, 1);
+      const coreRadius = EXPLOSION_RADIUS * (0.25 + 0.35 * coreGrow);
+      fx.core.scale.setScalar(coreRadius);
+      (fx.core.material as THREE.MeshBasicMaterial).opacity = (1 - t) * (1 - t);
+
+      // A lokeshullam vegig a TELJES hatosugarig fut ki -- ez mutatja
+      // meg, meddig ert el a sebzes.
+      fx.shock.scale.setScalar(EXPLOSION_RADIUS * t);
+      (fx.shock.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t);
+    }
   }
 
   // --- Tavoli (halozati) jatekosok autoi ---

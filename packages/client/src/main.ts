@@ -14,6 +14,7 @@ import { initDebugPanel } from "./debugPanel";
 import { hideLoading, Hud, showError } from "./hud";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
+import { ExplosionQueue } from "./network/explosionQueue";
 import { SceneView } from "./scene";
 
 /**
@@ -107,6 +108,13 @@ async function main(): Promise<void> {
   // egy ujat, es a kodot visszairjuk a hash-be -- igy a link
   // megoszthato a tobbi jatekossal.
   const net = new NetworkClient();
+
+  /**
+   * Robbanasok, amik a KESLELTETETT idovonalon meg nem jottek el --
+   * a latvany es a lokes egyszerre, a rakéta megjelenitesevel egy
+   * idoben tortenik. Lasd ExplosionQueue.
+   */
+  const explosionQueue = new ExplosionQueue();
   net.on({
     onJoined: (_playerId, roomCode, spawn) => {
       location.hash = roomCode;
@@ -132,11 +140,16 @@ async function main(): Promise<void> {
       hud.setNetworkStatus(`szoba ${net.roomCode}`, view.remoteCarCount);
     },
     onExplosion: (position) => {
-      // A SEBZEST a szerver mar alkalmazta (a HP-ban jon vissza); itt a
-      // FIZIKAI LOKES tortenik. Azert a kliensen, mert a hibrid
-      // modellben a sajat auto mozgasa hozza tartozik -- a szerver nem
-      // tudja ellokni, csak megmondani, hogy volt robbanas.
-      backend.applyExplosion(position, EXPLOSION_RADIUS, EXPLOSION_MAX_PUSH);
+      // A robbanas a szerver JELENEBEN tortent, a rakétat viszont --
+      // mint minden halozati entitast -- INTERP_DELAY_MS-szel korabbrol
+      // rajzoljuk. Ha a villanas azonnal megjelenne, a lovedek elott
+      // robbanna fel: 55 m/s-nal 5.5 m-rel korabban. Ezert a
+      // MEGJELENITEST a rakéta idovonalara toljuk.
+      //
+      // A LOKES is ekkor hat, nem hamarabb: kulonben a jatekost
+      // ellokne, mielott barmit latna belole. Egyben tartjuk az okot es
+      // az okozatot.
+      explosionQueue.push(position, performance.now());
     },
     onRespawn: (position) => {
       // A szerver altal kiosztott helyre allunk, teli HP-val. A serult
@@ -370,7 +383,19 @@ async function main(): Promise<void> {
 
     // A rakétakat a szerver lepteti -- mi csak a legutobbi snapshothoz
     // igazitjuk a jelenetet.
-    view.syncRockets(net.rockets.sample(performance.now()));
+    const renderNow = performance.now();
+    view.syncRockets(net.rockets.sample(renderNow));
+
+    // Az esedekesse valt robbanasok: latvany ES lokes egyszerre.
+    for (const position of explosionQueue.due(renderNow)) {
+      view.spawnExplosion(position, renderNow);
+      // A SEBZEST a szerver mar alkalmazta (a HP-ban jon vissza); itt a
+      // FIZIKAI LOKES tortenik. Azert a kliensen, mert a hibrid
+      // modellben a sajat auto mozgasa hozza tartozik -- a szerver nem
+      // tudja ellokni, csak megmondani, hogy volt robbanas.
+      backend.applyExplosion(position, EXPLOSION_RADIUS, EXPLOSION_MAX_PUSH);
+    }
+    view.updateExplosions(renderNow);
 
     view.render();
 

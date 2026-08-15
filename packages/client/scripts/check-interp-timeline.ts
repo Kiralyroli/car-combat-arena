@@ -18,8 +18,9 @@
  *
  * Futtatas: npx tsx scripts/check-interp-timeline.ts
  */
-import { RemotePlayers } from "../src/network/remotePlayers";
+import { INTERP_DELAY_MS, RemotePlayers } from "../src/network/remotePlayers";
 import { RemoteRockets } from "../src/network/remoteRockets";
+import { ExplosionQueue } from "../src/network/explosionQueue";
 import type { PlayerSnapshot, RocketSnapshot } from "@cca/shared";
 
 let failures = 0;
@@ -151,6 +152,38 @@ function main(): void {
     runaway.length === 0
       ? "nem vetitunk tovabb (helyes: a sebesseg nem meghatarozhato)"
       : `z = ${runaway[0].position[2].toFixed(0)} (a hibas valtozat tobb szazat adott)`,
+  );
+
+  console.log("\nRobbanas-effekt idozitese:");
+
+  // A szerver akkor kuld `explosion` uzenetet, amikor a lovedek AZ O
+  // idejeben becsapodott. Ha a villanas beerkezeskor azonnal megjelenne,
+  // megelozne a kesleltetve rajzolt rakétat: eloszor a robbanas latszana,
+  // es csak utana erne oda a lovedek.
+  const queue = new ExplosionQueue();
+  queue.push([1, 2, 3], 1000);
+
+  check(
+    "a beerkezes pillanataban meg NEM jelenik meg",
+    queue.due(1000).length === 0 && queue.waiting === 1,
+    "varakozik",
+  );
+  check(
+    "a rakéta idovonala elott meg nem jelenik meg",
+    queue.due(1000 + INTERP_DELAY_MS - 10).length === 0,
+    `${INTERP_DELAY_MS - 10} ms-mal kesobb meg varakozik`,
+  );
+
+  const released = queue.due(1000 + INTERP_DELAY_MS);
+  check(
+    "pontosan a rakéta idovonalan jelenik meg",
+    released.length === 1 && released[0][0] === 1 && released[0][2] === 3,
+    `${INTERP_DELAY_MS} ms-mal a beerkezes utan, a kapott pozicioval`,
+  );
+  check(
+    "egyszer jelenik meg, nem ismetlodik",
+    queue.due(2000).length === 0 && queue.waiting === 0,
+    "a sor kiurult",
   );
 
   console.log(

@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   await a.evaluate(`
     (function () {
       var s = window.__spike;
-      window.__rv = { minGap: Infinity, samples: 0, seen: 0, frozen: 0, moved: 0 };
+      window.__rv = { minGap: Infinity, samples: 0, seen: 0, frozen: 0, moved: 0, fxAt: 0, rocketGapAtFx: -2 };
       var prev = null;
       setInterval(function () {
         var d = window.__rv;
@@ -130,6 +130,21 @@ async function main(): Promise<void> {
 
         var rockets = s.net.rockets.sample(now);
         var ids = s.view.remoteCarIds();
+
+        // A robbanas-effekt eszlelese SZANDEKOSAN a korai kilepes ELOTT
+        // all: a villanas eppen akkor jelenik meg, amikor a lovedek
+        // eltunik, tehat a "van meg rakéta" agban sosem latnank.
+        //
+        // Amit merunk: a villanas pillanataban hol jart a KIRAJZOLT
+        // lovedek. Ha az effekt kesleltetes nelkul jelenne meg (a
+        // szerver jeleneben), a rakéta ekkor meg ~5.5 m-rel a cel elott
+        // lenne -- a jatekos elobb latna a robbanast, mint a becsapodast.
+        if (d.fxAt === 0 && s.view.explosionCount() > 0) {
+          d.fxAt = now;
+          d.rocketGapAtFx =
+            rockets.length > 0 ? Math.abs(rockets[0].position[2]) : -1;
+        }
+
         if (rockets.length === 0 || ids.length === 0) { prev = null; return; }
 
         var car = s.net.remotes.sample(ids[0], now);
@@ -187,6 +202,8 @@ async function main(): Promise<void> {
     seen: number;
     frozen: number;
     moved: number;
+    fxAt: number;
+    rocketGapAtFx: number;
   } = await a.evaluate("window.__rv");
 
   check(
@@ -230,6 +247,32 @@ async function main(): Promise<void> {
   // Simasag: interpolacio nelkul a lovedek csak snapshotonkent (50 ms)
   // valtozna, tehat a 15 ms-os mintaknak nagyjabol a ketharmada
   // VALTOZATLAN poziciot adna. Interpolacioval szinte mindegyik mozog.
+  // Robbanas-effekt: legyen egyaltalan, es ne elozze meg a becsapodast.
+  check(
+    "megjelent a robbanas latvanya",
+    rv.fxAt > 0,
+    rv.fxAt > 0 ? "igen" : "egyetlen mintaban sem lattunk effektet",
+  );
+
+  // Az effekt IDOZITESET (hogy ne elozze meg a lovedeket) SZANDEKOSAN
+  // nem itt ellenorizzuk, hanem a check-interp-timeline.ts-ben.
+  //
+  // Itt ugyanis nem merheto: a megjelenest a render-ciklus utemezi, ami
+  // headlessben ~9 fps, azaz ~110 ms felbontasu -- eppen azt a 100 ms-ot
+  // mosna el, amit keresunk. Meg is prubaltam: az ellenorzes a HIBAS,
+  // kesleltetes nelkuli valtozaton is atment, tehat hamis biztonsagot
+  // adott volna. Csak azt allitjuk, ami itt valoban latszik: hogy van
+  // egyaltalan robbanas-latvany.
+  //
+  // A villanaskori tavolsagot informacioként kiirjuk.
+  if (rv.fxAt > 0) {
+    console.log(
+      `       (a villanaskor a lovedek ${
+        rv.rocketGapAtFx < 0 ? "mar becsapodott" : `${rv.rocketGapAtFx.toFixed(2)} m-re volt`
+      })`,
+    );
+  }
+
   const frozenRatio = paired > 0 ? rv.frozen / paired : 1;
   check(
     "a rakéta folyamatosan mozog (nem snapshotonkent ugrik)",
