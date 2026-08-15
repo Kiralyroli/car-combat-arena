@@ -5,11 +5,18 @@ import {
   RESPAWN_DELAY_MS,
   ROCKET_COOLDOWN_MS,
   splitCollisionDamage,
+  brokenMaskOf,
+  damageWheel,
+  gripsOf,
+  healthyWheels,
+  wheelExplosionDamage,
+  wheelWorldPosition,
   MAX_HP,
   SPAWN_POINTS,
   type ClientState,
   type PlayerSnapshot,
   type ServerMessage,
+  type WheelDamage,
 } from "@cca/shared";
 
 /** Terv 3. fejezet: minimum 2, idealis 4--8 jatekos. */
@@ -31,6 +38,11 @@ export interface ServerPlayer {
   /** Melyik SPAWN_POINTS elemet foglalja -- kilepeskor felszabadul. */
   spawnIndex: number;
   hp: number;
+  /**
+   * Kerekenkenti serules -- a SZERVER birtokolja (terv 4.6).
+   * Sorrend: FL, FR, RL, RR (= WHEEL_LAYOUT).
+   */
+  wheels: WheelDamage[];
   /** Az utoljara elfogadott allapot sorszama -- a kesve erkezok eldobasahoz. */
   lastSeq: number;
   /**
@@ -67,8 +79,6 @@ const ORIGIN_STATE: ClientState = {
   velocity: [0, 0, 0],
   steer: 0,
   susp: [0, 0, 0, 0],
-  grip: [1, 1, 1, 1],
-  brokenMask: 0,
   aimYaw: 0,
   aimPitch: 0,
 };
@@ -105,6 +115,7 @@ export class Room {
       state: spawn.state,
       spawnIndex: spawn.index,
       hp: START_HP,
+      wheels: healthyWheels(),
       lastSeq: -1,
       lastStateAt: performance.now(),
       rejectedCount: 0,
@@ -222,6 +233,8 @@ export class Room {
       player.spawnIndex = spawn.index;
       player.state = spawn.state;
       player.hp = MAX_HP;
+      // Uj auto, uj esely: a kerekek is javulnak.
+      player.wheels = healthyWheels();
       player.deadSince = null;
       // Az ujraszuletes nagy ugras: ne szamitson teleportnak a kovetkezo
       // ellenorzesnel sem, es a hutes se hozza magaval a regi parokat.
@@ -231,6 +244,47 @@ export class Room {
       console.log(
         `[room ${this.code}] ${player.id.slice(0, 8)} ujraszuletett (spawn ${spawn.index})`,
       );
+    }
+  }
+
+  /**
+   * Egy robbanas hatasa a jatekos NEGY KEREKERE, kulon-kulon.
+   *
+   * Miert kerekenkent, es nem egyetlen tavolsaggal az auto
+   * kozeppontjatol: az auto 4.9 m hosszu, a robbanas hatosugara 7 m --
+   * az orr elott felrobbano rakéta igy az elso kerekeket viszi le, a
+   * hatsokat alig karositja. Ez lathato es taktikailag ertelmes
+   * kulonbseg; kozeppontbol szamolva mind a negy kerek egyszerre tornek
+   * le, ami a jatekosnak veletlenszerunek tunne.
+   */
+  private damageWheelsFrom(
+    position: readonly number[],
+    player: ServerPlayer,
+  ): void {
+    for (let i = 0; i < player.wheels.length; i++) {
+      if (player.wheels[i].broken) continue;
+
+      const wheel = wheelWorldPosition(
+        player.state.position,
+        player.state.rotation,
+        i,
+      );
+      const distance = Math.hypot(
+        wheel[0] - position[0],
+        wheel[1] - position[1],
+        wheel[2] - position[2],
+      );
+
+      const amount = wheelExplosionDamage(distance);
+      if (amount <= 0) continue;
+
+      const before = player.wheels[i];
+      player.wheels[i] = damageWheel(before, amount);
+      if (!before.broken && player.wheels[i].broken) {
+        console.log(
+          `[room ${this.code}] ${player.id.slice(0, 8)} ${i}. kereke letort`,
+        );
+      }
     }
   }
 
@@ -279,6 +333,12 @@ export class Room {
     for (const explosion of this.rockets.step(dt, now, targets)) {
       for (const player of this.players.values()) {
         if (player.deadSince !== null) continue;
+        // A KEREKEK kulon sebzodnek, kerekenkenti tavolsag szerint
+        // (terv 4.6). Ezt a body-sebzes ELOTT vegezzuk el, hogy a
+        // megsemmisulessel egy tickben letort kerek is bekeruljon az
+        // utolso snapshotba -- kulonben a roncs ep kerekekkel allna meg.
+        this.damageWheelsFrom(explosion.position, player);
+
         const damage = explosionDamageFor(explosion, player.id, player.state);
         if (damage <= 0) continue;
 
@@ -312,8 +372,8 @@ export class Room {
         velocity: player.state.velocity,
         steer: player.state.steer,
         susp: player.state.susp,
-        grip: player.state.grip,
-        brokenMask: player.state.brokenMask,
+        grip: gripsOf(player.wheels),
+        brokenMask: brokenMaskOf(player.wheels),
         aimYaw: player.state.aimYaw,
         aimPitch: player.state.aimPitch,
         hp: player.hp,

@@ -34,8 +34,7 @@ function state(
     velocity,
     steer: 0,
     susp: [0.3, 0.3, 0.3, 0.3],
-    grip: [1, 1, 1, 1],
-    brokenMask: 0,
+
     aimYaw: 0,
     aimPitch: 0,
   };
@@ -145,8 +144,7 @@ async function main(): Promise<void> {
       velocity,
       steer: 0,
       susp: [0.3, 0.3, 0.3, 0.3],
-      grip: [1, 1, 1, 1],
-      brokenMask: 0,
+
       aimYaw: 0,
       aimPitch: 0,
     };

@@ -37,9 +37,14 @@ export const PROTOCOL_VERSION = 1;
  * korbefordulasi (2*PI -> 0) ugras a ket snapshot kozotti
  * interpolacioban.
  */
-export interface WheelVisualState {
-  steer: number;
-  susp: [number, number, number, number];
+/**
+ * A tavoli autok kirajzolasahoz szukseges teljes kerek-allapot.
+ *
+ * Ket forrasbol all ossze a szerveren: a poz (steer, susp) a
+ * jatekostol erkezik, a SERULES (grip, brokenMask) viszont a szerver
+ * sajat, hiteles adata -- lasd WheelPoseState.
+ */
+export interface WheelVisualState extends WheelPoseState {
   /**
    * Kerekenkenti tapadas-szorzo (0..1). Ebbol jon a kerek merete es
    * szine is -- lasd wheelVisuals.ts.
@@ -80,8 +85,22 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
   hp: number;
 }
 
+/**
+ * A kerek-latvany azon resze, amit a KLIENS birtokol.
+ *
+ * A kormanyszog es a felfuggesztes-osszenyomodas a lokalis fizikabol
+ * jon: a szerver nem szimulalja a jarmuvet, tehat nem is tudhatja
+ * oket. A SERULES (grip, brokenMask) viszont NEM tartozik ide -- azt a
+ * szerver dönti el (terv 15.4), kulonben mindenki maga mondhatna meg,
+ * letort-e a kereke.
+ */
+export interface WheelPoseState {
+  steer: number;
+  susp: [number, number, number, number];
+}
+
 /** A kliens sajat, mar lokalisan kiszamolt allapota. */
-export interface ClientState extends WheelVisualState, AimState {
+export interface ClientState extends WheelPoseState, AimState {
   position: [number, number, number];
   rotation: [number, number, number, number];
   velocity: [number, number, number];

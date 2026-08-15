@@ -18,7 +18,8 @@
     "check:reverse": "tsx scripts/check-reverse.ts",
     "check:plausibility": "tsx scripts/check-plausibility.ts",
     "check:combat": "tsx scripts/check-combat.ts",
-    "check:rocket": "tsx scripts/check-rocket.ts"
+    "check:rocket": "tsx scripts/check-rocket.ts",
+    "check:wheels": "tsx scripts/check-wheels.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0"

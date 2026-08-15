@@ -91,15 +91,26 @@ async function main(): Promise<void> {
       fireAtCrosshair();
       return;
     }
-    if (action === "repairWheels") {
-      for (let i = 0; i < 4; i++) {
-        backend.setWheelDamage(i, { ...HEALTHY_WHEEL });
+    // A kerek-serules debug-gombjai (1-4 es javitas) CSAK OFFLINE
+    // hatnak. Csatlakozva a szerver birtokolja a kerekek allapotat
+    // (terv 4.6), es a kovetkezo snapshot ugyis visszairna a helyi
+    // valtoztatast -- a gomb latszolag "nem mukodne". Inkabb mondjuk
+    // meg, mint hogy a jatekos egy villano kereket lasson.
+    if (action === "repairWheels" || /^breakWheel\d$/.test(action)) {
+      if (net.connected) {
+        console.warn(
+          "A kerek-serulest a szerver kezeli -- a debug-gombok csak offline hatnak.",
+        );
+        return;
       }
-      return;
-    }
-    const match = /^breakWheel(\d)$/.exec(action);
-    if (match) {
-      backend.setWheelDamage(Number(match[1]), { ...BROKEN_WHEEL });
+      if (action === "repairWheels") {
+        for (let i = 0; i < 4; i++) {
+          backend.setWheelDamage(i, { ...HEALTHY_WHEEL });
+        }
+        return;
+      }
+      const index = Number(/^breakWheel(\d)$/.exec(action)![1]);
+      backend.setWheelDamage(index, { ...BROKEN_WHEEL });
     }
   });
 
@@ -321,20 +332,10 @@ async function main(): Promise<void> {
           currWheels[2].suspensionLength,
           currWheels[3].suspensionLength,
         ],
-        // Serules-allapot: enelkul a tobbi jatekos nem latna, ha
-        // valakinek kilottek a kereket. (A 4. lepcsoben ezt majd a
-        // szerver fogja birtokolni -- terv 15.4 --, addig a kliens
-        // kuldi, ugyanugy, mint a pozicioját.)
-        grip: [
-          currWheels[0].damage.gripMultiplier,
-          currWheels[1].damage.gripMultiplier,
-          currWheels[2].damage.gripMultiplier,
-          currWheels[3].damage.gripMultiplier,
-        ],
-        brokenMask: currWheels.reduce(
-          (mask, w, i) => (w.damage.broken ? mask | (1 << i) : mask),
-          0,
-        ),
+        // A KEREK-SERULEST mar NEM kuldjuk: azt a szerver birtokolja
+        // (terv 15.4, 4. lepcso 6. pont), es a snapshotban kapjuk vissza.
+        // Korabban a kliens jelentette be, vagyis egy modositott kliens
+        // egyszeruen letagadhatta volna a letort kereket.
       },
       now,
     );
@@ -384,6 +385,22 @@ async function main(): Promise<void> {
     // A rakétakat a szerver lepteti -- mi csak a legutobbi snapshothoz
     // igazitjuk a jelenetet.
     const renderNow = performance.now();
+
+    // A kerek-serulest a SZERVER birtokolja (terv 4.6): a snapshotbol
+    // kapott allapotot rakjuk at a sajat fizikankba. Csak VALTOZASKOR,
+    // mert a setWheelDamage a kerek-sugarat is ujraszamolja.
+    const serverWheels = net.ownWheels;
+    if (serverWheels) {
+      for (let i = 0; i < 4; i++) {
+        const now = currWheels[i].damage;
+        const next = serverWheels[i];
+        if (now.broken === next.broken && now.gripMultiplier === next.gripMultiplier) {
+          continue;
+        }
+        backend.setWheelDamage(i, { ...next });
+      }
+    }
+
     view.syncRockets(net.rockets.sample(renderNow));
 
     // Az esedekesse valt robbanasok: latvany ES lokes egyszerre.

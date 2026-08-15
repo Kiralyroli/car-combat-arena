@@ -2,7 +2,9 @@ import {
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   SNAPSHOT_HZ,
+  wheelsFromNetwork,
   type ClientState,
+  type WheelDamage,
   type ServerMessage,
   type Transport,
 } from "@cca/shared";
@@ -54,6 +56,12 @@ export class NetworkClient {
   roomCode: string | null = null;
   /** A sajat karosszeria-HP-nk a szerver szerint; null, amig nincs snapshot. */
   hp: number | null = null;
+  /**
+   * A sajat kerekeink serulese a szerver szerint; null, amig nincs
+   * snapshot. A hivo ebbol allitja be a jarmu FIZIKAJAT -- a kerek-
+   * serules nem csak latvany (tapadas es kerek-sugar is fugg tole).
+   */
+  ownWheels: WheelDamage[] | null = null;
   /**
    * A repulo rakétak pufferelve -- UGYANAZON az idovonalon, mint a
    * tavoli autok (lasd remoteRockets.ts).
@@ -202,7 +210,14 @@ export class NetworkClient {
         // terv 15.4), ezert a snapshotbol vesszuk ki, mielott kiszurnenk
         // magunkat belole.
         const own = message.players.find((p) => p.id === this.playerId);
-        if (own) this.hp = own.hp;
+        if (own) {
+          this.hp = own.hp;
+          // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
+          // FIZIKAI hatas is (tapadas, kerek-sugar), ezert a hivo
+          // beallitja a sajat jarmuvunkon. SZANDEKOSAN nem
+          // interpolaljuk -- a "tort" allapot diszkret.
+          this.ownWheels = wheelsFromNetwork(own.grip, own.brokenMask);
+        }
 
         const others = message.players.filter(
           (p) => p.id !== this.playerId && !this.hasRecentlyLeft(p.id, now),

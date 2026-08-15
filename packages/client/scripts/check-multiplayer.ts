@@ -396,35 +396,51 @@ async function main(): Promise<void> {
     `elteresek: ${suspErrors.map((e: number) => e.toFixed(4)).join(", ")} m`,
   );
 
-  // 3c. Kerek-serules szinkronja: ha B-nek kilovik a kereket, azt A-nak
-  //     is latnia kell (kisebb, sotetvoros kerek).
+  // 3c. Kerek-serules szinkronja: ha B kereke serul, azt A-nak is
+  //     latnia kell (kisebb, sotetebb kerek).
+  //
+  //     A serulest RAKETAVAL valtjuk ki, nem debug-gombbal: a kerek-
+  //     serules a szerveré (terv 4.6), a helyi gombok csatlakozva
+  //     szandekosan nem hatnak. Korabban a "2" gombot nyomtuk meg, es
+  //     a teszt pontosan attol bukott el, hogy a szabaly atkerult a
+  //     szerverre -- a termek helyes volt, a teszt merte rosszul.
   const beforeDamage = await wheelState(a);
-  // A "2" gomb toRi le az FR (jobb elso) kereket -- lasd main.ts.
-  await b.keyboard.press("2");
-  await sleep(900);
+  await b.evaluate(() => (window as any).__spike.backend.reset({ x: 0, y: 1.0, z: 0 }));
+  await a.evaluate(() => (window as any).__spike.backend.reset({ x: 0, y: 1.0, z: 25 }));
+  await sleep(2500);
+  for (let shot = 0; shot < 2; shot++) {
+    await a.evaluate(() => (window as any).__spike.net.fire([0, 1, -30]));
+    await sleep(1800);
+  }
   const afterDamage = await wheelState(a);
 
   check(
-    "tort kerek kisebb lesz A oldalan is",
+    "a serult kerek kisebb lesz A oldalan is",
     !!beforeDamage &&
       !!afterDamage &&
-      afterDamage.wheelScaleY[1] < beforeDamage.wheelScaleY[1] * 0.8,
+      // A rakéta HATULROL erkezik (mindketto -Z fele nez), tehat a
+      // hatso kerekek (RL, RR) serulnek jobban.
+      afterDamage.wheelScaleY[2] < beforeDamage.wheelScaleY[2] * 0.98,
     beforeDamage && afterDamage
-      ? `FR meret ${beforeDamage.wheelScaleY[1].toFixed(2)} -> ${afterDamage.wheelScaleY[1].toFixed(2)}`
+      ? `RL meret ${beforeDamage.wheelScaleY[2].toFixed(2)} -> ${afterDamage.wheelScaleY[2].toFixed(2)}`
       : "nincs adat",
   );
   check(
-    "tort kerek szine atvalt A oldalan is",
-    !!afterDamage && afterDamage.wheelColor[1] === "8b2f2a",
-    afterDamage ? `FR szin = #${afterDamage.wheelColor[1]}` : "nincs adat",
-  );
-  check(
-    "a tobbi kerek valtozatlan marad",
+    "a serult kerek szine atvalt A oldalan is",
     !!afterDamage &&
-      afterDamage.wheelColor[0] !== "8b2f2a" &&
-      afterDamage.wheelColor[2] !== "8b2f2a" &&
-      afterDamage.wheelColor[3] !== "8b2f2a",
-    afterDamage ? `szinek: ${afterDamage.wheelColor.join(", ")}` : "nincs adat",
+      (afterDamage.wheelColor[2] === "6b4a1f" || afterDamage.wheelColor[2] === "8b2f2a"),
+    afterDamage ? `RL szin = #${afterDamage.wheelColor[2]}` : "nincs adat",
+  );
+  // A robbanas KEREKENKENTI tavolsaggal sebez: a tavolabbi kerekeknek
+  // kevesbe kell serulniuk. Ha mind a negy egyformán valtozna, az azt
+  // jelentene, hogy a szerver a kozeppontbol szamol.
+  check(
+    "a tavolabbi kerekek kevesbe serultek",
+    !!afterDamage &&
+      afterDamage.wheelScaleY[0] > afterDamage.wheelScaleY[2] + 0.005,
+    afterDamage
+      ? `elso ${afterDamage.wheelScaleY[0].toFixed(3)} vs hatso ${afterDamage.wheelScaleY[2].toFixed(3)}`
+      : "nincs adat",
   );
 
   // 4. B lecsatlakozik -- az autojanak el kell tunnie A-nal

@@ -16,6 +16,7 @@ export * from "./config";
 export * from "./math";
 export * from "./types";
 export * from "./wheelVisuals";
+export * from "./wheelDamage";
 export * from "./combat";
 export * from "./rocket";
 export * from "./physics/rapier";

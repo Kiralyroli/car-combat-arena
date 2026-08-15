@@ -40,8 +40,7 @@ function car(
     velocity,
     steer: 0,
     susp: [0.3, 0.3, 0.3, 0.3],
-    grip: [1, 1, 1, 1],
-    brokenMask: 0,
+
     aimYaw: 0,
     aimPitch: 0,
   };
