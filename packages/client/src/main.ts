@@ -1,4 +1,6 @@
 import {
+  EXPLOSION_MAX_PUSH,
+  EXPLOSION_RADIUS,
   FIXED_DT,
   HEALTHY_WHEEL,
   MAX_STEPS_PER_FRAME,
@@ -7,6 +9,7 @@ import {
   type VehicleBackend,
   type WheelDamage,
 } from "@cca/shared";
+import { Aim } from "./aim";
 import { initDebugPanel } from "./debugPanel";
 import { hideLoading, Hud, showError } from "./hud";
 import { Input } from "./input";
@@ -32,6 +35,46 @@ async function main(): Promise<void> {
 
   const view = await SceneView.create();
   const input = new Input();
+  const aim = new Aim();
+
+  /**
+   * Kiloves a celkereszt ala.
+   *
+   * A kepernyo-koordinatabol a jelenet szamolja ki a vilagbeli
+   * celpontot (sugar-vetites), es AZT kuldjuk a szervernek -- az irany
+   * a szerver hiteles pozicioja es a celpont kozott all elo.
+   */
+  function fireAtCrosshair(): void {
+    const [ndcX, ndcY] = aim.ndc();
+    net.fire(view.aimPointAt(ndcX, ndcY));
+  }
+  aim.onFire(fireAtCrosshair);
+
+  /**
+   * A celzas iranya szogekben, a SAJAT autonk kozeppontjabol nezve.
+   *
+   * Ebbol all be a tetőn levő rakétaveto, es ez megy at a halozaton is,
+   * hogy a tobbiek lassak, merre celzunk.
+   */
+  function currentAim(chassis: { position: [number, number, number] }): {
+    yaw: number;
+    pitch: number;
+  } {
+    const [ndcX, ndcY] = aim.ndc();
+    const target = view.aimPointAt(ndcX, ndcY);
+    const dx = target[0] - chassis.position[0];
+    const dy = target[1] - chassis.position[1];
+    const dz = target[2] - chassis.position[2];
+    const horizontal = Math.hypot(dx, dz);
+    return {
+      // A szog KONVENCIOJA: az az Y-forgatas, amivel egy -Z fele nezo
+      // objektum ebbe az iranyba fordul. A "kezenfekvo" atan2(dx, -dz)
+      // ennek pont az ELLENTETTJE -- azzal a veto a celzassal ellenkezo
+      // oldalra mutatott (a kepen jol lathatoan).
+      yaw: Math.atan2(-dx, -dz),
+      pitch: Math.atan2(dy, horizontal || 1e-4),
+    };
+  }
   const hud = new Hud(backend.name, backend.version);
   initDebugPanel();
 
@@ -41,6 +84,10 @@ async function main(): Promise<void> {
       for (let i = 0; i < 4; i++) {
         backend.setWheelDamage(i, { ...HEALTHY_WHEEL });
       }
+      return;
+    }
+    if (action === "fire") {
+      fireAtCrosshair();
       return;
     }
     if (action === "repairWheels") {
@@ -66,7 +113,12 @@ async function main(): Promise<void> {
       // A szerver altal kiosztott helyre allunk, kulonben minden
       // jatekos a kozos config-spawnra (egymasba) szuletne.
       backend.reset({ x: spawn[0], y: spawn[1], z: spawn[2] });
-      hud.setNetworkStatus(`szoba ${roomCode}`, net.remotes.ids().length);
+      // A mar bent levo jatekosok autoi ekkorra letrejottek (a `joined`
+      // uzenet eloszor `onPlayerJoined`-ot valt ki mindegyikre), ezert a
+      // JELENETBOL olvassuk a szamot. A halozati puffer meg ures --
+      // az csak az elso snapshottol tolodik fel --, abbol nezve
+      // csatlakozaskor mindig 0 tarsat mutatnank.
+      hud.setNetworkStatus(`szoba ${roomCode}`, view.remoteCarCount);
     },
     onPlayerJoined: (id) => {
       view.addRemoteCar(id);
@@ -78,6 +130,21 @@ async function main(): Promise<void> {
       view.removeRemoteCar(id);
       backend.removeRemoteBody(id);
       hud.setNetworkStatus(`szoba ${net.roomCode}`, view.remoteCarCount);
+    },
+    onExplosion: (position) => {
+      // A SEBZEST a szerver mar alkalmazta (a HP-ban jon vissza); itt a
+      // FIZIKAI LOKES tortenik. Azert a kliensen, mert a hibrid
+      // modellben a sajat auto mozgasa hozza tartozik -- a szerver nem
+      // tudja ellokni, csak megmondani, hogy volt robbanas.
+      backend.applyExplosion(position, EXPLOSION_RADIUS, EXPLOSION_MAX_PUSH);
+    },
+    onRespawn: (position) => {
+      // A szerver altal kiosztott helyre allunk, teli HP-val. A serult
+      // kerekeket is javitjuk: uj auto, uj esely.
+      backend.reset({ x: position[0], y: position[1], z: position[2] });
+      for (let i = 0; i < 4; i++) {
+        backend.setWheelDamage(i, { ...HEALTHY_WHEEL });
+      }
     },
     onError: (code, message) => {
       console.warn(`Halozati hiba (${code}): ${message}`);
@@ -166,6 +233,8 @@ async function main(): Promise<void> {
     // "atcsuszasnak" latszana. Ugyanabbol az interpolalt allapotbol
     // dolgozunk, mint a megjelenites, igy amit latunk, azzal utkozunk.
     for (const id of net.remotes.ids()) {
+      // Megsemmisult autonak nincs teste -- lasd lentebb.
+      if (net.remotes.hpOf(id) === 0) continue;
       const state = net.remotes.sample(id, now);
       if (!state) continue;
       backend.updateRemoteBody(
@@ -219,11 +288,17 @@ async function main(): Promise<void> {
     // --- Halozat: sajat allapot kuldese, tavoli autok interpolacioja ---
     // A sajat autot NEM a szervertol kapjuk vissza (hibrid authority,
     // terv 15.4) -- csak kikuldjuk a mar kiszamolt allapotot.
+    // A celzas iranya: a sajat vetőnk beallitasahoz ES a halozathoz.
+    const ownAim = currentAim(currChassis);
+    view.setOwnAim(ownAim.yaw, ownAim.pitch);
+
     net.sendState(
       {
         position: currChassis.position,
         rotation: currChassis.quaternion,
         velocity: backend.getVelocity(),
+        aimYaw: ownAim.yaw,
+        aimPitch: ownAim.pitch,
         // Latvany-allapot a tavoli kerekekhez: a kormanyszog a
         // kormanyzott (elso) kerekrol, a rugohosszak mind a negyrol.
         steer: currWheels[0].steering,
@@ -258,6 +333,18 @@ async function main(): Promise<void> {
         view.addRemoteCar(id);
         backend.addRemoteBody(id);
       }
+
+      // Megsemmisult auto: eltunik, es a FIZIKAI TESTE is megszunik --
+      // kulonben egy lathatatlan akadallyal lehetne utkozni.
+      const remoteHp = net.remotes.hpOf(id);
+      view.setRemoteHp(id, remoteHp);
+      if (remoteHp === 0) {
+        backend.removeRemoteBody(id);
+        continue;
+      }
+      // Ujraszuletes utan visszakerul a teste.
+      if (!backend.getRemoteBody(id)) backend.addRemoteBody(id);
+
       const state = net.remotes.sample(id, now);
       if (!state) continue;
 
@@ -281,9 +368,13 @@ async function main(): Promise<void> {
       view.updateRemoteCar(id, state);
     }
 
+    // A rakétakat a szerver lepteti -- mi csak a legutobbi snapshothoz
+    // igazitjuk a jelenetet.
+    view.syncRockets(net.rockets.sample(performance.now()));
+
     view.render();
 
-    hud.update(backend.getTelemetry(), currWheels, fps, net.ping);
+    hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp);
 
     requestAnimationFrame(frame);
   }

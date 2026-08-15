@@ -117,6 +117,19 @@ export interface VehicleBackend {
    */
   setNetworkLatency(ms: number): void;
 
+  /**
+   * Robbanas lokese a SAJAT autonkra.
+   *
+   * A szerver csak azt mondja meg, hol es mekkora volt a robbanas -- a
+   * fizikai hatast mindenki a sajat autojara szamolja, mert a hibrid
+   * modellben a sajat mozgas a klienshez tartozik (terv 15.4).
+   */
+  applyExplosion(
+    position: [number, number, number],
+    radius: number,
+    maxPush: number,
+  ): void;
+
   addRemoteBody(id: string): void;
   removeRemoteBody(id: string): void;
   /**

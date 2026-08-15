@@ -62,8 +62,17 @@ export class GameLoop {
       ticks++;
       this.tick++;
 
-      // Ide kerul majd (4. lepcso): utkozes-kiertekeles, sebzes,
-      // lovedekek leptetese, pickupok, meccs-allapot.
+      // Utkozes-kiertekeles es sebzes -- a szerver donti el (terv 15.4).
+      // Fix lepeskozu tickben fut, hogy determinisztikus legyen.
+      for (const room of this.rooms.all()) {
+        if (room.playerCount > 1) room.resolveCollisions(now);
+        // A rakétak leptetese ITT tortenik, a fix lepeskozu tickben --
+        // a lovedek palyaja igy fuggetlen a szerver terheltsegetol.
+        room.stepRockets(FIXED_DT, now);
+        room.respawnExpired(now);
+      }
+
+      // Ide kerul majd: lovedekek leptetese, pickupok, meccs-allapot.
 
       if (this.tick % TICKS_PER_SNAPSHOT === 0) {
         this.broadcastSnapshots(now);
@@ -84,6 +93,7 @@ export class GameLoop {
         tick: this.tick,
         time: now,
         players: room.buildSnapshot(),
+        rockets: room.rockets.toSnapshot(),
       });
     }
   }

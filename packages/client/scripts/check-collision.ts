@@ -171,10 +171,48 @@ async function main(): Promise<void> {
   // ujra; kesleltetes es jitter mellett ez tovabb tart. Valodi jatekban
   // ilyen ugras nincs (az ujraszuletes engedelyezett), tehat ez a teszt
   // sajat felallasi koltsege -- megvarjuk, nem pedig alszunk ra.
-  for (let i = 0; i < 30; i++) {
-    if ((await trackError()) < 1) break;
+  // MINDKET iranyban meg kell varni, nem csak A szemszogebol!
+  //
+  // A `trackError` azt meri, hogy A vilagaban jo helyen van-e B teste --
+  // vagyis csak azt, hogy a szerver mar ujraszinkronizalta-e B-t. A
+  // sajat allapota ettol fuggetlenul meg elutasitott lehet, es akkor a
+  // szerver A-t tovabbra is a REGI spawn-pontjan tudja. Ilyenkor a
+  // nekifutas kliens-oldalon tokeletesen lezajlik (a lokes latszik), de
+  // a szerver ket olyan autot lat, amelyek soha nem ernek ossze, tehat
+  // NEM ad sebzest -- a teszt ugy bukott el, hogy a termekben semmi baj
+  // nem volt. 200 ms + jitter mellett kb. minden tizedik futasban
+  // becsuszott, mert A ujraszinkronja (10 elutasitott allapot utan)
+  // neha csak a becsapodas kozben ert oda.
+  const errorAtoB = trackError;
+  const errorBtoA = async (): Promise<number> => {
+    const aReal = await ownPos(a);
+    const bodyPos: number[] = await b.evaluate(() => {
+      const s = (window as any).__spike;
+      const ids = s.view.remoteCarIds();
+      if (ids.length === 0) return [NaN, NaN, NaN];
+      const t = s.backend.getRemoteBody(ids[0]);
+      return t ? t.position : [NaN, NaN, NaN];
+    });
+    return Math.hypot(
+      bodyPos[0] - aReal[0],
+      bodyPos[1] - aReal[1],
+      bodyPos[2] - aReal[2],
+    );
+  };
+
+  let syncedAtoB = false;
+  let syncedBtoA = false;
+  for (let i = 0; i < 40; i++) {
+    if (!syncedAtoB && (await errorAtoB()) < 1) syncedAtoB = true;
+    if (!syncedBtoA && (await errorBtoA()) < 1) syncedBtoA = true;
+    if (syncedAtoB && syncedBtoA) break;
     await sleep(300);
   }
+  check(
+    "a felallas utan mindket auto ujraszinkronizalodott",
+    syncedAtoB && syncedBtoA,
+    `A->B ${syncedAtoB ? "ok" : "idotullepes"}, B->A ${syncedBtoA ? "ok" : "idotullepes"}`,
+  );
 
   let maxIdleError = 0;
   for (let i = 0; i < 5; i++) {
@@ -203,8 +241,14 @@ async function main(): Promise<void> {
       // figyelo inditasakor -- kulonben a masik auto teljes nekifutasat
       // mernenk, nem a lokest.
       var id = view.remoteCarIds()[0];
-      window.__imp = { impactAt: 0, prevSpeed: 0, startZ: 0,
-                       maxAway: 0, worstPullback: 0, maxLead: 0 };
+      // maxStepBack: a legnagyobb EGY KEPKOCKA alatti visszalepes.
+      // A worstPullback osszesitett mutato -- egy lassu, sima
+      // visszarendezodes ugyanakkora erteket ad, mint egy hirtelen
+      // ugras, pedig a jatekos csak az utobbit latja hibanak. A ketto
+      // egyutt mondja meg, melyikrol van szo.
+      window.__imp = { impactAt: 0, prevSpeed: 0, startZ: 0, prevZ: 0, hasPrev: false,
+                       maxAway: 0, worstPullback: 0, maxLead: 0,
+                       maxStepBack: 0 };
       function tick() {
         var d = window.__imp;
         var sp = s.backend.getTelemetry().speedKmh;
@@ -226,6 +270,12 @@ async function main(): Promise<void> {
         if (!d.impactAt && d.prevSpeed > 25 && sp < d.prevSpeed - 8) {
           d.impactAt = performance.now();
           d.startZ = z;
+          // A becsapodas kepkockajaban meg nincs ERVENYES elozo minta az
+          // ablakon belul: a prevZ meg a becsapodas ELOTTI kepkockabol
+          // valo, ahol az auto ~25 m/s-mal jott, tehat egy ~0.4 m-es
+          // "visszalepest" mutatna, ami valojaban a nekifutas. (Pont ezt
+          // merte a mutato eloszor, meg 0 ms kesleltetesnel is.)
+          d.hasPrev = false;
         }
         d.prevSpeed = sp;
         if (d.impactAt && performance.now() - d.impactAt < 700) {
@@ -235,6 +285,18 @@ async function main(): Promise<void> {
           // muterme, amit ki akarunk zarni (visszaszivodas vagy ugras).
           var pullback = d.maxAway - away;
           if (pullback > d.worstPullback) d.worstPullback = pullback;
+
+          // Visszafele tett lepes ebben a kepkockaban (a lokes iranya a
+          // novekvo |z - startZ|, tehat a csokkenes a visszalepes).
+          // Kulon jelzo, nem a prevZ igazsagerteke: a cel-auto eppen
+          // z ~ 0-nal all, tehat a "prevZ nem nulla" ellenorzes
+          // veletlenszeruen kihagyna kepkockakat.
+          if (d.hasPrev) {
+            var stepBack = Math.abs(d.prevZ - d.startZ) - away;
+            if (stepBack > d.maxStepBack) d.maxStepBack = stepBack;
+          }
+          d.prevZ = z;
+          d.hasPrev = true;
         }
         requestAnimationFrame(tick);
       }
@@ -243,6 +305,9 @@ async function main(): Promise<void> {
   `);
 
   const bBefore = await ownPos(b);
+  const ownHp = (page: Page): Promise<number | null> =>
+    page.evaluate(() => (window as any).__spike.net.hp as number | null);
+  const hpBefore = { a: await ownHp(a), b: await ownHp(b) };
 
   // A teljes gazzal nekihajt B-nek. B NEM ad gazt -- ha elmozdul, azt
   // csak az utkozes okozhatta.
@@ -319,6 +384,7 @@ async function main(): Promise<void> {
     maxAway: number;
     worstPullback: number;
     maxLead: number;
+    maxStepBack: number;
   } = await a.evaluate("window.__imp");
 
   // A lokes ne csak "valamennyire" latszodjon: a becsapodas utani rovid
@@ -350,7 +416,7 @@ async function main(): Promise<void> {
   check(
     "a lokes nem szivodik vissza es nem ugrik",
     imp.worstPullback < 0.4,
-    `legnagyobb visszahuzas ${imp.worstPullback.toFixed(2)} m`,
+    `legnagyobb visszahuzas ${imp.worstPullback.toFixed(2)} m, legnagyobb egy-kepkockas visszalepes ${imp.maxStepBack.toFixed(3)} m`,
   );
 
   // Az ERINTKEZES UTAN a testnek vissza kell allnia a hiteles
@@ -371,6 +437,42 @@ async function main(): Promise<void> {
     "utkozes utan visszaall a hiteles poziciora",
     recoveredError < 1,
     `${recoveredError.toFixed(3)} m elteres`,
+  );
+
+  // Sebzes: a SZERVER donti el (terv 15.4) -- a kliens nem jelent be
+  // talalatot, csak a HP-t kapja vissza a snapshotban.
+  const hpAfter = { a: await ownHp(a), b: await ownHp(b) };
+  check(
+    "az utkozes mindket autonak sebzett",
+    hpBefore.a !== null &&
+      hpAfter.a !== null &&
+      hpBefore.b !== null &&
+      hpAfter.b !== null &&
+      hpAfter.a < hpBefore.a &&
+      hpAfter.b < hpBefore.b,
+    `A: ${hpBefore.a} -> ${hpAfter.a}, B: ${hpBefore.b} -> ${hpAfter.b}`,
+  );
+
+  // A a nekifuto, B az allo cel -- a tamado jarjon jobban.
+  const lostA = (hpBefore.a ?? 0) - (hpAfter.a ?? 0);
+  const lostB = (hpBefore.b ?? 0) - (hpAfter.b ?? 0);
+  check(
+    "a nekimeno auto kevesebb HP-t vesztett",
+    lostA < lostB,
+    `A (nekiment) -${lostA} HP, B (allt) -${lostB} HP`,
+  );
+
+  // A tobbi jatekos HP-ja lathato az autoja felett.
+  const remoteHpShown: number | null = await a.evaluate(() => {
+    const s = (window as any).__spike;
+    const ids = s.view.remoteCarIds();
+    if (ids.length === 0) return null;
+    return s.net.remotes.hpOf(ids[0]) as number | null;
+  });
+  check(
+    "a masik jatekos HP-ja elerheto a kliensen",
+    remoteHpShown !== null && remoteHpShown === hpAfter.b,
+    `${remoteHpShown} (B valos HP-ja: ${hpAfter.b})`,
   );
 
   await a.screenshot({ path: "out/collision.png" });

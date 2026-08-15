@@ -79,6 +79,14 @@ export class WsServer {
       case "join":
         this.handleJoin(conn, message);
         return;
+      case "fire":
+        // A kiloves iranyat es helyet a SZERVER szamolja a jatekos
+        // allapotabol -- a kliens csak kerni tud (lasd FireMessage).
+        if (conn.room && conn.playerId) {
+          conn.room.tryFire(conn.playerId, message.target, performance.now());
+        }
+        return;
+
       case "state":
         this.handleState(conn, message);
         return;
@@ -168,6 +176,10 @@ export class WsServer {
     // WebRTC DataChannelre valthat -- ez a vedelme mar most a helyen van.
     if (message.seq <= player.lastSeq) return;
     player.lastSeq = message.seq;
+
+    // Megsemmisult auto allapotat nem vesszuk at: a roncs maradjon ott,
+    // ahol kidőlt. Az ujraszuletest a szerver kezdemenyezi (respawn).
+    if (player.deadSince !== null) return;
 
     // Plauzibilitas-ellenorzes (terv 15.4, 3. lepcso 5. pont).
     //

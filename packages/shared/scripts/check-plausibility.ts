@@ -36,6 +36,8 @@ function state(
     susp: [0.3, 0.3, 0.3, 0.3],
     grip: [1, 1, 1, 1],
     brokenMask: 0,
+    aimYaw: 0,
+    aimPitch: 0,
   };
 }
 
@@ -145,6 +147,8 @@ async function main(): Promise<void> {
       susp: [0.3, 0.3, 0.3, 0.3],
       grip: [1, 1, 1, 1],
       brokenMask: 0,
+      aimYaw: 0,
+      aimPitch: 0,
     };
     const verdict = checkPlausibility(previous, sample, (stepsPerSample * 1) / 60);
     if (!verdict.ok) {

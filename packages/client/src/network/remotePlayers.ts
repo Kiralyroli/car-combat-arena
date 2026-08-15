@@ -17,11 +17,35 @@ import type { PlayerSnapshot } from "@cca/shared";
  * puffer nyeli el.
  */
 
-/** Mennyivel a jelen mogott renderelunk. 20 Hz-nel 2 snapshot-nyi tartalek. */
-const INTERP_DELAY_MS = 100;
+/**
+ * Mennyivel a jelen mogott renderelunk. 20 Hz-nel 2 snapshot-nyi tartalek.
+ *
+ * EXPORTALT, mert a rakétak ugyanezt a kesleltetest hasznaljak
+ * (lasd remoteRockets.ts). A ketto NEM terhet el: ha a lovedek a
+ * jelenbol, a celpont pedig 100 ms-mal korabbrol rajzolodna, akkor a
+ * rakéta a kepernyon 100 ms-szal a celpont ELOTT jarna -- 55 m/s-nal
+ * 5.5 m --, es a jatekos olyan talalatot latna, ami nem tortent meg
+ * (vagy forditva). Egy timeline legyen, egy konstanssal.
+ */
+export const INTERP_DELAY_MS = 100;
 
 /** Ennel regebbi mintakra mar nincs szukseg. */
 const BUFFER_KEEP_MS = 1000;
+
+/**
+ * Szogek kozotti interpolacio a ROVIDEBB iranyba.
+ *
+ * A celzasi szog korbeer: -179 fok es +179 fok kozott a naiv atlagolas
+ * az egesz koron atvinne a vetot (358 fokot fordulna 2 helyett), ami
+ * lathato porgesnek latszana minden alkalommal, amikor a jatekos
+ * athalad a hatso iranyon.
+ */
+function lerpAngle(a: number, b: number, t: number): number {
+  let delta = b - a;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  return a + delta * t;
+}
 
 interface Sample {
   /** Lokalis beerkezesi ido (performance.now()). */
@@ -33,6 +57,8 @@ interface Sample {
   susp: [number, number, number, number];
   grip: [number, number, number, number];
   brokenMask: number;
+  aimYaw: number;
+  aimPitch: number;
 }
 
 export interface InterpolatedState {
@@ -43,6 +69,8 @@ export interface InterpolatedState {
   susp: [number, number, number, number];
   grip: [number, number, number, number];
   brokenMask: number;
+  aimYaw: number;
+  aimPitch: number;
 }
 
 export class RemotePlayers {
@@ -51,6 +79,17 @@ export class RemotePlayers {
   /** Ujrahasznositott objektumok -- ne allokaljunk minden frame-ben. */
   private readonly outPos = new THREE.Vector3();
   private readonly outQuat = new THREE.Quaternion();
+
+  /**
+   * Tavoli jatekosok HP-ja. SZANDEKOSAN nem interpolaljuk: a HP
+   * diszkret, szerver altal eldontott ertek, nem folytonos mozgas --
+   * a koztes ertekek megjelenitese csak felrevezetne.
+   */
+  private readonly hp = new Map<string, number>();
+
+  hpOf(id: string): number | null {
+    return this.hp.get(id) ?? null;
+  }
 
   ids(): string[] {
     return [...this.buffers.keys()];
@@ -62,15 +101,19 @@ export class RemotePlayers {
 
   remove(id: string): void {
     this.buffers.delete(id);
+    this.hp.delete(id);
   }
 
   clear(): void {
     this.buffers.clear();
+    this.hp.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
   ingest(players: PlayerSnapshot[], receivedAt: number): void {
     for (const player of players) {
+      this.hp.set(player.id, player.hp);
+
       let buffer = this.buffers.get(player.id);
       if (!buffer) {
         buffer = [];
@@ -85,6 +128,8 @@ export class RemotePlayers {
         susp: player.susp,
         grip: player.grip,
         brokenMask: player.brokenMask,
+        aimYaw: player.aimYaw,
+        aimPitch: player.aimPitch,
       });
 
       // Regi mintak eldobasa.
@@ -174,6 +219,8 @@ export class RemotePlayers {
       // kozott, ezert NEM interpolaljuk. A megjelenitett idopillanathoz
       // tartozo (regebbi) mintat vesszuk at valtozatlanul.
       brokenMask: a.brokenMask,
+      aimYaw: lerpAngle(a.aimYaw, b.aimYaw, t),
+      aimPitch: a.aimPitch + (b.aimPitch - a.aimPitch) * t,
     };
   }
 

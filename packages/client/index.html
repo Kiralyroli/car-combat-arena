@@ -77,6 +77,45 @@
       }
       #help b { color: #e6edf3; font-weight: 600; }
 
+      /*
+       * Celkereszt: az eger utan mozog, es a rakéta oda repul.
+       * A vaszon folott elrejtjuk a rendszer-kurzort, de a debug
+       * panel folott meghagyjuk -- ott csuszkakat kell huzni.
+       */
+      canvas { cursor: none; }
+
+      #crosshair {
+        position: fixed;
+        width: 26px;
+        height: 26px;
+        margin: -13px 0 0 -13px;
+        pointer-events: none;
+        z-index: 20;
+      }
+      #crosshair::before,
+      #crosshair::after {
+        content: "";
+        position: absolute;
+        background: #f0a020;
+        box-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+      }
+      /* Vizszintes es fuggoleges szar, kozepen resel -- igy a celpont
+         maga nem takarodik el. */
+      #crosshair::before {
+        left: 0;
+        right: 0;
+        top: 12px;
+        height: 2px;
+        clip-path: polygon(0 0, 38% 0, 38% 100%, 0 100%, 62% 0, 100% 0, 100% 100%, 62% 100%);
+      }
+      #crosshair::after {
+        top: 0;
+        bottom: 0;
+        left: 12px;
+        width: 2px;
+        clip-path: polygon(0 0, 100% 0, 100% 38%, 0 38%, 0 62%, 100% 62%, 100% 100%, 0 100%);
+      }
+
       #loading {
         position: fixed;
         inset: 0;
@@ -193,10 +232,11 @@
   </head>
   <body>
     <div id="loading">Fizikai motor betoltese...</div>
+    <div id="crosshair" hidden></div>
     <div id="hud" hidden></div>
     <div id="help" hidden>
       <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
-      <b>Space</b> kezifek &nbsp; <b>Shift</b> boost &nbsp; <b>R</b> reset<br />
+      <b>Space</b> kezifek &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> reset<br />
       <b>1 2 3 4</b> kerek kiloves (FL FR RL RR) &nbsp; <b>0</b> kerekek javitasa
     </div>
     <div id="debug-panel" hidden></div>

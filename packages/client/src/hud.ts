@@ -31,6 +31,7 @@ export class Hud {
     wheels: WheelReadout[],
     fps: number,
     pingMs: number | null,
+    hp: number | null,
   ): void {
     // 10 Hz eleg a HUD-nak, ne terhelje a fo ciklust.
     const now = performance.now();
@@ -45,6 +46,12 @@ export class Hud {
     const pingClass =
       pingMs === null ? "" : pingMs < 60 ? "good" : pingMs < 120 ? "warn" : "bad";
     const fpsClass = fps >= 55 ? "good" : fps >= 30 ? "warn" : "bad";
+
+    // A HP a SZERVERTOL jon (o donti el a sebzest), ezert halozat nelkul
+    // nincs ertelmes erteke.
+    const hpText =
+      hp === null ? "--" : hp === 0 ? "MEGSEMMISULT" : `${hp}`;
+    const hpClass = hp === null ? "" : hp > 60 ? "good" : hp > 25 ? "warn" : "bad";
 
     const wheelHtml = wheels
       .map((w) => {
@@ -63,6 +70,7 @@ export class Hud {
       <h2>${this.backendName}</h2>
       <div class="row"><span class="label">verzio</span><span class="val">${this.backendVersion}</span></div>
       <hr />
+      <div class="row"><span class="label">HP</span><span class="val ${hpClass}">${hpText}</span></div>
       <div class="row"><span class="label">sebesseg</span><span class="val">${t.speedKmh.toFixed(0)} km/h</span></div>
       <div class="row"><span class="label">kerek foldon</span><span class="val">${t.wheelsOnGround} / 4</span></div>
       <hr />

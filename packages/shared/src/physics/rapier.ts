@@ -11,6 +11,7 @@ import {
 } from "../config";
 import { clamp, cross, dot, eulerToQuat, length, lerp, rotateVec } from "../math";
 import { wheelRadiusFor } from "../wheelVisuals";
+import { explosionFalloff } from "../rocket";
 import {
   HEALTHY_WHEEL,
   type DriveInput,
@@ -818,6 +819,38 @@ export class RapierBackend implements VehicleBackend {
       holdUntil: 0,
       holdStartedAt: 0,
     });
+  }
+
+  applyExplosion(
+    position: [number, number, number],
+    radius: number,
+    maxPush: number,
+  ): void {
+    const p = this.chassis.translation();
+    const dx = p.x - position[0];
+    const dy = p.y - position[1];
+    const dz = p.z - position[2];
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance >= radius) return;
+
+    const strength = maxPush * explosionFalloff(distance, radius);
+    // Ha pontosan a robbanas kozeppontjaban allunk, nincs ertelmes
+    // irany -- ilyenkor felfele lokjuk.
+    const nx = distance > 0.01 ? dx / distance : 0;
+    const ny = distance > 0.01 ? dy / distance : 1;
+    const nz = distance > 0.01 ? dz / distance : 0;
+
+    const v = this.chassis.linvel();
+    this.chassis.setLinvel(
+      {
+        x: v.x + nx * strength,
+        // Egy kis felfele-osszetevo mindig jar: igy a robbanas
+        // "felkapja" az autot, nem csak oldalra csusztatja.
+        y: v.y + ny * strength + strength * 0.35,
+        z: v.z + nz * strength,
+      },
+      true,
+    );
   }
 
   setNetworkLatency(ms: number): void {

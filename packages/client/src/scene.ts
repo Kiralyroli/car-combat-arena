@@ -4,10 +4,12 @@ import {
   ARENA,
   CAMERA,
   CHASSIS,
+  MAX_HP,
   WHEEL,
   WHEEL_LAYOUT,
   wheelRadiusFor,
   wheelTintFor,
+  type RocketSnapshot,
   type Transform,
   type WheelDamage,
   type WheelReadout,
@@ -17,6 +19,17 @@ import {
 const VEHICLE_MODEL_URL = "/models/sedan.glb";
 
 const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as const;
+
+/** Milyen magasan lebegjen a HP-sav az auto kozeppontja felett (m). */
+const HP_BAR_HEIGHT = CHASSIS.halfExtents.y + 1.4;
+
+/**
+ * A rakétaveto magassaga a chassis KOZEPPONTJAHOZ kepest (m).
+ *
+ * A modell tetőteje kb. 1.45 m-re van a talajtol, a chassis kozeppontja
+ * pedig halfExtents.y magasan -- a kettő kulonbsege adja a tetőszintet.
+ */
+const LAUNCHER_HEIGHT = 1.45 - CHASSIS.halfExtents.y;
 
 /**
  * Egy tavoli (halozati) jatekos autoja.
@@ -34,6 +47,8 @@ export interface RemoteVisualState {
   susp: [number, number, number, number];
   grip: [number, number, number, number];
   brokenMask: number;
+  aimYaw: number;
+  aimPitch: number;
 }
 
 interface RemoteCar {
@@ -45,6 +60,12 @@ interface RemoteCar {
   wheelMeshes: THREE.Mesh[];
   /** A kerekek nyugalmi lokalis Y-koordinataja (a rugo-elmozdulas ehhez kepest hat). */
   wheelRestY: number[];
+  /** Rakétaveto a tetőn -- a celzas iranyaba fordul. */
+  launcher: { root: THREE.Group; tube: THREE.Object3D };
+  /** HP-sav az auto felett (billboard sprite). */
+  hpBar: THREE.Sprite;
+  /** Az utoljara KIRAJZOLT HP -- csak valtozaskor rajzolunk ujra. */
+  shownHp: number;
   /** Halmozott gordulesi szog radianban -- a megtett utbol szamolva. */
   rollAngle: number;
   /** Elozo pozicio a megtett ut merésehez; null az elso frame-ig. */
@@ -74,6 +95,8 @@ export class SceneView {
    */
   private remoteTemplate!: THREE.Object3D;
   private remoteCars = new Map<string, RemoteCar>();
+  /** A sajat autonk rakétavetője (a tetőn). */
+  private launcher!: { root: THREE.Group; tube: THREE.Object3D };
 
   private camPos = new THREE.Vector3(0, 6, -12);
   private camLook = new THREE.Vector3();
@@ -162,6 +185,13 @@ export class SceneView {
     const chassisWrapper = new THREE.Group();
     body.position.y -= CHASSIS.halfExtents.y;
     chassisWrapper.add(body);
+
+    // Rakétaveto a tetőre. A jarmu GYEREKE, tehat egyutt mozog es dol
+    // vele -- csak a celzas-irany szamolodik le rola (lasd aimLauncher).
+    this.launcher = this.createLauncher();
+    this.launcher.root.position.y = LAUNCHER_HEIGHT;
+    chassisWrapper.add(this.launcher.root);
+
     this.scene.add(chassisWrapper);
     this.chassisMesh = chassisWrapper;
 
@@ -187,6 +217,208 @@ export class SceneView {
     }
   }
 
+  // --- Rakétaveto (a tetőn) ---
+
+  /**
+   * Egyszeru rakétaveto primitivekbol.
+   *
+   * SZANDEKOSAN nem letoltott modell: a terv az asset-munkat az MVP
+   * utanra uteemezi (5. lepcso: eloszb tesztelok, csak utana tartalom),
+   * es a fegyverkeszlet sincs meg lezarva. Ez a placeholder viszont
+   * megoldja azt, ami most valoban hianyzik: latszik, hogy az auto fel
+   * van fegyverkezve, es hogy MERRE celoz.
+   *
+   * A felepites keszakarva ugyanaz, mint egy kesobbi valodi modellnel
+   * lenne: egy forgo alap (yaw) es egy benne bolintó cső (pitch) --
+   * igy a csere egyetlen `WeaponPoint_Roof` csomoponttal megoldhato
+   * lesz (terv 6. fejezet).
+   */
+  private createLauncher(): { root: THREE.Group; tube: THREE.Object3D } {
+    if (!this.launcherParts) {
+      this.launcherParts = {
+        base: new THREE.BoxGeometry(0.5, 0.16, 0.5),
+        tube: new THREE.CylinderGeometry(0.11, 0.13, 0.95, 10),
+        material: new THREE.MeshStandardMaterial({
+          color: 0x3a4048,
+          roughness: 0.6,
+          metalness: 0.3,
+        }),
+      };
+      // A cső alapertelmezetten +Y fele all -- forgassuk -Z fele, hogy
+      // az "elore" a modell orr-iranya legyen (lasd config.ts).
+      this.launcherParts.tube.rotateX(Math.PI / 2);
+    }
+    const parts = this.launcherParts;
+
+    const root = new THREE.Group();
+    const base = new THREE.Mesh(parts.base, parts.material);
+    base.castShadow = true;
+    root.add(base);
+
+    // A cső kicsit fentebb es elorebb ul az alapon.
+    const tube = new THREE.Mesh(parts.tube, parts.material);
+    tube.position.set(0, 0.16, -0.2);
+    tube.castShadow = true;
+    root.add(tube);
+
+    return { root, tube };
+  }
+
+  private launcherParts: {
+    base: THREE.BoxGeometry;
+    tube: THREE.CylinderGeometry;
+    material: THREE.MeshStandardMaterial;
+  } | null = null;
+
+  /**
+   * A veto beallitasa a celzas szerint.
+   *
+   * Az alap VILAG-iranyba fordul, ezert a kocsi sajat elfordulasat le
+   * kell vonni: a veto a jarmu gyereke, tehat a lokalis szoge a ketto
+   * kulonbsege. Enelkul kanyarodas kozben egyutt fordulna az autoval,
+   * es nem oda mutatna, ahova celzunk.
+   */
+  private aimLauncher(
+    launcher: { root: THREE.Group; tube: THREE.Object3D },
+    carQuaternion: THREE.Quaternion,
+    aimYaw: number,
+    aimPitch: number,
+  ): void {
+    // Ugyanaz a konvencio, mint a celzasnal (lasd main.ts currentAim):
+    // az az Y-forgatas, amivel egy -Z fele nezo objektum ebbe az iranyba
+    // fordul.
+    const forward = this.tmpVec.set(0, 0, -1).applyQuaternion(carQuaternion);
+    const carYaw = Math.atan2(-forward.x, -forward.z);
+    launcher.root.rotation.set(0, aimYaw - carYaw, 0);
+    // A cső geometriaja mar -Z fele all (lasd createLauncher), ezert itt
+    // csak a bolintás jon ra: +X korul forgatva a -Z irany felfele mozdul.
+    launcher.tube.rotation.x = aimPitch;
+  }
+
+  // --- Celzas ---
+
+  private readonly arenaMeshes: THREE.Mesh[] = [];
+  /** Ujrahasznositott lista a celzas-sugarhoz -- ne allokaljunk lovesenkent. */
+  private readonly aimTargets: THREE.Object3D[] = [];
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly ndc = new THREE.Vector2();
+  /** A talaj sikja: ha a sugar nem talal el semmit, ide vetitunk. */
+  private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly aimPoint = new THREE.Vector3();
+
+  /**
+   * Hova mutat a celkereszt a vilagban.
+   *
+   * A kepernyo-koordinatabol sugarat inditunk a kamerabol, es az ARENA
+   * feluleteire vetitunk. Ha a sugar nem talal el semmit (pl. az eg
+   * fele nez), a talaj sikjara esunk vissza; ha meg az sem metszi
+   * (felfele mutato sugar), egy tavoli pontot adunk vissza a sugar
+   * menten -- igy a celzas mindig ad ertelmes iranyt, sosem "akad meg".
+   *
+   * @param ndcX -1..1 kepernyo-koordinata (bal..jobb)
+   * @param ndcY -1..1 (lent..fent)
+   */
+  aimPointAt(ndcX: number, ndcY: number): [number, number, number] {
+    this.ndc.set(ndcX, ndcY);
+    this.raycaster.setFromCamera(this.ndc, this.camera);
+
+    // A TAVOLI AUTOKRA is celozni kell tudni, nem csak a palyara.
+    // Nelkuluk a sugar athatolna rajtuk, es a mogottuk levo talajra
+    // celoznank -- vagyis egy ellenfelre celozva a rakéta enyhen lefele
+    // indulna, es a labai elott csapodna be.
+    this.aimTargets.length = 0;
+    this.aimTargets.push(...this.arenaMeshes);
+    for (const car of this.remoteCars.values()) {
+      if (car.wrapper.visible) this.aimTargets.push(car.wrapper);
+    }
+
+    const hits = this.raycaster.intersectObjects(this.aimTargets, true);
+    if (hits.length > 0) {
+      const p = hits[0].point;
+      return [p.x, p.y, p.z];
+    }
+
+    if (this.raycaster.ray.intersectPlane(this.groundPlane, this.aimPoint)) {
+      return [this.aimPoint.x, this.aimPoint.y, this.aimPoint.z];
+    }
+
+    this.raycaster.ray.at(200, this.aimPoint);
+    return [this.aimPoint.x, this.aimPoint.y, this.aimPoint.z];
+  }
+
+  // --- Rakétak (a szerver lepteti, mi csak rajzoljuk) ---
+
+  private rocketMeshes = new Map<number, THREE.Object3D>();
+  private rocketGeometry: THREE.CylinderGeometry | null = null;
+  private rocketMaterial: THREE.MeshStandardMaterial | null = null;
+
+  /**
+   * A repulo rakétak szinkronizalasa a szerver snapshotjaval.
+   *
+   * A lovedeket NEM mi szimulaljuk (terv 15.4: a talalat a szerveren
+   * dol el), ezert egyszeruen a kapott listahoz igazitjuk a jelenetet:
+   * ami uj, azt letrehozzuk, ami eltunt, azt toroljuk.
+   */
+  /**
+   * A KIRAJZOLT rakétak helyzete -- a tesztek ezt merik.
+   *
+   * Szandekosan a jelenetbol olvas, nem a halozati pufferbol: a jatekos
+   * is ezt latja, es epp az volt a hiba, hogy a kirajzolt lovedek mas
+   * idovonalon jart, mint a kirajzolt autok.
+   */
+  drawnRocketPositions(): [number, number, number][] {
+    return [...this.rocketMeshes.values()].map((m) => [
+      m.position.x,
+      m.position.y,
+      m.position.z,
+    ]);
+  }
+
+  syncRockets(rockets: RocketSnapshot[]): void {
+    if (!this.rocketGeometry) {
+      // Kozos geometria es anyag minden rakétahoz -- olcso.
+      this.rocketGeometry = new THREE.CylinderGeometry(0.12, 0.18, 1.1, 8);
+      // A henger alapertelmezetten +Y fele all; forgassuk -Z fele, hogy
+      // a "haladasi irany" a modell elore-tengelye legyen.
+      this.rocketGeometry.rotateX(Math.PI / 2);
+      this.rocketMaterial = new THREE.MeshStandardMaterial({
+        color: 0xf0a020,
+        emissive: 0x803000,
+        roughness: 0.5,
+      });
+    }
+
+    const seen = new Set<number>();
+    for (const rocket of rockets) {
+      seen.add(rocket.id);
+      let mesh = this.rocketMeshes.get(rocket.id);
+      if (!mesh) {
+        mesh = new THREE.Mesh(this.rocketGeometry, this.rocketMaterial!);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+        this.rocketMeshes.set(rocket.id, mesh);
+      }
+      mesh.position.set(...rocket.position);
+      // A modell -Z tengelyet forditjuk a halado iranyba.
+      this.tmpVec.set(...rocket.direction);
+      mesh.quaternion.setFromUnitVectors(SceneView.MODEL_FORWARD, this.tmpVec);
+    }
+
+    for (const [id, mesh] of this.rocketMeshes) {
+      if (seen.has(id)) continue;
+      this.scene.remove(mesh);
+      this.rocketMeshes.delete(id);
+    }
+  }
+
+  /** A modell elore-tengelye (lasd config.ts orr-konvencio). */
+  private static readonly MODEL_FORWARD = new THREE.Vector3(0, 0, -1);
+
+  /** A SAJAT autonk vetőjenek beallitasa a celzas szerint. */
+  setOwnAim(aimYaw: number, aimPitch: number): void {
+    this.aimLauncher(this.launcher, this.chassisMesh.quaternion, aimYaw, aimPitch);
+  }
+
   // --- Tavoli (halozati) jatekosok autoi ---
 
   /**
@@ -196,6 +428,94 @@ export class SceneView {
   private static readonly REMOTE_COLORS = [
     0x3b82f6, 0xef4444, 0x22c55e, 0xa855f7, 0xf97316, 0x14b8a6, 0xec4899,
   ];
+
+  /**
+   * HP-sav egy tavoli auto fole.
+   *
+   * Sprite (billboard): mindig a kamera fele nez, tehat barhonnan
+   * olvashato. A tartalmat egy kis vaszonra rajzoljuk, es CSAK akkor
+   * frissitjuk, ha valtozott a HP -- kepkockankent ujrarajzolni
+   * feleslegesen terhelne a GPU-t (textura-feltoltes minden frame-ben).
+   */
+  private createHpBar(): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 32;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        // Ne takarja el a palya: a HP mindig legyen lathato, akkor is,
+        // ha az auto egy lada mogott van.
+        depthTest: false,
+      }),
+    );
+    sprite.scale.set(2.2, 0.55, 1);
+    sprite.renderOrder = 999;
+    return sprite;
+  }
+
+  private drawHpBar(sprite: THREE.Sprite, hp: number): void {
+    const texture = (sprite.material as THREE.SpriteMaterial).map;
+    if (!texture) return;
+    const canvas = texture.image as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const ratio = Math.max(0, Math.min(1, hp / MAX_HP));
+    const pad = 3;
+    const w = canvas.width - pad * 2;
+    const h = canvas.height - pad * 2;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Hatter + keret, hogy vilagos hattér elott is olvashato legyen.
+    ctx.fillStyle = "rgba(13, 17, 23, 0.75)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+
+    // Ugyanaz a harom sav, mint a HUD-on (zold / sarga / piros).
+    ctx.fillStyle = ratio > 0.6 ? "#3fb950" : ratio > 0.25 ? "#d29922" : "#f85149";
+    ctx.fillRect(pad, pad, w * ratio, h);
+
+    ctx.font = "bold 18px ui-monospace, Consolas, monospace";
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${Math.round(hp)}`, canvas.width / 2, canvas.height / 2 + 1);
+
+    texture.needsUpdate = true;
+  }
+
+  /**
+   * A tavoli auto HP-savjanak frissitese (csak valtozaskor rajzol), es
+   * a megsemmisult auto elrejtese.
+   *
+   * 0 HP-nal a kocsi eltunik a palyarol -- ugyanugy, ahogy a szerver is
+   * kiveszi az utkozes-kiertekelesbol. Enelkul egy "roncs" maradna a
+   * palyan, aminek se sebzese, se utkozese nincs, de latszik.
+   */
+  setRemoteHp(id: string, hp: number | null): void {
+    const car = this.remoteCars.get(id);
+    if (!car || hp === null) return;
+    if (car.shownHp === hp) return;
+    car.shownHp = hp;
+
+    const alive = hp > 0;
+    car.wrapper.visible = alive;
+    car.hpBar.visible = alive;
+    if (alive) this.drawHpBar(car.hpBar, hp);
+  }
+
+  /** Megsemmisult-e a tavoli auto (a fizikai teste ilyenkor nem kell). */
+  isRemoteCarAlive(id: string): boolean {
+    const car = this.remoteCars.get(id);
+    return car === undefined || car.shownHp !== 0;
+  }
 
   hasRemoteCar(id: string): boolean {
     return this.remoteCars.has(id);
@@ -241,6 +561,12 @@ export class SceneView {
     const wrapper = new THREE.Group();
     wrapper.add(car);
     this.enableShadows(wrapper);
+
+    // Rakétaveto a tavoli autora is: igy latszik, ha ranK celoznak.
+    const launcher = this.createLauncher();
+    launcher.root.position.y = LAUNCHER_HEIGHT;
+    wrapper.add(launcher.root);
+
     this.scene.add(wrapper);
 
     // A kerek-node-ok a klonon belul ugyanazokat a neveket viselik.
@@ -267,20 +593,36 @@ export class SceneView {
       }
     }
 
+    // A HP-sav NEM a wrapper gyereke: az egyutt forogna az autoval, es
+    // felborulaskor a kocsi ALA kerulne. Kulon all a jelenetben, es
+    // minden frame-ben az auto fole visszuk (lasd updateRemoteCar).
+    const hpBar = this.createHpBar();
+    this.scene.add(hpBar);
+
     this.remoteCars.set(id, {
       wrapper,
       wheels,
       wheelMeshes,
       wheelRestY,
+      launcher,
+      hpBar,
+      shownHp: -1,
       rollAngle: 0,
       prevPos: null,
     });
+    this.drawHpBar(hpBar, MAX_HP);
   }
 
   removeRemoteCar(id: string): void {
     const car = this.remoteCars.get(id);
     if (!car) return;
     this.scene.remove(car.wrapper);
+    // A HP-sav kulon all a jelenetben, ezert kulon is kell eltavolitani,
+    // es a sajat texturajat/anyagat felszabaditani.
+    this.scene.remove(car.hpBar);
+    const material = car.hpBar.material as THREE.SpriteMaterial;
+    material.map?.dispose();
+    material.dispose();
     this.remoteCars.delete(id);
   }
 
@@ -318,6 +660,15 @@ export class SceneView {
 
     car.wrapper.position.copy(state.position);
     car.wrapper.quaternion.copy(state.quaternion);
+    this.aimLauncher(car.launcher, state.quaternion, state.aimYaw, state.aimPitch);
+
+    // A HP-sav az auto FOLE kerul, fuggolegesen -- fuggetlenul attol,
+    // hogy a kocsi eppen hogyan all (lasd a letrehozasnal).
+    car.hpBar.position.set(
+      state.position.x,
+      state.position.y + HP_BAR_HEIGHT,
+      state.position.z,
+    );
 
     for (let i = 0; i < car.wheels.length; i++) {
       const wheel = car.wheels[i];
@@ -490,6 +841,9 @@ export class SceneView {
       mesh.receiveShadow = true;
       mesh.castShadow = box.name !== "ground";
       this.scene.add(mesh);
+      // A celzas ezekre a felszinekre vetit (lasd aimPointAt) -- a
+      // jelenet tobbi eleme (autok, rakétak, HP-savok) nem lehet celpont.
+      this.arenaMeshes.push(mesh);
     }
 
     // Racs a talajon, hogy a sebesseg es a csuszas lathato legyen.

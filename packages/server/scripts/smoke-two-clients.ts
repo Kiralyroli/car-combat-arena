@@ -7,6 +7,7 @@
  */
 import { WebSocket } from "ws";
 import {
+  IMPACT_COOLDOWN_MS,
   PROTOCOL_VERSION,
   SNAPSHOT_HZ,
   type ClientMessage,
@@ -15,12 +16,35 @@ import {
 
 const URL = process.env.SERVER_URL ?? "ws://localhost:8080";
 
+/** Alap allapot, amibol a tesztek a poziciot/sebesseget felulirjak. */
+const NEUTRAL_STATE = {
+  position: [0, 1, 0] as [number, number, number],
+  rotation: [0, 0, 0, 1] as [number, number, number, number],
+  velocity: [0, 0, 0] as [number, number, number],
+  steer: 0,
+  susp: [0.3, 0.3, 0.3, 0.3] as [number, number, number, number],
+  grip: [1, 1, 1, 1] as [number, number, number, number],
+  brokenMask: 0,
+  aimYaw: 0,
+  aimPitch: 0,
+};
+
 interface FakeClient {
   name: string;
   socket: WebSocket;
   playerId: string | null;
   roomCode: string | null;
   snapshotCount: number;
+  /** A sajat HP-nk a legutobbi snapshot szerint. */
+  hp: number;
+  /** Az utoljara ELKULDOTT pozicio -- a fokozatos mozgatashoz. */
+  lastSent: [number, number, number];
+  /** Hova kert minket a szerver ujraszuletni, vagy null. */
+  respawnPosition: [number, number, number] | null;
+  /** Hany rakéta volt a legutobbi snapshotban. */
+  rocketCount: number;
+  /** Hany robbanas-esemenyt kaptunk. */
+  explosions: number;
   seenOthers: Set<string>;
   events: string[];
   /** Visszakapott `pong`-ok: a kuldesi idobelyeg es a BEERKEZES ideje. */
@@ -36,6 +60,11 @@ function connect(name: string): Promise<FakeClient> {
       playerId: null,
       roomCode: null,
       snapshotCount: 0,
+      hp: 100,
+      lastSent: [0, 2.5, 0],
+      respawnPosition: null,
+      rocketCount: 0,
+      explosions: 0,
       seenOthers: new Set(),
       events: [],
       pongs: [],
@@ -53,7 +82,9 @@ function connect(name: string): Promise<FakeClient> {
           break;
         case "snapshot":
           client.snapshotCount++;
+          client.rocketCount = msg.rockets.length;
           for (const p of msg.players) {
+            if (p.id === client.playerId) client.hp = p.hp;
             if (p.id !== client.playerId) client.seenOthers.add(p.id);
           }
           break;
@@ -62,6 +93,13 @@ function connect(name: string): Promise<FakeClient> {
           break;
         case "playerLeft":
           client.events.push(`playerLeft ${msg.playerId.slice(0, 8)}`);
+          break;
+        case "explosion":
+          client.explosions++;
+          break;
+        case "respawn":
+          client.respawnPosition = msg.position;
+          client.events.push("respawn");
           break;
         case "pong":
           // A beerkezes idejet ITT kell rogziteni. Ha csak kesobb, a
@@ -117,13 +155,15 @@ async function main(): Promise<void> {
     send(a, {
       type: "state",
       seq,
-      state: { position: [seq, 2.5, 0], rotation: [0, 0, 0, 1], velocity: [10, 0, 0] },
+      state: { ...NEUTRAL_STATE, position: [seq, 2.5, 0], velocity: [10, 0, 0] },
     });
     send(b, {
       type: "state",
       seq,
-      state: { position: [0, 2.5, seq], rotation: [0, 0, 0, 1], velocity: [0, 0, 10] },
+      state: { ...NEUTRAL_STATE, position: [0, 2.5, seq], velocity: [0, 0, 10] },
     });
+    a.lastSent = [seq, 2.5, 0];
+    b.lastSent = [0, 2.5, seq];
     await sleep(16);
   }
   await sleep(300);
@@ -170,11 +210,210 @@ async function main(): Promise<void> {
   send(a, {
     type: "state",
     seq: 5,
-    state: { position: [999, 999, 999], rotation: [0, 0, 0, 1], velocity: [0, 0, 0] },
+    state: { ...NEUTRAL_STATE, position: [999, 999, 999] },
   });
   await sleep(200);
   const aInB = [...b.seenOthers].includes(a.playerId!);
   check("regi seq nem irta felul az allapotot", aInB, "a jatekos tovabbra is lathato");
+
+  // 4b. Utkozesi sebzes -- a SZERVER donti el (terv 4. lepcso 2. pont).
+  //     A kliensek NEM jelentenek be talalatot: a szerver a poziciobol
+  //     es a sebessegbol allapitja meg.
+  let seq = 100;
+
+  // Eloszor egymas melle visszuk oket. A szerver plauzibilitas-
+  // ellenorzese nem enged teleportalni, ezert TOBB LEPESBEN, a
+  // megengedett sebesseg-koltsegvetesen belul kozelitunk.
+  async function moveTo(
+    client: FakeClient,
+    target: [number, number, number],
+  ): Promise<void> {
+    const from = client.lastSent;
+    for (let step = 1; step <= 5; step++) {
+      const t = step / 5;
+      send(client, {
+        type: "state",
+        seq: seq++,
+        state: {
+          ...NEUTRAL_STATE,
+          position: [
+            from[0] + (target[0] - from[0]) * t,
+            from[1] + (target[1] - from[1]) * t,
+            from[2] + (target[2] - from[2]) * t,
+          ],
+        },
+      });
+      await sleep(120);
+    }
+    client.lastSent = target;
+  }
+
+  await moveTo(a, [20, 1, 0]);
+  await moveTo(b, [20, 1, 12]);
+  await sleep(300);
+
+  const hpBefore = { a: a.hp, b: b.hp };
+
+  // Most osszeer a ket auto, egymas fele 18-18 m/s-mal (36 m/s kozeledes).
+  const impactA: [number, number, number] = [20, 1, 0];
+  const impactB: [number, number, number] = [20, 1, 4];
+  send(a, {
+    type: "state",
+    seq: seq++,
+    state: { ...NEUTRAL_STATE, position: impactA, velocity: [0, 0, 18] },
+  });
+  send(b, {
+    type: "state",
+    seq: seq++,
+    state: { ...NEUTRAL_STATE, position: impactB, velocity: [0, 0, -18] },
+  });
+
+  // A sebzesre VARUNK, nem alszunk ra egy fix ideig: a hutest kesobb
+  // csak akkor tudjuk ertelmesen merni, ha tudjuk, mikor tortent az
+  // elso talalat. Fix alvassal a meres athuzodhat a hutesi ablakon --
+  // ez elsore pontosan igy is tortent.
+  const impactAt = performance.now();
+  for (let i = 0; i < 20 && a.hp === hpBefore.a; i++) await sleep(25);
+
+  check(
+    "a szerver sebzett az utkozesert",
+    a.hp < hpBefore.a && b.hp < hpBefore.b,
+    `A: ${hpBefore.a} -> ${a.hp}, B: ${hpBefore.b} -> ${b.hp}`,
+  );
+  check(
+    "mindket auto ugyanannyit kapott (nem iranyfuggo)",
+    hpBefore.a - a.hp === hpBefore.b - b.hp,
+    `${hpBefore.a - a.hp} vs ${hpBefore.b - b.hp} HP`,
+  );
+
+  // A hutes miatt a folytatodo erintkezes nem sebez ujra azonnal --
+  // kulonben egyetlen koccanas masodpercenkent tucatnyi sebzest okozna.
+  // A merest a HUTESI ABLAKON BELUL kell elvegezni.
+  const hpAfterFirst = a.hp;
+  send(a, {
+    type: "state",
+    seq: seq++,
+    state: { ...NEUTRAL_STATE, position: impactA, velocity: [0, 0, 18] },
+  });
+  send(b, {
+    type: "state",
+    seq: seq++,
+    state: { ...NEUTRAL_STATE, position: impactB, velocity: [0, 0, -18] },
+  });
+  await sleep(200);
+
+  const elapsed = performance.now() - impactAt;
+  check(
+    "a folytatodo erintkezes nem sebez azonnal ujra",
+    a.hp === hpAfterFirst && elapsed < IMPACT_COOLDOWN_MS,
+    `${hpAfterFirst} -> ${a.hp} HP, ${elapsed.toFixed(0)} ms a hutesi ablakbol (${IMPACT_COOLDOWN_MS} ms)`,
+  );
+
+  // 4c. Megsemmisules es ujraszuletes (terv 4. lepcso 5. pont).
+  //     Addig utkoztetjuk oket, amig valaki el nem fogy.
+  for (let round = 0; round < 6 && a.hp > 0 && b.hp > 0; round++) {
+    await sleep(IMPACT_COOLDOWN_MS + 80);
+    send(a, {
+      type: "state",
+      seq: seq++,
+      state: { ...NEUTRAL_STATE, position: impactA, velocity: [0, 0, 25] },
+    });
+    send(b, {
+      type: "state",
+      seq: seq++,
+      state: { ...NEUTRAL_STATE, position: impactB, velocity: [0, 0, -25] },
+    });
+    await sleep(200);
+  }
+
+  const destroyed = a.hp === 0 || b.hp === 0;
+  check("eleg utkozes utan megsemmisul az auto", destroyed, `A=${a.hp} B=${b.hp} HP`);
+
+  // A megsemmisult jatekos allapotat a szerver NEM veszi at tobbe.
+  const deadClient = a.hp === 0 ? a : b;
+  const wreckPos = deadClient === a ? impactA : impactB;
+  send(deadClient, {
+    type: "state",
+    seq: seq++,
+    state: { ...NEUTRAL_STATE, position: [10, 1, 10], velocity: [0, 0, 0] },
+  });
+  await sleep(200);
+  const stillAtWreck = [...(deadClient === a ? b : a).seenOthers].length > 0;
+  check(
+    "a megsemmisult auto allapota nem frissul",
+    stillAtWreck,
+    `a roncs a helyen maradt (${wreckPos.join(", ")})`,
+  );
+
+  // Ujraszuletes: a szerver kuldi meg a helyet, es teli HP-t ad.
+  const respawnedAt = performance.now();
+  for (let i = 0; i < 40 && deadClient.hp === 0; i++) await sleep(100);
+
+  check(
+    "a szerver ujraszuletette a jatekost",
+    deadClient.hp === 100,
+    `${deadClient.hp} HP ${((performance.now() - respawnedAt) / 1000).toFixed(1)} s mulva`,
+  );
+  check(
+    "a kliens megkapta az ujraszuletesi poziciot",
+    deadClient.respawnPosition !== null,
+    deadClient.respawnPosition
+      ? `[${deadClient.respawnPosition.map((v) => v.toFixed(0)).join(", ")}]`
+      : "nem erkezett respawn uzenet",
+  );
+
+  // 4d. Rakéta (terv 4. lepcso 3. pont): a szerver szimulalja.
+  //     A-t B moge allitjuk, B fele nezve (az orr a -Z fele nez).
+  await moveTo(a, [22, 1, 18]);
+  await moveTo(b, [22, 1, 0]);
+  await sleep(400);
+
+  const hpBeforeRocket = { a: a.hp, b: b.hp };
+  const explosionsBefore = a.explosions;
+
+  send(a, { type: "fire", target: [22, 1, 0] });
+  await sleep(150);
+  check(
+    "a kiloves utan repul rakéta",
+    a.rocketCount > 0,
+    `${a.rocketCount} rakéta a snapshotban`,
+  );
+
+  // A hutes miatt kozvetlenul utana nem lehet ujra tuzelni.
+  const rocketsAfterFirst = a.rocketCount;
+  send(a, { type: "fire", target: [22, 1, 0] });
+  await sleep(120);
+  check(
+    "a hutes miatt nem lehet azonnal ujra tuzelni",
+    a.rocketCount <= rocketsAfterFirst,
+    `${rocketsAfterFirst} -> ${a.rocketCount} rakéta`,
+  );
+
+  // Megvarjuk a becsapodast.
+  for (let i = 0; i < 40 && a.explosions === explosionsBefore; i++) await sleep(100);
+
+  check(
+    "a becsapodas robbanast valt ki",
+    a.explosions > explosionsBefore,
+    `${a.explosions - explosionsBefore} robbanas`,
+  );
+  check(
+    "a rakéta a becsapodas utan eltunik",
+    a.rocketCount === 0,
+    `${a.rocketCount} rakéta maradt`,
+  );
+  check(
+    "a celpont sebzodott",
+    b.hp < hpBeforeRocket.b,
+    `B: ${hpBeforeRocket.b} -> ${b.hp} HP`,
+  );
+  // EZ a fontos negativ eset: a sajat rakétank ne sebezzen minket.
+  // Az orr elott szuletik, de rossz elojellel azonnal onmagaba csapodna.
+  check(
+    "a kilovo nem sebezte meg magat",
+    a.hp === hpBeforeRocket.a,
+    `A: ${hpBeforeRocket.a} -> ${a.hp} HP`,
+  );
 
   // 5. Lecsatlakozas
   b.socket.close();

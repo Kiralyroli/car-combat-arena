@@ -14,10 +14,15 @@ const KEY_MAP: Record<string, string> = {
   ShiftRight: "boost",
 };
 
-export type ActionKey = "reset" | "repairWheels" | `breakWheel${0 | 1 | 2 | 3}`;
+export type ActionKey =
+  | "reset"
+  | "repairWheels"
+  | "fire"
+  | `breakWheel${0 | 1 | 2 | 3}`;
 
 const ACTION_MAP: Record<string, ActionKey> = {
   KeyR: "reset",
+  KeyF: "fire",
   Digit0: "repairWheels",
   Digit1: "breakWheel0",
   Digit2: "breakWheel1",

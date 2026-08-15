@@ -8,6 +8,7 @@ import {
 } from "@cca/shared";
 import { LatencyTransport } from "./latencyTransport";
 import { RemotePlayers } from "./remotePlayers";
+import { RemoteRockets } from "./remoteRockets";
 import { WsTransport } from "./wsTransport";
 
 /**
@@ -30,6 +31,8 @@ export interface NetworkEvents {
   ) => void;
   onPlayerJoined?: (playerId: string) => void;
   onPlayerLeft?: (playerId: string) => void;
+  onRespawn?: (position: [number, number, number]) => void;
+  onExplosion?: (position: [number, number, number], ownerId: string) => void;
   onError?: (code: string, message: string) => void;
   onClose?: () => void;
 }
@@ -49,6 +52,21 @@ export class NetworkClient {
 
   playerId: string | null = null;
   roomCode: string | null = null;
+  /** A sajat karosszeria-HP-nk a szerver szerint; null, amig nincs snapshot. */
+  hp: number | null = null;
+  /**
+   * A repulo rakétak pufferelve -- UGYANAZON az idovonalon, mint a
+   * tavoli autok (lasd remoteRockets.ts).
+   */
+  readonly rockets = new RemoteRockets();
+
+  /**
+   * Rakéta-kiloves kerese a megcelzott vilagbeli pontra.
+   * A kiindulopontot, a huteset es a talalatot a szerver donti el.
+   */
+  fire(target: [number, number, number]): void {
+    this.transport?.send({ type: "fire", target });
+  }
 
   get connected(): boolean {
     return this.transport?.connected ?? false;
@@ -94,6 +112,9 @@ export class NetworkClient {
     transport.onMessage((message) => this.handleMessage(message));
     transport.onClose(() => {
       this.remotes.clear();
+      // A repulo rakétak is tunjenek el: kapcsolat nelkul nem erkezik
+      // tobb minta, es a puffer utolso allapotukban "megfagyasztana" oket.
+      this.rockets.clear();
       // A regi kes-ertek megtevesztő lenne bontott kapcsolatnal.
       this.rttMs = null;
       this.events.onClose?.();
@@ -176,10 +197,23 @@ export class NetworkClient {
         // kilepett jatekosokat is (lasd recentlyLeft).
         this.snapshotCount++;
         const now = performance.now();
+
+        // A sajat HP-nkat a szerver mondja meg (o donti el a sebzest --
+        // terv 15.4), ezert a snapshotbol vesszuk ki, mielott kiszurnenk
+        // magunkat belole.
+        const own = message.players.find((p) => p.id === this.playerId);
+        if (own) this.hp = own.hp;
+
         const others = message.players.filter(
           (p) => p.id !== this.playerId && !this.hasRecentlyLeft(p.id, now),
         );
         this.remotes.ingest(others, now);
+
+        // A rakétakat a szerver lepteti; mi pufferelunk es a tavoli
+        // autokkal AZONOS kesleltetessel rajzolunk. (Korabban a
+        // legfrissebb snapshotbol rajzoltuk azonnal, amitol a lovedek
+        // ~100 ms-szal -- 5.5 m-rel -- a celpont elott jart.)
+        this.rockets.ingest(message.rockets, now);
         return;
       }
 
@@ -195,6 +229,18 @@ export class NetworkClient {
 
       case "playerJoined":
         this.events.onPlayerJoined?.(message.playerId);
+        return;
+
+      case "explosion":
+        // A sebzest a szerver mar alkalmazta; ez a latvanyert es a
+        // fizikai lokesert jon (a lokest mi szamoljuk a sajat autonkra).
+        this.events.onExplosion?.(message.position, message.ownerId);
+        return;
+
+      case "respawn":
+        // A szerver megmondja, hova szuletunk ujra -- a sajat autonkat
+        // csak mi tudjuk athelyezni (hibrid modell, terv 15.4).
+        this.events.onRespawn?.(message.position);
         return;
 
       case "playerLeft":

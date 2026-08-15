@@ -56,8 +56,22 @@ export interface WheelVisualState {
   brokenMask: number;
 }
 
+/**
+ * Merre celoz a jatekos.
+ *
+ * Latvany-adat: ebbol all be a rakétaveto a tetőn. Azert megy at a
+ * halozaton, mert TAKTIKAI informacio is -- latni, hogy az ellenfel
+ * eppen rad celoz-e. Ket szam, tehat olcso.
+ */
+export interface AimState {
+  /** Vizszintes celzasi szog (radian, vilag-koordinatarendszerben). */
+  aimYaw: number;
+  /** Fuggoleges celzasi szog (radian). Pozitiv = felfele. */
+  aimPitch: number;
+}
+
 /** Egy jatekos allapota egy adott szerver-tickben (lasd 15.4). */
-export interface PlayerSnapshot extends WheelVisualState {
+export interface PlayerSnapshot extends WheelVisualState, AimState {
   id: string;
   position: [number, number, number];
   /** Quaternion (x, y, z, w). */
@@ -67,7 +81,7 @@ export interface PlayerSnapshot extends WheelVisualState {
 }
 
 /** A kliens sajat, mar lokalisan kiszamolt allapota. */
-export interface ClientState extends WheelVisualState {
+export interface ClientState extends WheelVisualState, AimState {
   position: [number, number, number];
   rotation: [number, number, number, number];
   velocity: [number, number, number];
@@ -101,7 +115,31 @@ export interface PingMessage {
   t: number;
 }
 
-export type ClientMessage = JoinMessage | StateMessage | PingMessage;
+/**
+ * Rakéta kiloves keres.
+ *
+ * A `target` a vilagbeli pont, ahova a jatekos celzott (a celkereszt
+ * alatti felszin). SZANDEKOSAN pontot kuldunk, nem IRANYT: a kiindulo
+ * poziciot a szerver a jatekos sajat, mar plauzibilitas-ellenorzott
+ * allapotabol veszi, es az iranyt ebbol a ket pontbol szamolja. Igy a
+ * kliens nem hatarozhatja meg, HONNAN indul a lovedek.
+ *
+ * A celzas iranyat viszont szuksegkeppen a kliens adja -- eger-celzasnal
+ * a szerver nem tudhatja, hova mutatott a jatekos. Ez elvi hatar: egy
+ * modositott kliens tokeletesen celozhat. A terv szerint (15.4) ez
+ * elfogadhato, mert a talalatot es a sebzest tovabbra is a szerver
+ * donti el.
+ */
+export interface FireMessage {
+  type: "fire";
+  target: [number, number, number];
+}
+
+export type ClientMessage =
+  | JoinMessage
+  | StateMessage
+  | PingMessage
+  | FireMessage;
 
 // --- Szerver -> kliens ---
 
@@ -119,6 +157,30 @@ export interface JoinedMessage {
   spawn: [number, number, number];
 }
 
+/** Egy repulo rakéta allapota a snapshotban. */
+export interface RocketSnapshot {
+  id: number;
+  ownerId: string;
+  position: [number, number, number];
+  /** Halado irany (egysegvektor) -- ebbol all be a modell forgasa. */
+  direction: [number, number, number];
+}
+
+/**
+ * Robbanas -- ESEMENY, nem allapot.
+ *
+ * A sebzest a szerver mar alkalmazta (az a HP-ban jon vissza); ez az
+ * uzenet a LATVANYERT es a FIZIKAI LOKESERT megy ki. A lokest minden
+ * kliens a sajat autojara szamolja, mert a hibrid modellben a sajat
+ * mozgas a klienshez tartozik (terv 15.4).
+ */
+export interface ExplosionMessage {
+  type: "explosion";
+  position: [number, number, number];
+  /** Ki lotte ki -- a talalat visszajelzesehez. */
+  ownerId: string;
+}
+
 export interface SnapshotMessage {
   type: "snapshot";
   /** Szerver-tick sorszam -- a kliens-oldali interpolaciohoz. */
@@ -127,6 +189,11 @@ export interface SnapshotMessage {
   time: number;
   /** MINDEN jatekos, a cimzettet is beleertve (az sajat magat kiszurja). */
   players: PlayerSnapshot[];
+  /**
+   * A repulo rakétak. A szerver lepteti oket, a kliens csak rajzolja --
+   * ezert itt nincs sebesseg: a kliens ket snapshot kozott interpolal.
+   */
+  rockets: RocketSnapshot[];
 }
 
 export interface PlayerJoinedMessage {
@@ -137,6 +204,19 @@ export interface PlayerJoinedMessage {
 export interface PlayerLeftMessage {
   type: "playerLeft";
   playerId: string;
+}
+
+/**
+ * Ujraszuletes: a szerver mondja meg, HOVA.
+ *
+ * A hibrid modellben a kliens birtokolja a sajat mozgasat, tehat a
+ * szerver nem tudja "athelyezni" az autojat -- csak megkerni ra. A
+ * kliens ezt a poziciot allitja be, es a plauzibilitas-ellenorzes
+ * atengedi, mert ervenyes spawn-pont (lasd plausibility.ts).
+ */
+export interface RespawnMessage {
+  type: "respawn";
+  position: [number, number, number];
 }
 
 export interface ErrorMessage {
@@ -156,6 +236,8 @@ export type ServerMessage =
   | SnapshotMessage
   | PlayerJoinedMessage
   | PlayerLeftMessage
+  | RespawnMessage
+  | ExplosionMessage
   | PongMessage
   | ErrorMessage;
 
