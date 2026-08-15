@@ -19,10 +19,12 @@
     "check:turning": "npm run check:turning --workspace @cca/shared",
     "check:spawns": "npm run check:spawns --workspace @cca/shared",
     "check:reverse": "npm run check:reverse --workspace @cca/shared",
-    "check:all": "npm run check:node && npm run check:selfright && npm run check:turning && npm run check:reverse && npm run check:spawns",
+    "check:plausibility": "npm run check:plausibility --workspace @cca/shared",
+    "check:all": "npm run check:node && npm run check:selfright && npm run check:turning && npm run check:reverse && npm run check:spawns && npm run check:plausibility",
     "check:net": "npm run check:net --workspace @cca/server",
     "check:mp": "npm run check:mp --workspace @cca/client",
     "check:collision": "npm run check:collision --workspace @cca/client",
+    "check:lag": "npm run check:lag --workspace @cca/client",
     "screenshot": "npm run screenshot --workspace @cca/client"
   },
   "devDependencies": {

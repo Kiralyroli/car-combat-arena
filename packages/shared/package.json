@@ -15,7 +15,8 @@
     "check:selfright": "tsx scripts/check-selfright.ts",
     "check:turning": "tsx scripts/check-turning.ts",
     "check:spawns": "tsx scripts/check-spawns.ts",
-    "check:reverse": "tsx scripts/check-reverse.ts"
+    "check:reverse": "tsx scripts/check-reverse.ts",
+    "check:plausibility": "tsx scripts/check-plausibility.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0"

@@ -26,6 +26,19 @@ export interface ServerPlayer {
   hp: number;
   /** Az utoljara elfogadott allapot sorszama -- a kesve erkezok eldobasahoz. */
   lastSeq: number;
+  /**
+   * Mikor erkezett utoljara allapot-uzenete (performance.now) --
+   * FUGGETLENUL attol, hogy elfogadtuk-e.
+   *
+   * Szandekosan nem az utolso ELFOGADAS ideje: abbol a megengedett
+   * elmozdulas az elutasitasok alatt magatol nőne, tehat elég lenne
+   * varni egy keveset, es a teleport atmenne.
+   */
+  lastStateAt: number;
+  /** Hany allapotot utasitottunk el osszesen (plauzibilitas). */
+  rejectedCount: number;
+  /** Hany allapotot utasitottunk el egymas utan -- lasd resync. */
+  consecutiveRejects: number;
 }
 
 const ORIGIN_STATE: ClientState = {
@@ -71,6 +84,9 @@ export class Room {
       spawnIndex: spawn.index,
       hp: START_HP,
       lastSeq: -1,
+      lastStateAt: performance.now(),
+      rejectedCount: 0,
+      consecutiveRejects: 0,
     };
     this.players.set(id, player);
     return player;

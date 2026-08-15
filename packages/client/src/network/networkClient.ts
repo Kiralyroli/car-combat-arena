@@ -6,6 +6,7 @@ import {
   type ServerMessage,
   type Transport,
 } from "@cca/shared";
+import { LatencyTransport } from "./latencyTransport";
 import { RemotePlayers } from "./remotePlayers";
 import { WsTransport } from "./wsTransport";
 
@@ -75,9 +76,19 @@ export class NetworkClient {
   /**
    * Csatlakozas es szobaba lepes. `roomCode` nelkul a szerver uj szobat
    * nyit, es a kodot a `joined` uzenetben kuldi vissza.
+   *
+   * `lagMs` > 0 eseten mesterseges kesleltetes kerul a Transport ele --
+   * fejlesztoi teszteleshez (terv 3. lepcso 6. pont).
    */
-  async connect(url: string, roomCode?: string): Promise<void> {
-    const transport = await WsTransport.connect(url);
+  async connect(
+    url: string,
+    roomCode?: string,
+    lagMs = 0,
+    jitterMs = 0,
+  ): Promise<void> {
+    const socket = await WsTransport.connect(url);
+    const transport: Transport =
+      lagMs > 0 ? new LatencyTransport(socket, lagMs, jitterMs) : socket;
     this.transport = transport;
 
     transport.onMessage((message) => this.handleMessage(message));
@@ -115,6 +126,31 @@ export class NetworkClient {
     this.transport.send({ type: "state", seq: ++this.seq, state });
   }
 
+  /**
+   * Frissen kilepett jatekosok, es mikor lepett ki (performance.now).
+   *
+   * Egy `playerLeft` utan meg erkezhetnek olyan snapshotok, amelyek meg
+   * TARTALMAZZAK a kilepett jatekost -- azok mar uton voltak, amikor
+   * kilepett. Ezek nelkul a szuro nelkul ujra letrehoznank az autojat,
+   * es az orokre ott ragadna, mert masodik `playerLeft` nem jon.
+   * Halozati ingadozas mellett ez rendszeresen elofordul; a jitteres
+   * teszt pontosan ezt produkalta.
+   */
+  private readonly recentlyLeft = new Map<string, number>();
+
+  /** Ennyi ideig (ms) tiltjuk a kilepett jatekos ujra-felvetelet. */
+  private static readonly RECENTLY_LEFT_MS = 3000;
+
+  private hasRecentlyLeft(id: string, now: number): boolean {
+    const at = this.recentlyLeft.get(id);
+    if (at === undefined) return false;
+    if (now - at > NetworkClient.RECENTLY_LEFT_MS) {
+      this.recentlyLeft.delete(id);
+      return false;
+    }
+    return true;
+  }
+
   private handleMessage(message: ServerMessage): void {
     switch (message.type) {
       case "joined":
@@ -125,11 +161,25 @@ export class NetworkClient {
         return;
 
       case "snapshot": {
+        // Amig nem tudjuk a SAJAT azonositonkat, a snapshotot eldobjuk.
+        //
+        // Kulonben nem tudnank kiszurni magunkat belole, es a sajat
+        // autonk MASODIK, "tavoli" autokent jelenne meg -- ami sosem
+        // tunne el, mert magunkra nem jon `playerLeft`. Nem elmeleti
+        // eset: halozati ingadozas mellett a `snapshot` megelozheti a
+        // `joined` uzenetet, es a jitteres teszt pontosan ezt produkalta
+        // (2 tavoli auto ket jatekosnal).
+        if (!this.playerId) return;
+
         // A sajat autonkat kiszurjuk: azt lokalisan szimulaljuk, a
-        // szerver visszakuldott valtozata csak visszarantana.
+        // szerver visszakuldott valtozata csak visszarantana. A frissen
+        // kilepett jatekosokat is (lasd recentlyLeft).
         this.snapshotCount++;
-        const others = message.players.filter((p) => p.id !== this.playerId);
-        this.remotes.ingest(others, performance.now());
+        const now = performance.now();
+        const others = message.players.filter(
+          (p) => p.id !== this.playerId && !this.hasRecentlyLeft(p.id, now),
+        );
+        this.remotes.ingest(others, now);
         return;
       }
 
@@ -148,6 +198,7 @@ export class NetworkClient {
         return;
 
       case "playerLeft":
+        this.recentlyLeft.set(message.playerId, performance.now());
         this.remotes.remove(message.playerId);
         this.events.onPlayerLeft?.(message.playerId);
         return;

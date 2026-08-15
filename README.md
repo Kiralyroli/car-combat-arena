@@ -15,10 +15,9 @@ egy arénában, arcade vezetéssel, fizikai ütközésekkel, fegyverekkel
     irányítás, önfelegyenesedés, per-kerék sérülés, élő hangoló panel
 -   **1--2. lépcső kész:** Sedan modell, követő kamera, aréna
     rámpákkal, boost
--   **3. lépcső folyamatban:** szerver, szobák, snapshot-szinkronizáció
-    és interpoláció megvan; hátra van a plauzibilitás-ellenőrzés, a
-    mesterséges késleltetéssel való tesztelés és a lecsatlakozás
-    finomítása
+-   **3. lépcső kész:** szerver, szobák, snapshot-szinkronizáció,
+    interpoláció, autók közti ütközés, szerver-oldali
+    plauzibilitás-ellenőrzés és késleltetéssel való tesztelés
 
 ## Indítás
 
@@ -66,7 +65,8 @@ npm run check:all
 ```
 
 Fizikai regressziós tesztek (gyorsulás, stabilitás, sérülés,
-önfelegyenesedés, kanyarodás) -- headless, Node alatt futnak.
+önfelegyenesedés, kanyarodás, tolatás), a spawn-pontok ellenőrzése és a
+szerver-oldali plauzibilitás-ellenőrzés -- headless, Node alatt futnak.
 
 ```bash
 npm run check:net
@@ -79,8 +79,26 @@ Futó szervert igényel.
 npm run check:mp
 ```
 
-Végponttól végpontig teszt két böngészőlappal. Futó szervert **és**
+Végponttól végpontig teszt két böngészővel. Futó szervert **és**
 klienst igényel.
+
+```bash
+npm run check:collision
+```
+
+Két autó fizikai ütközése: valódi lökés, azonnal látható visszajelzés,
+nincs átcsúszás.
+
+```bash
+npm run check:lag
+```
+
+Ugyanezek **200 ms mesterséges késleltetéssel**. A hálózati késleltetés
+a `Transport` réteg mögé kerül, és a böngészőben is bekapcsolható:
+`http://localhost:5173/?lag=200&jitter=40`.
+
+Ez nem opcionális extra: az ütközés-előrejelzés időzítése a
+késleltetéstől függ, és 0 ms-on hangolva élesben rossz lenne.
 
 ## Dokumentáció
 

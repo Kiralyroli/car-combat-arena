@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
+  checkPlausibility,
   PROTOCOL_VERSION,
   type ClientMessage,
   type ServerMessage,
@@ -18,6 +19,16 @@ import type { RoomManager } from "../rooms/roomManager";
  * szallitassal foglalkozik -- szoba- es jatiklogika nincs benne, azt a
  * Room / RoomManager vegzi.
  */
+
+/**
+ * Ennyi EGYMAS UTANI elutasitas utan atvesszuk a kliens allapotat.
+ *
+ * 20 Hz-es kuldesnel ez kb. fel masodperc: eleg rovid ahhoz, hogy egy
+ * valodi deszinkronizacio ne fagyassza be tartosan a jatekost, es eleg
+ * hosszu ahhoz, hogy egy teleport-hack ne legyen kenyelmes (minden
+ * ugrashoz fel masodperc "beragadast" kellene elviselnie).
+ */
+const MAX_CONSECUTIVE_REJECTS = 10;
 
 interface Connection {
   socket: WebSocket;
@@ -158,9 +169,50 @@ export class WsServer {
     if (message.seq <= player.lastSeq) return;
     player.lastSeq = message.seq;
 
-    // TODO (3. lepcso 5. pont): plauzibilitas-ellenorzes -- max sebesseg,
-    // pozicio-delta es palya-hatarok vizsgalata, mielott elfogadjuk.
+    // Plauzibilitas-ellenorzes (terv 15.4, 3. lepcso 5. pont).
+    //
+    // A kliens birtokolja a sajat mozgasat, tehat egy modositott kliens
+    // barmit allithat magarol. Ujraszimulalni nem tudjuk (az a teljes
+    // authoritative fizika lenne), de a fizikailag lehetetlent eldobjuk.
+    const now = performance.now();
+    const dtSeconds = (now - player.lastStateAt) / 1000;
+    player.lastStateAt = now;
+
+    const verdict = checkPlausibility(player.state, message.state, dtSeconds);
+
+    if (!verdict.ok) {
+      player.rejectedCount++;
+      player.consecutiveRejects++;
+
+      // Kiut a tartos elakadasbol: ha SOK allapot bukik el egymas utan,
+      // az valoszinuleg nem csalas, hanem deszinkronizacio (pl. hosszu
+      // halozati kimaradas). Ilyenkor egyszer atvesszuk az allapotot,
+      // kulonben a jatekos VEGLEG beragadna a tobbiek kepernyojen.
+      // Ez inkabb legyen ritka es NAPLOZOTT, mint csendes.
+      if (player.consecutiveRejects >= MAX_CONSECUTIVE_REJECTS) {
+        console.warn(
+          `[room ${conn.room.code}] ${conn.playerId.slice(0, 8)} ujraszinkronizalva ` +
+            `${player.consecutiveRejects} elutasitas utan (${verdict.reason})`,
+        );
+        player.state = message.state;
+        player.consecutiveRejects = 0;
+        return;
+      }
+
+      // ELDOBJUK: a jatekos az utoljara elfogadott helyen marad. Igy a
+      // hamis allapot nem jut el a tobbi klienshez -- a csalo legfeljebb
+      // a sajat kepernyojen "repul".
+      if (player.rejectedCount <= 3 || player.rejectedCount % 50 === 0) {
+        console.warn(
+          `[room ${conn.room.code}] ${conn.playerId.slice(0, 8)} allapota elutasitva ` +
+            `(${verdict.reason}: ${verdict.detail}) -- osszesen ${player.rejectedCount}`,
+        );
+      }
+      return;
+    }
+
     player.state = message.state;
+    player.consecutiveRejects = 0;
   }
 
   private handleDisconnect(conn: Connection): void {

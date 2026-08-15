@@ -18,3 +18,4 @@ export * from "./types";
 export * from "./wheelVisuals";
 export * from "./physics/rapier";
 export * from "./net/protocol";
+export * from "./net/plausibility";

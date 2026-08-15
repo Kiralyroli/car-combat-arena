@@ -94,8 +94,20 @@ async function main(): Promise<void> {
   });
 
   const roomFromUrl = location.hash.replace("#", "").trim();
+
+  // Mesterseges halozati kesleltetes fejlesztoi teszteleshez:
+  //   ?lag=200        -> 200 ms oda-vissza ut
+  //   ?lag=200&jitter=40
+  // Lasd terv 3. lepcso 6. pont: 150-200 ms mellett is simanak kell lennie.
+  const params = new URLSearchParams(location.search);
+  const lagMs = Number(params.get("lag") ?? 0);
+  const jitterMs = Number(params.get("jitter") ?? 0);
+  if (lagMs > 0) {
+    console.log(`Mesterseges kesleltetes: ${lagMs} ms (jitter ${jitterMs} ms)`);
+  }
+
   net
-    .connect(SERVER_URL, roomFromUrl || undefined)
+    .connect(SERVER_URL, roomFromUrl || undefined, lagMs, jitterMs)
     .catch((err: unknown) => {
       // A halozat hianya NEM allitja meg a jatekot: egyjatekos modban
       // tovabb lehet vezetni (ez a fejlesztes kozben is kenyelmesebb).
@@ -143,6 +155,11 @@ async function main(): Promise<void> {
     const frameDt = Math.min((now - last) / 1000, 0.25);
     last = now;
     fps = fps * 0.9 + (1 / Math.max(frameDt, 1e-4)) * 0.1;
+
+    // Az utkozes-joslat idozitese a MERT kesleltetesbol szarmazik
+    // (lasd rapier.ts holdDurationMs) -- ezert kell a fizikanak
+    // ismernie a pinget.
+    backend.setNetworkLatency(net.ping ?? 0);
 
     // A tavoli autok fizikai testeit a LEPTETES ELOTT kell a helyukre
     // vinni, kulonben egy lepessel elmaradnanak, es az utkozes

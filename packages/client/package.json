@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "screenshot": "tsx scripts/screenshot.ts",
     "check:mp": "tsx scripts/check-multiplayer.ts",
-    "check:collision": "tsx scripts/check-collision.ts"
+    "check:collision": "tsx scripts/check-collision.ts",
+    "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200"
   },
   "dependencies": {
     "@cca/shared": "*",

@@ -109,6 +109,14 @@ export interface VehicleBackend {
    * testek: minket ellokhetnek, de oket mi nem mozdithatjuk el
    * (a mozgasukat a tulajdonosuk szimulacioja hatarozza meg).
    */
+  /**
+   * A mert halozati oda-vissza ut (ms). Az utkozes-joslat idozitese
+   * EBBOL szarmazik: a joslatot addig kell tartani, amig a masik kliens
+   * allapota vissza nem er -- ez pedig egyenesen a kesleltetestol fugg.
+   * 0 = nincs halozat (egyjatekos).
+   */
+  setNetworkLatency(ms: number): void;
+
   addRemoteBody(id: string): void;
   removeRemoteBody(id: string): void;
   /**

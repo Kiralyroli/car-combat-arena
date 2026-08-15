@@ -13,6 +13,27 @@ import { WHEEL } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/**
+ * Mesterseges halozati kesleltetes (oda-vissza ut, ms).
+ *   LAG=200 npx tsx scripts/check-multiplayer.ts
+ * Lasd terv 3. lepcso 6. pont.
+ */
+function argOrEnv(name: string, envName: string): number {
+  const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (arg) return Number(arg.split("=")[1]);
+  return Number(process.env[envName] ?? 0);
+}
+
+const LAG_MS = argOrEnv("lag", "LAG");
+const JITTER_MS = argOrEnv("jitter", "JITTER");
+
+/** A query a hash ELE kerul: .../?lag=200#ABCD */
+function clientUrl(hash: string): string {
+  const query =
+    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  return `${CLIENT_URL}${query}${hash}`;
+}
+
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? "OK  " : "HIBA"} ${label} -- ${detail}`);
@@ -44,15 +65,45 @@ const ownPos = (page: Page): Promise<number[]> =>
   page.evaluate(() => (window as any).__spike.backend.getChassis().position as number[]);
 
 /**
- * Megvarja, amig a kocsi leert es megallapodott.
+ * Megvarja, amig a `page` altal KIRAJZOLT tavoli auto is megnyugszik.
  *
- * A spawn 2.5 m magasrol ejti be az autot (CHASSIS.spawn), es a
- * szerverhez csatlakozaskor is odateleportalunk. Ha a teszt mar ez
- * alatt "vezetni" kezd, a kocsi valojaban ZUHAN es oldalra csuszik --
- * a gazadasnak alig van hatasa, es a kerekek helyesen NEM gordulnek
- * (csuszo kerek nem gordul). Ilyenkor a merés a fizikat hibaztatna a
- * sajat rossz idozitese helyett.
+ * Nem eleg megvarni, hogy a masik jatekos kocsija tenylegesen megalljon:
+ * a megjelenites szandekosan le van maradva (interpolacios puffer), es a
+ * lemaradas a HALOZATI KESLELTETESSEL no. Fix alvassal ez 0 ms-on meg
+ * mukodik, 200 ms-on viszont mar nem -- a teszt olyankor egy meg mozgo
+ * kepet hasonlitana a mar allo valosaghoz. Ezert a megfigyelheto
+ * allapotra varunk, nem az orara.
  */
+async function waitForRemoteStable(page: Page, timeoutMs = 6000): Promise<boolean> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const w = window as any;
+        const view = w.__spike.view;
+        const ids: string[] = view.remoteCarIds();
+        if (ids.length === 0) return false;
+        const t = w.__spike.backend.getRemoteBody(ids[0]);
+        if (!t) return false;
+        const prev = w.__prevRemotePos as number[] | undefined;
+        w.__prevRemotePos = t.position;
+        if (!prev) return false;
+        return (
+          Math.hypot(
+            t.position[0] - prev[0],
+            t.position[1] - prev[1],
+            t.position[2] - prev[2],
+          ) < 0.01
+        );
+      },
+      null,
+      { timeout: timeoutMs, polling: 120 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Megvarja, amig a kocsi gyakorlatilag megall. */
 async function waitForStopped(page: Page, timeoutMs = 6000): Promise<boolean> {
   try {
@@ -67,6 +118,16 @@ async function waitForStopped(page: Page, timeoutMs = 6000): Promise<boolean> {
   }
 }
 
+/**
+ * Megvarja, amig a kocsi leert es megallapodott.
+ *
+ * A spawn 2.5 m magasrol ejti be az autot (CHASSIS.spawn), es a
+ * szerverhez csatlakozaskor is odateleportalunk. Ha a teszt mar ez
+ * alatt "vezetni" kezd, a kocsi valojaban ZUHAN es oldalra csuszik --
+ * a gazadasnak alig van hatasa, es a kerekek helyesen NEM gordulnek
+ * (csuszo kerek nem gordul). Ilyenkor a merés a fizikat hibaztatna a
+ * sajat rossz idozitese helyett.
+ */
 async function waitForSettled(page: Page, timeoutMs = 8000): Promise<boolean> {
   try {
     await page.waitForFunction(
@@ -101,9 +162,17 @@ async function openClient(hash: string): Promise<{ browser: Browser; page: Page 
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba] ${e.message}`));
-  await page.goto(`${CLIENT_URL}${hash}`);
-  // Meg kell varni a fizika + modell betoltest.
+  await page.goto(clientUrl(hash));
+  // Meg kell varni a fizika + modell betoltest...
   await page.waitForFunction(() => !!(window as any).__spike, null, { timeout: 20000 });
+  // ...es a TENYLEGES csatlakozast is: a `joined` uzenet hatasara a
+  // kliens a szerver altal kiosztott spawn-pontra teleportal, ami
+  // felulirna a teszt altal beallitott allapotot.
+  await page.waitForFunction(
+    () => !!(window as any).__spike?.net?.playerId,
+    null,
+    { timeout: 20000 },
+  );
   return { browser, page };
 }
 
@@ -164,22 +233,33 @@ async function main(): Promise<void> {
   // kovetes hibatlan. Allo helyzetben nincs mit elcsuszni, es az
   // interpolacios lemaradas is nulla, tehat szoros hatart szabhatunk.
   await waitForStopped(b);
-  await sleep(600);
+  await waitForRemoteStable(a);
 
-  const bTruth = await ownPos(b);
-  const after = (await remoteCars(a)).positions[0] ?? [];
+  // Addig varunk, amig a kirajzolt pozicio TENYLEG be nem er -- nem
+  // csak amig meg nem all. A ketto nem ugyanaz: a megjelenites
+  // megallhat ugy is, hogy meg 1-2 metert be kell hoznia, es a
+  // behozas ideje a kesleltetessel no. Ha nem er be, az utolso mert
+  // erteket jelentjuk, es az ellenorzes jogosan bukik.
+  let bTruth = await ownPos(b);
+  let after = (await remoteCars(a)).positions[0] ?? [];
+  let trackErr = Infinity;
+  for (let i = 0; i < 15; i++) {
+    bTruth = await ownPos(b);
+    after = (await remoteCars(a)).positions[0] ?? [];
+    trackErr = Math.hypot(
+      after[0] - bTruth[0],
+      after[1] - bTruth[1],
+      after[2] - bTruth[2],
+    );
+    if (trackErr < 0.3) break;
+    await sleep(200);
+  }
+
   const moved = Math.hypot(after[0] - before[0], after[2] - before[2]);
-
   check(
     "B tenylegesen elmozdult (input megerkezett)",
     moved > 0.5,
     `${moved.toFixed(2)} m elmozdulas A nezopontjabol`,
-  );
-
-  const trackErr = Math.hypot(
-    after[0] - bTruth[0],
-    after[1] - bTruth[1],
-    after[2] - bTruth[2],
   );
   check(
     "A altal rajzolt pozicio megallas utan egyezik B valos allapotaval",
@@ -220,7 +300,7 @@ async function main(): Promise<void> {
   // helyzetben a lemaradas nulla, tehat a ket ertek osszevetheto.
   await b.keyboard.up("w");
   await waitForStopped(b);
-  await sleep(400);
+  await waitForRemoteStable(a);
   const wsBefore = await wheelState(a);
   const posBefore = await ownPos(b);
 
@@ -228,7 +308,7 @@ async function main(): Promise<void> {
   await sleep(2000);
   await b.keyboard.up("w");
   await waitForStopped(b);
-  await sleep(400);
+  await waitForRemoteStable(a);
   const wsDuring = await wheelState(a);
   const posDuring = await ownPos(b);
 
@@ -283,24 +363,33 @@ async function main(): Promise<void> {
   // (interpolacios puffer), ezert a ket oldal mas-mas pillanatot irna
   // le, es a teszt a sajat idozitesi csuszasat merne.
   await waitForStopped(b);
-  await sleep(600);
+  await waitForRemoteStable(a);
 
-  const bSusp: number[] = await b.evaluate(() =>
-    (window as any).__spike.backend
-      .getWheels()
-      .map((w: any) => w.suspensionLength as number),
-  );
-  const wsNow = await wheelState(a);
   // A KONFIGBOL vesszuk, nem beegetve: korabban itt egy masolt 0.25
   // allt, es amikor a nyugalmi hossz 0.30-ra valtozott, a teszt
   // pontosan 0.05 m-es "hibat" jelzett minden keréknel -- a termekben
   // viszont semmi baj nem volt.
   const REST = WHEEL.suspensionRestLength;
-  const suspErrors: number[] =
-    wsNow?.wheelY.map((y: number, i: number) => {
-      const expected = wsNow.restY[i] - (bSusp[i] - REST);
-      return Math.abs(y - expected);
-    }) ?? [];
+
+  // Megvarjuk, amig a rugo-ertekek TENYLEG beernek. A test poziciója
+  // mar megnyugodhat akkor is, amikor az utolso rugo-frissites meg uton
+  // van -- kesleltetes es jitter mellett ez kulon idot vesz igenybe.
+  let suspErrors: number[] = [];
+  for (let i = 0; i < 15; i++) {
+    const bSusp: number[] = await b.evaluate(() =>
+      (window as any).__spike.backend
+        .getWheels()
+        .map((w: any) => w.suspensionLength as number),
+    );
+    const wsNow = await wheelState(a);
+    suspErrors =
+      wsNow?.wheelY.map((y: number, j: number) => {
+        const expected = wsNow.restY[j] - (bSusp[j] - REST);
+        return Math.abs(y - expected);
+      }) ?? [];
+    if (suspErrors.length === 4 && suspErrors.every((e) => e < 0.03)) break;
+    await sleep(200);
+  }
   check(
     "tavoli rugohosszak egyeznek B valos ertekeivel",
     suspErrors.length === 4 && suspErrors.every((e: number) => e < 0.03),

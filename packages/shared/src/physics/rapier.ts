@@ -63,11 +63,19 @@ const REMOTE_BODY_SNAP_DISTANCE = 12;
  * SEBESSEG hat (elorecsatolas), poziciohiba-korrekcio nem, igy a lokes
  * megmarad addig, amig a hiteles allapot be nem eri.
  *
- * Az ertek nagysagrendje: oda-vissza ut + snapshot-utem + interpolacios
- * puffer. Bougyan halozaton ennel tobb is lehet; a tartas vege utan a
- * korrekcio fokozatosan (BLEND) ter vissza, tehat a tulzas nem ugrik.
+ * Ez csak az ALAP: a tenyleges tartas ehhez hozzaadja a mert halozati
+ * kesleltetest (lasd holdDurationMs). Rogzitett ertek nem mukodne, mert
+ * a tartas EPPEN a kesleltetest hivatott athidalni. Meresek szerint az
+ * utkozes utan a halozat ennyi ido alatt eri utol az esemenyt:
+ *   ping  80 ms ->  458-687 ms
+ *   ping 300 ms ->  837-948 ms
+ *   ping 530 ms -> 1192-1410 ms
+ * Vagyis nagyjabol "ping + 600..880 ms". A 600 ms-os FIX ertek 200 ms-os
+ * halozaton mar joval a halozat utolerese elott visszarantotta a
+ * kocsit -- ez volt a kesleltetett tesztelés elso valodi talalata.
+ * Az alap ezert a felso becslesbol jon.
  */
-const REMOTE_COLLISION_HOLD_MS = 600;
+const REMOTE_COLLISION_HOLD_BASE_MS = 600;
 
 /**
  * Egy erintkezes-sorozat alatt legfeljebb ennyi ideig (ms) tartjuk a
@@ -77,11 +85,22 @@ const REMOTE_COLLISION_HOLD_MS = 600;
  * autonak, minden lepesben uj utkozest eszlelunk, a tartas ujraindul,
  * es a test SOHA nem all vissza a hiteles pozicioba. Meresben igy 5 m-es
  * tartos elteres alakult ki, es a ket auto egymasba csuszott.
+ *
+ * Ez is a tartas fole szamolodik, tehat szinten kesleltetes-fuggo.
  */
-const REMOTE_COLLISION_MAX_HOLD_MS = 1000;
+const REMOTE_COLLISION_MAX_HOLD_EXTRA_MS = 600;
 
-/** A tartas utan ennyi ido alatt (ms) er vissza a korrekcio a teljes erejere. */
-const REMOTE_COLLISION_BLEND_MS = 400;
+/**
+ * A tartas utan ennyi ido alatt (ms) er vissza a korrekcio a teljes
+ * erejere.
+ *
+ * Nem mindegy, milyen GYORSAN: ha a tartas azelott jar le, hogy a
+ * halozat utolerte volna az utkozest, a korrekcio visszahuzza a kocsit,
+ * es a jatekos ezt latja "rugozasnak". Hosszabb visszateressel ez a
+ * visszahuzas lassu es eszrevehetetlen marad. 400 ms-nal meresben ~0.9 m
+ * lathato visszahuzas jelentkezett 100 ms-os halozaton.
+ */
+const REMOTE_COLLISION_BLEND_MS = 900;
 
 /**
  * A tartas alatt a lokalis joslat legfeljebb ennyivel (m) terhet el a
@@ -157,6 +176,9 @@ export class RapierBackend implements VehicleBackend {
 
   /** Tavoli jatekosok testei es a hozzajuk tartozo jóslat-allapot. */
   private remoteBodies = new Map<string, RemoteBody>();
+
+  /** Mert halozati oda-vissza ut (ms) -- lasd setNetworkLatency. */
+  private networkLatencyMs = 0;
 
   private damage: WheelDamage[] = WHEEL_LAYOUT.map(() => ({ ...HEALTHY_WHEEL }));
   private stepMsAvg = 0;
@@ -798,6 +820,36 @@ export class RapierBackend implements VehicleBackend {
     });
   }
 
+  setNetworkLatency(ms: number): void {
+    // Vedelem a kiugro ertekek ellen: egy-egy kesve erkezo csomag ne
+    // huzza fel percekre a tartast.
+    const value = clamp(ms, 0, 1000);
+
+    // Felfele AZONNAL kovet, lefele csak lassan.
+    //
+    // A ping meresrol meresre ingadozik. Ha a pillanatnyi erteket
+    // hasznalnank, egy lefele kilengés kozben megrovidulne a tartas --
+    // eppen egy utkozes kellos kozepen --, es a kocsi lathatoan
+    // visszaszivodna. A rovid tartas latvanyos hiba, a tul hosszu
+    // viszont csak kesobbi osszesimulast jelent, ezert erdemes a
+    // biztonsagosabb (hosszabb) irany fele tevedni.
+    this.networkLatencyMs =
+      value > this.networkLatencyMs
+        ? value
+        : this.networkLatencyMs * 0.99 + value * 0.01;
+  }
+
+  /**
+   * Mennyi ideig tartsuk a lokalis utkozes-joslatot (ms).
+   *
+   * A tartasnak addig kell tartania, amig a masik kliens allapota
+   * vissza nem er -- ez pedig egyenesen a kesleltetestol fugg, ezert
+   * NEM lehet rogzitett szam (lasd REMOTE_COLLISION_HOLD_BASE_MS).
+   */
+  private holdDurationMs(): number {
+    return REMOTE_COLLISION_HOLD_BASE_MS + this.networkLatencyMs;
+  }
+
   getRemoteBody(id: string): Transform | null {
     const entry = this.remoteBodies.get(id);
     if (!entry) return null;
@@ -942,9 +994,11 @@ export class RapierBackend implements VehicleBackend {
         // Uj erintkezes-sorozat kezdete?
         if (entry.holdUntil === 0) entry.holdStartedAt = now;
         // Tartos nekitamaszkodasnal NEM hosszabbitunk a vegtelensegig --
-        // lasd REMOTE_COLLISION_MAX_HOLD_MS.
-        if (now - entry.holdStartedAt < REMOTE_COLLISION_MAX_HOLD_MS) {
-          entry.holdUntil = now + REMOTE_COLLISION_HOLD_MS;
+        // lasd REMOTE_COLLISION_MAX_HOLD_EXTRA_MS.
+        const maxHold =
+          this.holdDurationMs() + REMOTE_COLLISION_MAX_HOLD_EXTRA_MS;
+        if (now - entry.holdStartedAt < maxHold) {
+          entry.holdUntil = now + this.holdDurationMs();
         }
       }
     }

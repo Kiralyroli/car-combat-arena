@@ -13,6 +13,27 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/**
+ * Mesterseges halozati kesleltetes (oda-vissza ut, ms).
+ *   LAG=200 npx tsx scripts/check-collision.ts
+ * Lasd terv 3. lepcso 6. pont.
+ */
+function argOrEnv(name: string, envName: string): number {
+  const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (arg) return Number(arg.split("=")[1]);
+  return Number(process.env[envName] ?? 0);
+}
+
+const LAG_MS = argOrEnv("lag", "LAG");
+const JITTER_MS = argOrEnv("jitter", "JITTER");
+
+/** A query a hash ELE kerul: .../?lag=200#ABCD */
+function clientUrl(hash: string): string {
+  const query =
+    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  return `${CLIENT_URL}${query}${hash}`;
+}
+
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? "OK  " : "HIBA"} ${label} -- ${detail}`);
@@ -34,8 +55,18 @@ async function openClient(hash: string): Promise<{ browser: Browser; page: Page 
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba] ${e.message}`));
-  await page.goto(`${CLIENT_URL}${hash}`);
+  await page.goto(clientUrl(hash));
   await page.waitForFunction(() => !!(window as any).__spike, null, { timeout: 20000 });
+  // Meg kell varni a TENYLEGES csatlakozast is, nem eleg a betoltes.
+  // A `joined` uzenet hatasara a kliens a szerver altal kiosztott
+  // spawn-pontra teleportal -- ha a teszt ez elott allitja be a
+  // jelenetet, a csatlakozas visszarantja a kocsit, es az utkozes meg
+  // sem tortenik. Kesleltetes mellett ez konnyen becsuszik.
+  await page.waitForFunction(
+    () => !!(window as any).__spike?.net?.playerId,
+    null,
+    { timeout: 20000 },
+  );
   return { browser, page };
 }
 
@@ -134,6 +165,17 @@ async function main(): Promise<void> {
     );
   };
 
+  // A jelenet felallitasa (placeFacing) TELEPORTALJA az autokat egy
+  // tetszoleges helyre. A szerver plauzibilitas-ellenorzese ezt --
+  // helyesen -- elutasitja, es csak nehany uzenet utan szinkronizal
+  // ujra; kesleltetes es jitter mellett ez tovabb tart. Valodi jatekban
+  // ilyen ugras nincs (az ujraszuletes engedelyezett), tehat ez a teszt
+  // sajat felallasi koltsege -- megvarjuk, nem pedig alszunk ra.
+  for (let i = 0; i < 30; i++) {
+    if ((await trackError()) < 1) break;
+    await sleep(300);
+  }
+
   let maxIdleError = 0;
   for (let i = 0; i < 5; i++) {
     await sleep(600);
@@ -160,12 +202,27 @@ async function main(): Promise<void> {
       // A kiindulopontot a BECSAPODAS pillanataban rogzitjuk, nem a
       // figyelo inditasakor -- kulonben a masik auto teljes nekifutasat
       // mernenk, nem a lokest.
+      var id = view.remoteCarIds()[0];
       window.__imp = { impactAt: 0, prevSpeed: 0, startZ: 0,
-                       maxAway: 0, worstPullback: 0 };
+                       maxAway: 0, worstPullback: 0, maxLead: 0 };
       function tick() {
         var d = window.__imp;
         var sp = s.backend.getTelemetry().speedKmh;
         var z = car.wrapper.position.z;
+
+        // Mennyivel jar a KIRAJZOLT auto a hiteles (halozati) pozicio
+        // elott. EZT szabalyozzuk kozvetlenul (a joslat elteres-korlatja),
+        // ezert ez a stabil mutatoja annak, hogy a joslat mukodik-e --
+        // szemben a 700 ms alatt megtett uttal, ami a kepkockasebesseg
+        // es a becsapodasi sebesseg ingadozasatol fuggoen szelesen szor.
+        if (d.impactAt) {
+          var net = null;
+          try { net = s.net.remotes.sample(id, performance.now()); } catch (e) {}
+          if (net) {
+            var lead = Math.abs(z - net.position.z);
+            if (lead > d.maxLead) d.maxLead = lead;
+          }
+        }
         if (!d.impactAt && d.prevSpeed > 25 && sp < d.prevSpeed - 8) {
           d.impactAt = performance.now();
           d.startZ = z;
@@ -257,8 +314,12 @@ async function main(): Promise<void> {
     `${gapOnB.toFixed(2)} m`,
   );
 
-  const imp: { impactAt: number; maxAway: number; worstPullback: number } =
-    await a.evaluate("window.__imp");
+  const imp: {
+    impactAt: number;
+    maxAway: number;
+    worstPullback: number;
+    maxLead: number;
+  } = await a.evaluate("window.__imp");
 
   // A lokes ne csak "valamennyire" latszodjon: a becsapodas utani rovid
   // ablakban a KIRAJZOLT elmozdulasnak a VALODI elmozdulas erdemi
@@ -269,10 +330,19 @@ async function main(): Promise<void> {
     bAfter[0] - bBefore[0],
     bAfter[2] - bBefore[2],
   );
+  // A joslat mukodesenek STABIL mutatoja: mennyivel jart a kirajzolt
+  // auto a hiteles pozicio elott. Ez az, amit kozvetlenul szabalyozunk
+  // (REMOTE_PREDICTION_MAX_OFFSET = 2.5 m), tehat kesleltetestol
+  // fuggetlenul el kell erni egy erdemi reszet.
+  //
+  // Korabban a becsapodas utani 700 ms-ban megtett utat mertuk, de az
+  // a kepkockasebesseg es a becsapodasi sebesseg ingadozasatol fuggoen
+  // 2.5 es 6.6 m kozott szort UGYANAZON a beallitason -- alkalmatlan
+  // volt kuszobot huzni ra.
   check(
-    "a lokes azonnal lathato (nem csak a halozati valasz utan)",
-    imp.impactAt > 0 && imp.maxAway > bTotalMoved * 0.3,
-    `${imp.maxAway.toFixed(2)} m latszott a becsapodas utani 700 ms-ban, a teljes valodi elmozdulas ${bTotalMoved.toFixed(2)} m`,
+    "a joslat erdemi elonyt epit a hiteles poziciohoz kepest",
+    imp.impactAt > 0 && imp.maxLead > 1.0,
+    `${imp.maxLead.toFixed(2)} m elony (korlat 2.5 m), a becsapodas utani 700 ms-ban ${imp.maxAway.toFixed(2)} m latszott a teljes ${bTotalMoved.toFixed(2)} m-bol`,
   );
   // Ez a ket muterme jelenne meg "keslelteteskent" a jatekosnak: vagy
   // a lokes szivodik vissza, mielott a halozat beerne, vagy a tul
