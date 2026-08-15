@@ -47,7 +47,7 @@ function player(t: number): PlayerSnapshot {
     aimYaw: 0,
     aimPitch: 0,
     hp: 100,
-    boostMs: 0,
+    boostGrants: 0,
   };
 }
 

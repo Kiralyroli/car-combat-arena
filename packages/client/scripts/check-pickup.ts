@@ -56,8 +56,9 @@ async function openClient(hash: string): Promise<{ browser: Browser; page: Page 
   return { browser, page };
 }
 
-const boostMs = (page: Page): Promise<number> =>
-  page.evaluate(() => (window as any).__spike.net.boostMs as number);
+/** A boost-tartaly telitettsege (0..1) a SAJAT kliensen. */
+const boostFraction = (page: Page): Promise<number> =>
+  page.evaluate(() => (window as any).__spike.boostTank.fraction as number);
 
 /** Eppen felveheto-e az adott indexu pickup, a kliens szerint. */
 const available = (page: Page, index: number): Promise<boolean | undefined> =>
@@ -88,72 +89,74 @@ async function main(): Promise<void> {
   await b.evaluate(() => (window as any).__spike.backend.reset({ x: -24, y: 1.0, z: -24 }));
   await sleep(3000);
 
-  const beforeA = await boostMs(a);
-  check("A-nak indulaskor nincs tullokese", beforeA === 0, `${beforeA} ms`);
+  const full = await boostFraction(a);
+  check("A teli tartallyal indul", full > 0.99, ((full*100).toFixed(0))+"%");
 
   const availableBefore = await available(b, 0);
   check(
     "a pickup kezdetben felveheto (B is igy latja)",
     availableBefore === true,
-    `${availableBefore}`,
+    String(availableBefore),
   );
 
-  // A a pickupra hajt. Csak elore kell mennie 8 m-t.
+  // A LEURITI a tartalyt: Shiftet tartva, allo helyzetben. (Gaz nem
+  // kell hozza -- a boost a Shiftbol fogy, nem a sebessegbol.)
+  //
+  // A tartas HOSSZABB, mint amennyi a tartaly kiuritesehez elegendo
+  // lenne valos idoben: a boost SZIMULALT idohoz kotodik (a fizikai
+  // lepesekhez), a headless renderelo pedig lassabban szimulal a valos
+  // idonel -- 3.5 s falioran csak ~1.9 s szimulalt idot jelentett, es a
+  // tartaly 62%-on maradt. A pontos aranyt a check-boost-tank.ts meri
+  // determinisztikusan; itt csak az a kerdes, hogy FOGY-e.
+  await a.keyboard.down("Shift");
+  await sleep(7000);
+  await a.keyboard.up("Shift");
+  const drained = await boostFraction(a);
+  check(
+    "a Shift fogyasztja a tartalyt",
+    drained < full - 0.25,
+    ((full*100).toFixed(0))+"% -> "+((drained*100).toFixed(0))+"%",
+  );
+
+  // A a pickupra hajt (8 m elore).
   await a.keyboard.down("w");
-  let picked = 0;
+  let refilled = drained;
   for (let i = 0; i < 25; i++) {
     await sleep(200);
-    picked = await boostMs(a);
-    if (picked > 0) break;
+    refilled = await boostFraction(a);
+    if (refilled > drained + 0.1) break;
   }
   await a.keyboard.up("w");
 
-  check("A felvette a boostot", picked > 0, `${picked} ms hatralevo`);
+  // A pontos 50%-ot a check-boost-tank.ts meri determinisztikusan; itt
+  // az a kerdes, hogy a LANC mukodik-e, ezert laza a hatar (a felvetel
+  // es a meres kozott is telik ido, es a Shift mar nincs nyomva).
+  check(
+    "a pickup visszatolti a tartalyt",
+    refilled > drained + 0.3,
+    ((drained*100).toFixed(0))+"% -> "+((refilled*100).toFixed(0))+"%",
+  );
 
   // A SZERVER dontott: B-nek is el kell tunnie a pickupnak. Ha a
-  // felvetel kliens-oldali lenne, B tovabbra is felvehetőnek latna.
-  let availableAfter: boolean | undefined = true;
+  // felvetel kliens-oldali lenne, B tovabbra is felvehetonek latna.
+  let availableAfter = true;
   for (let i = 0; i < 15; i++) {
-    availableAfter = await available(b, 0);
-    if (availableAfter === false) break;
+    availableAfter = (await available(b, 0)) === true;
+    if (!availableAfter) break;
     await sleep(200);
   }
   check(
     "a pickup B szemszogebol is eltunt",
-    availableAfter === false,
-    `${availableAfter} -- a szerver dontott, nem A kliense`,
-  );
-
-  // A tullokes MERT hatasat (gyorsulas) SZANDEKOSAN nem itt merjuk,
-  // hanem a check-pickups.ts-ben, headlessen.
-  //
-  // Itt ugyanis a palya rontja el a merest: ket futast kell
-  // osszehasonlitani, es a savok akadalyai (ladak) nagyobb kulonbseget
-  // okoznak, mint maga a boost. Meressel 94 vs 55 km/h ket, akadaly-
-  // mentesnek hitt savon, es 49 vs 47 km/h ugyanazon a savon, ahol
-  // mindket futas ladaba utkozott -- vagyis a szam nem a boostrol
-  // szolt. Egy alkalommal ugy is "atment", hogy a viszonyitasi futas
-  // volt tort (2 vs 50 km/h, mert A beleszuletett B autojaba); egy
-  // ilyen ellenorzes rosszabb a semminel.
-  //
-  // Amit ITT lehet ertelmesen merni, az a LANC: a szerver konyveli-e a
-  // felvetelt, latja-e a masik jatekos, es visszajon-e a pickup.
-  const remaining = await boostMs(a);
-  check(
-    "a tullokes a felvetel utan is tart",
-    remaining > 0,
-    `${remaining.toFixed(0)} ms van hatra`,
+    !availableAfter,
+    "a szerver dontott, nem A kliense",
   );
 
   let respawned = false;
   for (let i = 0; i < 40; i++) {
-    if ((await available(b, 0)) === true) {
-      respawned = true;
-      break;
-    }
+    if ((await available(b, 0)) === true) { respawned = true; break; }
     await sleep(500);
   }
-  check("a felvett pickup kesobb ujra felbukkan", respawned, `${respawned}`);
+  check("a felvett pickup kesobb ujra felbukkan", respawned, String(respawned));
 
   console.log(
     failures === 0 ? "\n=== Minden teszt OK ===" : `\n=== ${failures} teszt ELBUKOTT ===`,

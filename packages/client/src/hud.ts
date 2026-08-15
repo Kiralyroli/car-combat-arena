@@ -32,8 +32,8 @@ export class Hud {
     fps: number,
     pingMs: number | null,
     hp: number | null,
-    /** A felvett tullokesbol hatralevo ido (ms); 0 = nincs. */
-    boostMs = 0,
+    /** A boost-tartaly telitettsege (0..1). */
+    boostFraction = 1,
   ): void {
     // 10 Hz eleg a HUD-nak, ne terhelje a fo ciklust.
     const now = performance.now();
@@ -48,6 +48,14 @@ export class Hud {
     const pingClass =
       pingMs === null ? "" : pingMs < 60 ? "good" : pingMs < 120 ? "warn" : "bad";
     const fpsClass = fps >= 55 ? "good" : fps >= 30 ? "warn" : "bad";
+
+    // A boost-sav MINDIG latszik, nem csak boostolas kozben: a boost
+    // korlatos eroforras, tehat a jatekosnak MIELOTT ranyomna kell
+    // tudnia, mennyi maradt. Szinezes: kek = bosegesen van, sarga =
+    // fogytan, piros = szinte ures.
+    const boostPercent = Math.max(0, Math.min(1, boostFraction)) * 100;
+    const boostColor =
+      boostPercent > 50 ? "#39d0ff" : boostPercent > 20 ? "#e3b341" : "#f85149";
 
     // A HP a SZERVERTOL jon (o donti el a sebzest), ezert halozat nelkul
     // nincs ertelmes erteke.
@@ -73,7 +81,15 @@ export class Hud {
       <div class="row"><span class="label">verzio</span><span class="val">${this.backendVersion}</span></div>
       <hr />
       <div class="row"><span class="label">HP</span><span class="val ${hpClass}">${hpText}</span></div>
-      ${boostMs > 0 ? `<div class="row"><span class="label">BOOST</span><span class="val" style="color:#39d0ff">${(boostMs / 1000).toFixed(1)} s</span></div>` : ""}
+      <div class="row">
+        <span class="label">BOOST</span>
+        <span class="val">
+          <span style="display:inline-block;width:70px;height:8px;background:#22272e;border:1px solid #3a4048;vertical-align:middle">
+            <span style="display:block;height:100%;width:${(boostPercent).toFixed(0)}%;background:${boostColor}"></span>
+          </span>
+          <span style="color:${boostColor};margin-left:6px">${boostPercent.toFixed(0)}%</span>
+        </span>
+      </div>
       <div class="row"><span class="label">sebesseg</span><span class="val">${t.speedKmh.toFixed(0)} km/h</span></div>
       <div class="row"><span class="label">kerek foldon</span><span class="val">${t.wheelsOnGround} / 4</span></div>
       <hr />

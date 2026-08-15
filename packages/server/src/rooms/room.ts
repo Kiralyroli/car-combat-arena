@@ -15,7 +15,7 @@ import {
   SPAWN_POINTS,
   PICKUP_POINTS,
   PICKUP_RESPAWN_MS,
-  BOOST_PICKUP_DURATION_MS,
+
   withinPickupRange,
   type ClientState,
   type PlayerSnapshot,
@@ -71,10 +71,13 @@ export interface ServerPlayer {
    */
   deadSince: number | null;
   /**
-   * Meddig (performance.now) tart a felvett tullokes; 0, ha nincs.
-   * A snapshotba a HATRALEVO idot tesszuk -- lasd PlayerSnapshot.
+   * Hany boost-visszatoltest kapott eddig (monoton no).
+   *
+   * A tartaly maga a kliensnel van (lasd BoostTank), a szerver csak a
+   * KIOSZTOTT visszatoltesek szamat tartja -- ebbol a kliens
+   * onkorrekcios modon tudja, mennyit kell toltenie.
    */
-  boostUntil: number;
+  boostGrants: number;
 }
 
 /** Rendezett parkulcs, hogy (a,b) es (b,a) ugyanaz legyen. */
@@ -131,7 +134,7 @@ export class Room {
       consecutiveRejects: 0,
       lastFiredAt: 0,
       deadSince: null,
-      boostUntil: 0,
+      boostGrants: 0,
     };
     this.players.set(id, player);
     return player;
@@ -239,9 +242,9 @@ export class Room {
         if (!withinPickupRange(player.state.position, PICKUP_POINTS[i])) continue;
 
         this.pickupReadyAt[i] = now + PICKUP_RESPAWN_MS;
-        // A felvetel UJRAINDITJA a tullokest, nem hosszabbitja: igy a
-        // pickupok halmozasaval nem lehet vegtelen boostot gyujteni.
-        player.boostUntil = now + BOOST_PICKUP_DURATION_MS;
+        // A visszatoltest a KLIENS vegzi el (nala van a tartaly); a
+        // szerver csak konyveli, hogy jar neki egy.
+        player.boostGrants++;
 
         console.log(
           `[room ${this.code}] ${player.id.slice(0, 8)} felvette a ${i}. boostot`,
@@ -425,7 +428,7 @@ export class Room {
         aimYaw: player.state.aimYaw,
         aimPitch: player.state.aimPitch,
         hp: player.hp,
-        boostMs: Math.max(0, Math.round(player.boostUntil - performance.now())),
+        boostGrants: player.boostGrants,
       });
     }
     return snapshot;

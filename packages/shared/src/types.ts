@@ -8,15 +8,14 @@ export interface DriveInput {
   /** -1 (balra) .. 1 (jobbra) */
   steer: number;
   handbrake: boolean;
-  boost: boolean;
   /**
-   * Felvett tullokes (boost pickup) aktiv-e.
+   * Boost aktiv-e ebben a lepesben.
    *
-   * A normal boost FOLE szorzodik, nem helyette (lasd pickups.ts), es
-   * a Shifttol FUGGETLENUL hat -- gaz kell hozza, de boost nem. Ezert
-   * kulon mezo, nem a `boost` erositese.
+   * A boost KORLATOS eroforras: a hivo csak akkor allitja true-ra, ha
+   * van meg a tartalyban (lasd BoostTank a kliensen). A fizika maga
+   * nem ismeri a tartalyt -- itt csak a "most boostol" tenye latszik.
    */
-  superBoost: boolean;
+  boost: boolean;
 }
 
 export const NEUTRAL_INPUT: DriveInput = {
@@ -25,7 +24,6 @@ export const NEUTRAL_INPUT: DriveInput = {
   steer: 0,
   handbrake: false,
   boost: false,
-  superBoost: false,
 };
 
 /**

@@ -63,10 +63,10 @@ export class NetworkClient {
    */
   ownWheels: WheelDamage[] | null = null;
   /**
-   * A felvett tullokesbol hatralevo ido (ms); 0, ha nincs.
-   * A fo ciklus ebbol allitja be a `superBoost` inputot.
+   * Hany boost-visszatoltest osztott ki nekunk eddig a szerver.
+   * A tartaly ebbol tolt (lasd BoostTank.syncGrants).
    */
-  boostMs = 0;
+  boostGrants = 0;
   /**
    * A repulo rakétak pufferelve -- UGYANAZON az idovonalon, mint a
    * tavoli autok (lasd remoteRockets.ts).
@@ -223,9 +223,7 @@ export class NetworkClient {
         const own = message.players.find((p) => p.id === this.playerId);
         if (own) {
           this.hp = own.hp;
-          // A felvett tullokes hatralevo ideje -- a fo ciklus ebbol
-          // allitja be a `superBoost` inputot.
-          this.boostMs = own.boostMs;
+          this.boostGrants = own.boostGrants;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
           // FIZIKAI hatas is (tapadas, kerek-sugar), ezert a hivo
           // beallitja a sajat jarmuvunkon. SZANDEKOSAN nem

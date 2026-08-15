@@ -12,8 +12,8 @@
  * Futtatas: npm run check:pickups
  */
 import {
-  BOOST_PICKUP_DURATION_MS,
-  BOOST_PICKUP_MULTIPLIER,
+  BOOST_CAPACITY_MS,
+  BOOST_REFILL_MS,
   PICKUP_POINTS,
   PICKUP_RADIUS,
   PICKUP_RESPAWN_MS,
@@ -38,14 +38,21 @@ async function main(): Promise<void> {
   console.log("Szabalyok:");
 
   check(
-    "a tullokes a normal boost FOLE szorzodik",
-    BOOST_PICKUP_MULTIPLIER > 1,
-    `${DRIVE.boostMultiplier} * ${BOOST_PICKUP_MULTIPLIER} = ${(DRIVE.boostMultiplier * BOOST_PICKUP_MULTIPLIER).toFixed(2)}-szoros hajtoero`,
+    "a pickup a kapacitas felet tolti vissza",
+    Math.abs(BOOST_REFILL_MS - BOOST_CAPACITY_MS * 0.5) < 1,
+    `${BOOST_CAPACITY_MS} ms tartaly, ${BOOST_REFILL_MS} ms visszatoltes`,
   );
   check(
-    "az ujra-felbukkanas hosszabb, mint a hatas",
-    PICKUP_RESPAWN_MS > BOOST_PICKUP_DURATION_MS,
-    `${PICKUP_RESPAWN_MS} ms varakozas / ${BOOST_PICKUP_DURATION_MS} ms hatas -- kulonben folyamatosan boostolni lehetne`,
+    "ket pickup teletolti az ures tartalyt",
+    BOOST_REFILL_MS * 2 >= BOOST_CAPACITY_MS,
+    "50% + 50% = 100%",
+  );
+  // Ha a pickup hamarabb jonne vissza, mint amennyi ido alatt a teljes
+  // tartaly elfogy, egy pickup korul korozve VEGTELEN boost lenne.
+  check(
+    "az ujra-felbukkanas hosszabb, mint egy teljes tartaly elhasznalasa",
+    PICKUP_RESPAWN_MS > BOOST_CAPACITY_MS,
+    `${PICKUP_RESPAWN_MS} ms varakozas / ${BOOST_CAPACITY_MS} ms boost`,
   );
 
   console.log("\nFelvetel:");
@@ -148,7 +155,7 @@ async function main(): Promise<void> {
       : tooClose.join("; "),
   );
 
-  console.log("\nA tullokes valodi hatasa (mert gyorsulas):");
+  console.log("\nA boost valodi hatasa (mert gyorsulas):");
 
   // SZANDEKOSAN itt merjuk, nem a bongeszos e2e-ben.
   //
@@ -158,20 +165,13 @@ async function main(): Promise<void> {
   // AKADALYMENTESNEK hitt savon, illetve 49 vs 47 km/h ugyanazon a
   // savon, ahol mindket futas ladaba utkozott. Headlessen a meres
   // determinisztikus es pontosan azt meri, ami a kerdes.
-  const plain = await accelerate(false, false);
-  const boosted = await accelerate(true, false);
+  const plain = await accelerate(false);
+  const boosted = await accelerate(true);
 
   check(
-    "a tullokes erdemben gyorsit",
+    "a boost erdemben gyorsit",
     boosted > plain * 1.2,
-    `${plain.toFixed(0)} -> ${boosted.toFixed(0)} km/h (${(((boosted - plain) / plain) * 100).toFixed(0)}%)`,
-  );
-
-  const withShift = await accelerate(false, true);
-  check(
-    "a Shift-boost tovabbra is onmagaban is hat",
-    withShift > plain * 1.2,
-    `${withShift.toFixed(0)} km/h -- a pickup NEM valtja ki a normal boostot`,
+    `${plain.toFixed(0)} -> ${boosted.toFixed(0)} km/h (${(((boosted - plain) / plain) * 100).toFixed(0)}%, szorzo ${DRIVE.boostMultiplier})`,
   );
 
   console.log(
@@ -186,14 +186,14 @@ async function main(): Promise<void> {
  * A spawn ugyanaz a szabad sarok, amit a tobbi headless meres hasznal
  * (lasd check-turning.ts) -- az arena kozepen a kocsi akadalyba erne.
  */
-async function accelerate(superBoost: boolean, boost: boolean): Promise<number> {
+async function accelerate(boost: boolean): Promise<number> {
   const backend = new RapierBackend();
   await backend.init();
   backend.reset({ x: 25, y: 2.5, z: 25 });
   // Leeres es megnyugvas, mielott gazt adnank.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, NEUTRAL_INPUT);
   for (let i = 0; i < 150; i++) {
-    backend.step(FIXED_DT, { ...NEUTRAL_INPUT, throttle: 1, boost, superBoost });
+    backend.step(FIXED_DT, { ...NEUTRAL_INPUT, throttle: 1, boost });
   }
   return backend.getTelemetry().speedKmh;
 }

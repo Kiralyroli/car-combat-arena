@@ -6,28 +6,36 @@
  * pickupot venne fel a sajat kepernyojen, es mindketto jogosnak
  * erezne.
  *
- * MIERT IDOZITETT EXTRA, es nem maga a boost:
- * a Shift-boost mar letezik es KORLATLAN (DRIVE.boostMultiplier). Egy
- * olyan pickup, ami "boostot ad", ezert semmit nem jelentene. A pickup
- * helyette egy erosebb, IDOZITETT tullokest ad a normal boost fole --
- * igy van ertelme erte elmenni, es az alap vezetes valtozatlan marad.
- * (Ha a boost kesobb korlatozott eroforras lesz, ez a modul a
- * termeszetes helye annak is.)
+ * A BOOST KORLATOS EROFORRAS: a Shift addig hat, amig van a
+ * tartalyban, es a pickup tolti vissza. Korabban a boost korlatlan
+ * volt, es a pickup egy kulon "tullokest" adott fole -- de korlatlan
+ * boost mellett a visszatoltesnek nincs ertelme, ezert a ketto egyben
+ * valtozott meg.
+ *
+ * A TARTALY a kliensnel van, a VISSZATOLTES a szervernel: a boost
+ * fogyasztasa a vezetes resze (terv 15.4: a sajat mozgas a kliense,
+ * nulla input laggel), a felvetel viszont kozos eroforras, amirol
+ * csak a szerver dönthet.
  */
 
 /** Ekkora sugaron belul (m) veszi fel az auto. */
 export const PICKUP_RADIUS = 3;
 
-/** Meddig hat a felvett tullokes (ms). */
-export const BOOST_PICKUP_DURATION_MS = 4000;
-
 /**
- * A tullokes szorzoja a NORMAL boost fole.
+ * Mennyi boost fer a tartalyba, BOOSTOLASSAL TOLTOTT idoben merve (ms).
  *
- * A ketto osszeszorzodik: 1.9 * 1.5 = 2.85-szoros hajtoero teljes
- * gazzal. Erezheto, de nem uralja a merkozest.
+ * A boost korlatos eroforras: a Shift addig hat, amig van benne. 5 s
+ * folyamatos boost eleg egy elozeshez vagy egy menekuleshez, de nem
+ * lehet vegig nyomva tartani -- e nelkul a pickupnak nem lenne
+ * ertelme, mert a boost amugy is mindig rendelkezesre allna.
  */
-export const BOOST_PICKUP_MULTIPLIER = 1.5;
+export const BOOST_CAPACITY_MS = 5000;
+
+/** A felvett pickup ennyit tolt vissza a tartalybol (0..1). */
+export const BOOST_REFILL_FRACTION = 0.5;
+
+/** Egy pickup ennyi ms boostot ad vissza. */
+export const BOOST_REFILL_MS = BOOST_CAPACITY_MS * BOOST_REFILL_FRACTION;
 
 /** Felvetel utan ennyi ido mulva (ms) bukkan fel ujra ugyanott. */
 export const PICKUP_RESPAWN_MS = 12000;

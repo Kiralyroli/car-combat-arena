@@ -94,10 +94,9 @@ export class Input {
       brake: 0,
       steer: this.steerValue,
       handbrake: this.held.has("handbrake"),
+      // A Shift SZANDEKA; hogy tenylegesen hat-e, a boost-tartalytol
+      // fugg (lasd BoostTank) -- azt a fo ciklus dönti el.
       boost: this.held.has("boost"),
-      // A tullokest a SZERVER adja (pickup) -- a billentyuzet nem
-      // allithatja be. A fo ciklus irja felul a snapshot alapjan.
-      superBoost: false,
     };
   }
 

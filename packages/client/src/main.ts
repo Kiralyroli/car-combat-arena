@@ -15,6 +15,7 @@ import { hideLoading, Hud, showError } from "./hud";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
 import { ExplosionQueue } from "./network/explosionQueue";
+import { BoostTank } from "./boostTank";
 import { SceneView } from "./scene";
 
 /**
@@ -126,6 +127,9 @@ async function main(): Promise<void> {
    * idoben tortenik. Lasd ExplosionQueue.
    */
   const explosionQueue = new ExplosionQueue();
+
+  /** A boost-tartaly: a Shift ebbol fogy, a pickup ezt tolti. */
+  const boostTank = new BoostTank();
   net.on({
     onJoined: (_playerId, roomCode, spawn) => {
       location.hash = roomCode;
@@ -169,6 +173,10 @@ async function main(): Promise<void> {
       for (let i = 0; i < 4; i++) {
         backend.setWheelDamage(i, { ...HEALTHY_WHEEL });
       }
+      // Teli tartallyal indulunk ujra -- kulonben a halalt koveto kor
+      // ott folytatodna, ahol az elozo abbamaradt, es a mar amugy is
+      // hatranyban levo jatekos meg boost nelkul is maradna.
+      boostTank.reset();
     },
     onError: (code, message) => {
       console.warn(`Halozati hiba (${code}): ${message}`);
@@ -223,6 +231,7 @@ async function main(): Promise<void> {
   // Debug-hook: konzolbol es automatizalt ellenorzesbol is elerheto.
   (window as unknown as Record<string, unknown>).__spike = {
     backend,
+    boostTank,
     view,
     net,
     stats: () => ({
@@ -274,18 +283,20 @@ async function main(): Promise<void> {
       );
     }
 
-    // A felvett tullokes a SZERVERTOL jon (o dönti el, ki erte oda
-    // eloszor a pickuphoz -- terv 15.4), a hatas viszont a sajat
-    // fizikankban ervenyesul. A hatralevo idot a snapshot hozza; azert
-    // fogy lokalisan is, hogy a ket snapshot kozott ne "villogjon".
-    net.boostMs = Math.max(0, net.boostMs - frameDt * 1000);
-    const superBoost = net.boostMs > 0;
+    // A pickupokat a szerver konyveli: a kiosztott visszatoltesek
+    // szamabol a tartaly magatol utolerheto allapotba kerul.
+    boostTank.syncGrants(net.boostGrants);
 
     // Fix lepeskozu fizika, a rendereleskol fuggetlenul (projekt-terv 15.3).
     accumulator += frameDt;
     let steps = 0;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
-      backend.step(FIXED_DT, { ...input.read(), superBoost });
+      const raw = input.read();
+      // A boost a TARTALYBOL fogy, es csak akkor hat, ha van meg benne.
+      // A fogyasztas a fizikai lepeshez kotodik (nem a kepkockahoz),
+      // kulonben lassabb gepen mas ideig tartana ugyanannyi boost.
+      const boost = boostTank.consume(raw.boost, FIXED_DT * 1000);
+      backend.step(FIXED_DT, { ...raw, boost });
       accumulator -= FIXED_DT;
       steps++;
       // Az uj "jelenlegi" allapot elotti allapot lesz a kovetkezo
@@ -424,7 +435,7 @@ async function main(): Promise<void> {
 
     view.render();
 
-    hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, net.boostMs);
+    hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
 
     requestAnimationFrame(frame);
   }

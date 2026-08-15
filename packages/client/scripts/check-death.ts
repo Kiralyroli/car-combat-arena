@@ -18,6 +18,27 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/**
+ * Mesterseges halozati kesleltetes -- ugyanaz a kapcsolo, mint a tobbi
+ * e2e tesztnel. KORABBAN HIANYZOTT: a --lag/--jitter argumentumokat a
+ * szkript elfogadta, de figyelmen kivul hagyta, tehat a "kesleltetett"
+ * futasok valojaban 0 ms-on mentek.
+ */
+function argOrEnv(name: string, envName: string): number {
+  const arg = process.argv.find((x) => x.startsWith(`--${name}=`));
+  if (arg) return Number(arg.split("=")[1]);
+  return Number(process.env[envName] ?? 0);
+}
+
+const LAG_MS = argOrEnv("lag", "LAG");
+const JITTER_MS = argOrEnv("jitter", "JITTER");
+
+function clientUrl(hash: string): string {
+  const query =
+    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  return `${CLIENT_URL}${query}${hash}`;
+}
+
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? "OK  " : "HIBA"} ${label} -- ${detail}`);
@@ -48,6 +69,30 @@ const viewOf = (page: Page): Promise<RemoteView> =>
     };
   })()`) as Promise<RemoteView>;
 
+/**
+ * Megvarja, amig MINDKET auto szerver-oldali allapota utolerte a
+ * teleportot -- azaz a masik kliensnel a tavoli test a valos helyen van.
+ *
+ * Mindket iranyban merunk: eleg, ha az egyik fel meg elutasitott
+ * allapotban van, es a szerver mar nem latja osszeerni a ket autot.
+ */
+async function bothSynced(a: Page, b: Page): Promise<boolean> {
+  const error = async (viewer: Page, subject: Page): Promise<number> => {
+    const real: number[] = await subject.evaluate(
+      () => (window as any).__spike.backend.getChassis().position as number[],
+    );
+    const body: number[] = await viewer.evaluate(() => {
+      const s = (window as any).__spike;
+      const ids = s.view.remoteCarIds();
+      if (ids.length === 0) return [NaN, NaN, NaN];
+      const t = s.backend.getRemoteBody(ids[0]);
+      return t ? t.position : [NaN, NaN, NaN];
+    });
+    return Math.hypot(body[0] - real[0], body[1] - real[1], body[2] - real[2]);
+  };
+  return (await error(a, b)) < 1 && (await error(b, a)) < 1;
+}
+
 /** Megvarja, amig a jatekos el (HP > 0), azaz lezajlott az ujraszuletes. */
 async function waitUntilAlive(page: Page, timeoutMs = 10000): Promise<void> {
   try {
@@ -71,7 +116,7 @@ async function openClient(hash: string): Promise<{ browser: Browser; page: Page 
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba] ${e.message}`));
-  await page.goto(`${CLIENT_URL}${hash}`);
+  await page.goto(clientUrl(hash));
   await page.waitForFunction(() => !!(window as any).__spike, null, { timeout: 20000 });
   await page.waitForFunction(
     () => !!(window as any).__spike?.net?.playerId,
@@ -111,7 +156,23 @@ async function main(): Promise<void> {
 
     await a.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 34 })");
     await b.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 0 })");
-    await sleep(2500);
+
+    // MEGVARJUK a szerver-oldali ujraszinkront, nem alszunk fix ideig.
+    //
+    // A `reset` teleport, amit a plauzibilitas-ellenorzes -- helyesen --
+    // elutasit, amig a resync be nem indul. Amig ez tart, a szerver a
+    // REGI helyen tudja az autot, tehat a rammeles a szerver szerint
+    // meg sem tortenik, es nem ad sebzest. 200 ms + jitter mellett a
+    // fix 2500 ms neha kevesnek bizonyult: a 12 rammelesbol egy sem
+    // szamitott, es a teszt 5 hibaval bukott el ugy, hogy a termekben
+    // semmi baj nem volt. (Ugyanez a hiba a check-collision.ts-ben is
+    // megvolt, ott mar javitva.)
+    let synced = false;
+    for (let i = 0; i < 30; i++) {
+      if (await bothSynced(a, b)) { synced = true; break; }
+      await sleep(300);
+    }
+    if (!synced) console.log("  [figyelem] a felallas nem szinkronizalt idoben");
 
     await a.keyboard.down("w");
     await sleep(4000);

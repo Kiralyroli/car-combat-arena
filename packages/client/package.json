@@ -17,6 +17,7 @@
     "check:pickup": "tsx scripts/check-pickup.ts",
     "check:rocket-visual": "tsx scripts/check-rocket-visual.ts",
     "check:timeline": "tsx scripts/check-interp-timeline.ts",
+    "check:boost": "tsx scripts/check-boost-tank.ts",
     "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200"
   },
   "dependencies": {

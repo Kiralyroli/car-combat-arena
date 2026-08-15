@@ -84,13 +84,13 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
   velocity: [number, number, number];
   hp: number;
   /**
-   * Meddig (ms) tart meg a felvett tullokes. 0 = nincs.
+   * Hany boost-visszatoltest kapott eddig a jatekos (monoton no).
    *
-   * A HATRALEVO idot kuldjuk, nem a lejarati idopontot: igy nem kell
-   * orajel-szinkron a szerverrel (ugyanaz az elv, mint az
-   * interpolacios puffernel).
+   * SZAMLALO, nem esemeny: a tartaly a kliensnel van (lasd BoostTank),
+   * es igy egy elveszett vagy megkettozott uzenet sem csusztatja el
+   * tartosan -- barmelyik snapshot helyreallitja a helyes allapotot.
    */
-  boostMs: number;
+  boostGrants: number;
 }
 
 /**
