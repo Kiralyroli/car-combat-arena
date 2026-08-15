@@ -274,11 +274,18 @@ async function main(): Promise<void> {
       );
     }
 
+    // A felvett tullokes a SZERVERTOL jon (o dönti el, ki erte oda
+    // eloszor a pickuphoz -- terv 15.4), a hatas viszont a sajat
+    // fizikankban ervenyesul. A hatralevo idot a snapshot hozza; azert
+    // fogy lokalisan is, hogy a ket snapshot kozott ne "villogjon".
+    net.boostMs = Math.max(0, net.boostMs - frameDt * 1000);
+    const superBoost = net.boostMs > 0;
+
     // Fix lepeskozu fizika, a rendereleskol fuggetlenul (projekt-terv 15.3).
     accumulator += frameDt;
     let steps = 0;
     while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
-      backend.step(FIXED_DT, input.read());
+      backend.step(FIXED_DT, { ...input.read(), superBoost });
       accumulator -= FIXED_DT;
       steps++;
       // Az uj "jelenlegi" allapot elotti allapot lesz a kovetkezo
@@ -402,6 +409,7 @@ async function main(): Promise<void> {
     }
 
     view.syncRockets(net.rockets.sample(renderNow));
+    view.syncPickups(net.pickupsAvailable, renderNow);
 
     // Az esedekesse valt robbanasok: latvany ES lokes egyszerre.
     for (const position of explosionQueue.due(renderNow)) {
@@ -416,7 +424,7 @@ async function main(): Promise<void> {
 
     view.render();
 
-    hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp);
+    hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, net.boostMs);
 
     requestAnimationFrame(frame);
   }

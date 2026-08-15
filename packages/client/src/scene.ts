@@ -5,6 +5,8 @@ import {
   CAMERA,
   CHASSIS,
   EXPLOSION_RADIUS,
+  PICKUP_HEIGHT,
+  PICKUP_POINTS,
   MAX_HP,
   WHEEL,
   WHEEL_LAYOUT,
@@ -418,6 +420,50 @@ export class SceneView {
   /** A SAJAT autonk vetőjenek beallitasa a celzas szerint. */
   setOwnAim(aimYaw: number, aimPitch: number): void {
     this.aimLauncher(this.launcher, this.chassisMesh.quaternion, aimYaw, aimPitch);
+  }
+
+  // --- Boost pickupok ---
+
+  private pickupMeshes: THREE.Mesh[] = [];
+
+  /**
+   * A pickupok letrehozasa (egyszer) es allapotuk frissitese.
+   *
+   * A POZICIO nem a halozatrol jon: az allando, a config-bol ismerjuk.
+   * Csak azt kapjuk meg, hogy eppen felveheto-e melyik -- igy egy
+   * snapshot nehany bit, nem ot pozicio.
+   */
+  syncPickups(available: boolean[], now: number): void {
+    if (this.pickupMeshes.length === 0) {
+      // Oktaeder: jol lathatoan "nem a palya resze", es olcso.
+      const geometry = new THREE.OctahedronGeometry(0.7);
+      for (const point of PICKUP_POINTS) {
+        const mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshStandardMaterial({
+            color: 0x39d0ff,
+            emissive: 0x1a6a8a,
+            roughness: 0.3,
+          }),
+        );
+        mesh.position.set(point.x, point.y, point.z);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+        this.pickupMeshes.push(mesh);
+      }
+    }
+
+    for (let i = 0; i < this.pickupMeshes.length; i++) {
+      const mesh = this.pickupMeshes[i];
+      // Amig nincs snapshot, mutassuk felvehetőnek: igy offline es
+      // csatlakozas elott sem tunik el a palya fele.
+      mesh.visible = available[i] ?? true;
+      if (!mesh.visible) continue;
+
+      // Lassu forgas es lebegés -- IDOFUGGO, nem kepkocka-fuggo.
+      mesh.rotation.y = (now / 1000) * 1.2;
+      mesh.position.y = PICKUP_HEIGHT + Math.sin(now / 400) * 0.15;
+    }
   }
 
   // --- Robbanas-effekt ---

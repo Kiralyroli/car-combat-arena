@@ -32,6 +32,8 @@ export class Hud {
     fps: number,
     pingMs: number | null,
     hp: number | null,
+    /** A felvett tullokesbol hatralevo ido (ms); 0 = nincs. */
+    boostMs = 0,
   ): void {
     // 10 Hz eleg a HUD-nak, ne terhelje a fo ciklust.
     const now = performance.now();
@@ -71,6 +73,7 @@ export class Hud {
       <div class="row"><span class="label">verzio</span><span class="val">${this.backendVersion}</span></div>
       <hr />
       <div class="row"><span class="label">HP</span><span class="val ${hpClass}">${hpText}</span></div>
+      ${boostMs > 0 ? `<div class="row"><span class="label">BOOST</span><span class="val" style="color:#39d0ff">${(boostMs / 1000).toFixed(1)} s</span></div>` : ""}
       <div class="row"><span class="label">sebesseg</span><span class="val">${t.speedKmh.toFixed(0)} km/h</span></div>
       <div class="row"><span class="label">kerek foldon</span><span class="val">${t.wheelsOnGround} / 4</span></div>
       <hr />

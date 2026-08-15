@@ -17,6 +17,7 @@ export * from "./math";
 export * from "./types";
 export * from "./wheelVisuals";
 export * from "./wheelDamage";
+export * from "./pickups";
 export * from "./combat";
 export * from "./rocket";
 export * from "./physics/rapier";

@@ -12,6 +12,7 @@ import {
 import { clamp, cross, dot, eulerToQuat, length, lerp, rotateVec } from "../math";
 import { wheelRadiusFor } from "../wheelVisuals";
 import { explosionFalloff } from "../rocket";
+import { BOOST_PICKUP_MULTIPLIER } from "../pickups";
 import {
   HEALTHY_WHEEL,
   type DriveInput,
@@ -371,6 +372,9 @@ export class RapierBackend implements VehicleBackend {
         engineMagnitude =
           DRIVE.engineForce *
           (input.boost ? DRIVE.boostMultiplier : 1) *
+          // A felvett tullokes a normal boost FOLE szorzodik, tehat
+          // Shifttel egyutt a legerosebb -- de onmagaban is hat.
+          (input.superBoost ? BOOST_PICKUP_MULTIPLIER : 1) *
           enginePowerScale;
       }
     } else if (input.throttle < 0) {

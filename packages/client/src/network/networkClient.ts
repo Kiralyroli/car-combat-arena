@@ -63,10 +63,21 @@ export class NetworkClient {
    */
   ownWheels: WheelDamage[] | null = null;
   /**
+   * A felvett tullokesbol hatralevo ido (ms); 0, ha nincs.
+   * A fo ciklus ebbol allitja be a `superBoost` inputot.
+   */
+  boostMs = 0;
+  /**
    * A repulo rakétak pufferelve -- UGYANAZON az idovonalon, mint a
    * tavoli autok (lasd remoteRockets.ts).
    */
   readonly rockets = new RemoteRockets();
+
+  /**
+   * Eppen felveheto-e az egyes pickupok (PICKUP_POINTS indexeles).
+   * A poziciot a kliens a config-bol ismeri, csak az allapot jon at.
+   */
+  pickupsAvailable: boolean[] = [];
 
   /**
    * Rakéta-kiloves kerese a megcelzott vilagbeli pontra.
@@ -212,6 +223,9 @@ export class NetworkClient {
         const own = message.players.find((p) => p.id === this.playerId);
         if (own) {
           this.hp = own.hp;
+          // A felvett tullokes hatralevo ideje -- a fo ciklus ebbol
+          // allitja be a `superBoost` inputot.
+          this.boostMs = own.boostMs;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
           // FIZIKAI hatas is (tapadas, kerek-sugar), ezert a hivo
           // beallitja a sajat jarmuvunkon. SZANDEKOSAN nem
@@ -229,6 +243,7 @@ export class NetworkClient {
         // legfrissebb snapshotbol rajzoltuk azonnal, amitol a lovedek
         // ~100 ms-szal -- 5.5 m-rel -- a celpont elott jart.)
         this.rockets.ingest(message.rockets, now);
+        this.pickupsAvailable = message.pickupsAvailable;
         return;
       }
 

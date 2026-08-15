@@ -83,6 +83,14 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
   rotation: [number, number, number, number];
   velocity: [number, number, number];
   hp: number;
+  /**
+   * Meddig (ms) tart meg a felvett tullokes. 0 = nincs.
+   *
+   * A HATRALEVO idot kuldjuk, nem a lejarati idopontot: igy nem kell
+   * orajel-szinkron a szerverrel (ugyanaz az elv, mint az
+   * interpolacios puffernel).
+   */
+  boostMs: number;
 }
 
 /**
@@ -213,6 +221,12 @@ export interface SnapshotMessage {
    * ezert itt nincs sebesseg: a kliens ket snapshot kozott interpolal.
    */
   rockets: RocketSnapshot[];
+  /**
+   * A pickupok allapota, INDEX SZERINT a PICKUP_POINTS-hoz igazitva.
+   * Csak azt kuldjuk, hogy eppen felveheto-e -- a pozicio allando, azt
+   * a kliens a config-bol ismeri.
+   */
+  pickupsAvailable: boolean[];
 }
 
 export interface PlayerJoinedMessage {

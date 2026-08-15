@@ -70,6 +70,7 @@ export class GameLoop {
         // a lovedek palyaja igy fuggetlen a szerver terheltsegetol.
         room.stepRockets(FIXED_DT, now);
         room.respawnExpired(now);
+        room.collectPickups(now);
       }
 
       // Ide kerul majd: lovedekek leptetese, pickupok, meccs-allapot.
@@ -94,6 +95,7 @@ export class GameLoop {
         time: now,
         players: room.buildSnapshot(),
         rockets: room.rockets.toSnapshot(),
+        pickupsAvailable: room.pickupsAvailable(now),
       });
     }
   }

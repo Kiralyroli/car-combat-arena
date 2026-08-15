@@ -14,6 +14,7 @@
     "check:collision": "tsx scripts/check-collision.ts",
     "check:death": "tsx scripts/check-death.ts",
     "check:wheel-damage": "tsx scripts/check-wheel-damage.ts",
+    "check:pickup": "tsx scripts/check-pickup.ts",
     "check:rocket-visual": "tsx scripts/check-rocket-visual.ts",
     "check:timeline": "tsx scripts/check-interp-timeline.ts",
     "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200"

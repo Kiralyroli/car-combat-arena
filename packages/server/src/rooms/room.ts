@@ -13,6 +13,10 @@ import {
   wheelWorldPosition,
   MAX_HP,
   SPAWN_POINTS,
+  PICKUP_POINTS,
+  PICKUP_RESPAWN_MS,
+  BOOST_PICKUP_DURATION_MS,
+  withinPickupRange,
   type ClientState,
   type PlayerSnapshot,
   type ServerMessage,
@@ -66,6 +70,11 @@ export interface ServerPlayer {
    * mikor jart le a varakozas.
    */
   deadSince: number | null;
+  /**
+   * Meddig (performance.now) tart a felvett tullokes; 0, ha nincs.
+   * A snapshotba a HATRALEVO idot tesszuk -- lasd PlayerSnapshot.
+   */
+  boostUntil: number;
 }
 
 /** Rendezett parkulcs, hogy (a,b) es (b,a) ugyanaz legyen. */
@@ -122,6 +131,7 @@ export class Room {
       consecutiveRejects: 0,
       lastFiredAt: 0,
       deadSince: null,
+      boostUntil: 0,
     };
     this.players.set(id, player);
     return player;
@@ -198,6 +208,44 @@ export class Room {
 
         this.markDeadIfDestroyed(a, now);
         this.markDeadIfDestroyed(b, now);
+      }
+    }
+  }
+
+  /**
+   * Mikor bukkan fel ujra az adott pickup (performance.now); 0 = most
+   * is felveheto. PICKUP_POINTS-szal azonos indexeles.
+   */
+  private readonly pickupReadyAt: number[] = PICKUP_POINTS.map(() => 0);
+
+  /** Eppen felveheto-e mindegyik pickup -- a snapshothoz. */
+  pickupsAvailable(now: number): boolean[] {
+    return this.pickupReadyAt.map((readyAt) => readyAt <= now);
+  }
+
+  /**
+   * Pickupok felvetele (terv 4. lepcso 4. pont).
+   *
+   * A SZERVER dönti el, ki vette fel: e nelkul ket jatekos ugyanazt a
+   * pickupot venne fel a sajat kepernyojen, es mindketto jogosnak
+   * erezne. Aki eloszor ideer a szerver szerint, azé.
+   */
+  collectPickups(now: number): void {
+    for (const player of this.players.values()) {
+      if (player.deadSince !== null) continue;
+
+      for (let i = 0; i < PICKUP_POINTS.length; i++) {
+        if (this.pickupReadyAt[i] > now) continue;
+        if (!withinPickupRange(player.state.position, PICKUP_POINTS[i])) continue;
+
+        this.pickupReadyAt[i] = now + PICKUP_RESPAWN_MS;
+        // A felvetel UJRAINDITJA a tullokest, nem hosszabbitja: igy a
+        // pickupok halmozasaval nem lehet vegtelen boostot gyujteni.
+        player.boostUntil = now + BOOST_PICKUP_DURATION_MS;
+
+        console.log(
+          `[room ${this.code}] ${player.id.slice(0, 8)} felvette a ${i}. boostot`,
+        );
       }
     }
   }
@@ -377,6 +425,7 @@ export class Room {
         aimYaw: player.state.aimYaw,
         aimPitch: player.state.aimPitch,
         hp: player.hp,
+        boostMs: Math.max(0, Math.round(player.boostUntil - performance.now())),
       });
     }
     return snapshot;

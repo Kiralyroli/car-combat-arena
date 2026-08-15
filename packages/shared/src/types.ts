@@ -9,6 +9,14 @@ export interface DriveInput {
   steer: number;
   handbrake: boolean;
   boost: boolean;
+  /**
+   * Felvett tullokes (boost pickup) aktiv-e.
+   *
+   * A normal boost FOLE szorzodik, nem helyette (lasd pickups.ts), es
+   * a Shifttol FUGGETLENUL hat -- gaz kell hozza, de boost nem. Ezert
+   * kulon mezo, nem a `boost` erositese.
+   */
+  superBoost: boolean;
 }
 
 export const NEUTRAL_INPUT: DriveInput = {
@@ -17,6 +25,7 @@ export const NEUTRAL_INPUT: DriveInput = {
   steer: 0,
   handbrake: false,
   boost: false,
+  superBoost: false,
 };
 
 /**

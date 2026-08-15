@@ -95,6 +95,9 @@ export class Input {
       steer: this.steerValue,
       handbrake: this.held.has("handbrake"),
       boost: this.held.has("boost"),
+      // A tullokest a SZERVER adja (pickup) -- a billentyuzet nem
+      // allithatja be. A fo ciklus irja felul a snapshot alapjan.
+      superBoost: false,
     };
   }
 
