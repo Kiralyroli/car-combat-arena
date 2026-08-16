@@ -175,7 +175,18 @@ export interface FireMessage {
   target: [number, number, number];
 }
 
+/**
+ * Nyitott szobak lekerdezese -- a lobbybol, MEG csatlakozas elott.
+ *
+ * Kulon uzenet, mert a kapcsolat ilyenkor meg nem tartozik szobahoz:
+ * a jatekos eppen azt valasztja ki, hova lepjen be.
+ */
+export interface ListRoomsMessage {
+  type: "listRooms";
+}
+
 export type ClientMessage =
+  | ListRoomsMessage
   | JoinMessage
   | StateMessage
   | PingMessage
@@ -239,6 +250,20 @@ export interface ExplosionMessage {
   ownerId: string;
 }
 
+/** Egy szoba a lobby listajaban. */
+export interface RoomListing {
+  code: string;
+  players: number;
+  maxPlayers: number;
+  /** A meccs allapota -- lathato legyen, hogy epp megy-e a jatek. */
+  phase: MatchPhase;
+}
+
+export interface RoomListMessage {
+  type: "roomList";
+  rooms: RoomListing[];
+}
+
 export interface SnapshotMessage {
   type: "snapshot";
   /** Szerver-tick sorszam -- a kliens-oldali interpolaciohoz. */
@@ -298,6 +323,7 @@ export interface PongMessage {
 }
 
 export type ServerMessage =
+  | RoomListMessage
   | JoinedMessage
   | SnapshotMessage
   | PlayerJoinedMessage

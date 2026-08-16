@@ -166,6 +166,11 @@ export class PlayerHud {
     this.weapon = must("weapon");
     this.weaponState = must("weapon-state");
     this.tyres = must("tyres");
+    // A lobby alatt REJTVE marad: ures HP- es boost-savokat mutatna,
+    // ami a nev-beviteli parbeszed mogott csak zavaro.
+  }
+
+  show(): void {
     this.root.hidden = false;
   }
 

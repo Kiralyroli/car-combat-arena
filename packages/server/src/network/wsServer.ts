@@ -6,6 +6,7 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from "@cca/shared";
+import { MAX_PLAYERS_PER_ROOM } from "../rooms/room";
 import type { Room } from "../rooms/room";
 import type { RoomManager } from "../rooms/roomManager";
 
@@ -76,6 +77,15 @@ export class WsServer {
 
   private handleMessage(conn: Connection, message: ClientMessage): void {
     switch (message.type) {
+      case "listRooms":
+        // A lobbybol jon, MEG csatlakozas elott -- ezert nem kell
+        // hozza sem szoba, sem playerId.
+        send(conn.socket, {
+          type: "roomList",
+          rooms: this.rooms.listings(MAX_PLAYERS_PER_ROOM),
+        });
+        return;
+
       case "join":
         this.handleJoin(conn, message);
         return;

@@ -14,7 +14,7 @@ import { Aim } from "./aim";
 import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
 import { DevMode } from "./devMode";
 import { hideLoading, Hud, MatchHud, PlayerHud, Scoreboard, showError } from "./hud";
-import { NameGate } from "./nameGate";
+import { Lobby, RoomBadge } from "./lobby";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
 import { ExplosionQueue } from "./network/explosionQueue";
@@ -149,6 +149,27 @@ async function main(): Promise<void> {
   const net = new NetworkClient();
 
   /**
+   * A folyamatban levo belepes -- a "joined" vagy "error" esemeny
+   * oldja fel.
+   *
+   * A "join" uzenetre a valasz KESOBB erkezik, es lehet siker vagy hiba
+   * (nincs ilyen szoba, tele van). A lobbynak meg kell varnia, hogy
+   * hiba eseten a jatekos ott, LATHATOAN kapja meg az uzenetet -- ne
+   * csak a konzolon.
+   */
+  let pendingJoin: ((error: string | null) => void) | null = null;
+
+  function joinAndWait(
+    roomCode: string | undefined,
+    name: string,
+  ): Promise<string | null> {
+    return new Promise<string | null>((resolve) => {
+      pendingJoin = resolve;
+      net.join(roomCode, name);
+    });
+  }
+
+  /**
    * Robbanasok, amik a KESLELTETETT idovonalon meg nem jottek el --
    * a latvany es a lokes egyszerre, a rakéta megjelenitesevel egy
    * idoben tortenik. Lasd ExplosionQueue.
@@ -178,6 +199,9 @@ async function main(): Promise<void> {
       // az csak az elso snapshottol tolodik fel --, abbol nezve
       // csatlakozaskor mindig 0 tarsat mutatnank.
       hud.setNetworkStatus(`szoba ${roomCode}`, view.remoteCarCount);
+      // A lobby erre var: sikeres belepes.
+      pendingJoin?.(null);
+      pendingJoin = null;
     },
     onPlayerJoined: (id) => {
       view.addRemoteCar(id);
@@ -218,6 +242,10 @@ async function main(): Promise<void> {
       console.warn(`Halozati hiba (${code}): ${message}`);
       hud.setNetworkStatus(`hiba: ${code}`, 0);
       if (code === "room_not_found") location.hash = "";
+      // Ha eppen belepni probaltunk, a LOBBY kapja meg a hibat --
+      // lathatoan, nem csak a konzolon.
+      pendingJoin?.(message);
+      pendingJoin = null;
     },
     onClose: () => {
       for (const id of view.remoteCarIds()) {
@@ -241,20 +269,52 @@ async function main(): Promise<void> {
     console.log(`Mesterseges kesleltetes: ${lagMs} ms (jitter ${jitterMs} ms)`);
   }
 
-  // A nevet a csatlakozas ELOTT kerjuk be: a szerver a "join"
-  // uzenetben kapja meg. A betoltes-jelzot elotte tuntetjuk el, hogy a
-  // parbeszed ne egy "Fizikai motor betoltese..." felirat folott alljon.
   hideLoading();
-  const playerName = await new NameGate().ask();
 
-  net
-    .connect(SERVER_URL, roomFromUrl || undefined, lagMs, jitterMs, playerName)
-    .catch((err: unknown) => {
-      // A halozat hianya NEM allitja meg a jatekot: egyjatekos modban
-      // tovabb lehet vezetni (ez a fejlesztes kozben is kenyelmesebb).
-      console.warn("Nem sikerult csatlakozni a szerverhez:", err);
-      hud.setNetworkStatus("offline", 0);
-    });
+  // --- Lobby: nev + szoba-valasztas ---
+  //
+  // A KAPCSOLATOT nyitjuk meg eloszor, belepes nelkul: igy a lobby le
+  // tudja kerdezni a nyitott szobakat, mielott a jatekos valasztana.
+  const lobby = new Lobby();
+  const roomBadge = new RoomBadge();
+  lobby.setRefreshHandler(() => net.requestRoomList());
+  net.on({ onRoomList: (rooms) => lobby.showRooms(rooms) });
+
+  /**
+   * A "?name=" MEGKERULI a lobbyt (a hash-ben megadott szobaba lep be).
+   * Ez kell az automatizalt teszteknek -- kulonben minden e2e futas a
+   * lobbyban allna meg --, es a kozvetlen meghivo-linkkel erkezoknek is
+   * kenyelmes.
+   */
+  const directName = params.get("name");
+
+  try {
+    await net.open(SERVER_URL, lagMs, jitterMs);
+  } catch (err: unknown) {
+    // A halozat hianya NEM allitja meg a jatekot: egyjatekos modban
+    // tovabb lehet vezetni (ez a fejlesztes kozben is kenyelmesebb).
+    console.warn("Nem sikerult csatlakozni a szerverhez:", err);
+    hud.setNetworkStatus("offline", 0);
+  }
+
+  if (net.connected) {
+    if (directName !== null) {
+      await joinAndWait(roomFromUrl || undefined, directName);
+    } else {
+      // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
+      let message: string | undefined;
+      for (;;) {
+        const choice = await lobby.open(message);
+        const failure = await joinAndWait(choice.roomCode, choice.name);
+        if (failure === null) break;
+        message = failure;
+      }
+    }
+    if (net.roomCode) roomBadge.show(net.roomCode);
+  }
+
+  // A jatekos-HUD csak a lobby utan jelenik meg.
+  playerHud.show();
 
   let last = performance.now();
   let accumulator = 0;

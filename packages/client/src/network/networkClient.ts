@@ -6,6 +6,7 @@ import {
   type ClientState,
   type WheelDamage,
   type MatchSnapshot,
+  type RoomListing,
   type ServerMessage,
   type Transport,
 } from "@cca/shared";
@@ -36,6 +37,7 @@ export interface NetworkEvents {
   onPlayerLeft?: (playerId: string) => void;
   onRespawn?: (position: [number, number, number]) => void;
   onExplosion?: (position: [number, number, number], ownerId: string) => void;
+  onRoomList?: (rooms: RoomListing[]) => void;
   onError?: (code: string, message: string) => void;
   onClose?: () => void;
 }
@@ -141,13 +143,13 @@ export class NetworkClient {
    * `lagMs` > 0 eseten mesterseges kesleltetes kerul a Transport ele --
    * fejlesztoi teszteleshez (terv 3. lepcso 6. pont).
    */
-  async connect(
-    url: string,
-    roomCode?: string,
-    lagMs = 0,
-    jitterMs = 0,
-    name?: string,
-  ): Promise<void> {
+  /**
+   * Csak a KAPCSOLAT megnyitasa -- belepes nelkul.
+   *
+   * A lobby igy meg tudja kerdezni a nyitott szobakat, MIELOTT a
+   * jatekos valasztana. Belepni utana a  hivassal lehet.
+   */
+  async open(url: string, lagMs = 0, jitterMs = 0): Promise<void> {
     const socket = await WsTransport.connect(url);
     const transport: Transport =
       lagMs > 0 ? new LatencyTransport(socket, lagMs, jitterMs) : socket;
@@ -163,8 +165,33 @@ export class NetworkClient {
       this.rttMs = null;
       this.events.onClose?.();
     });
+  }
 
-    transport.send({ type: "join", protocol: PROTOCOL_VERSION, roomCode, name });
+  /** Nyitott szobak lekerdezese (a valasz az onRoomList esemenyben jon). */
+  requestRoomList(): void {
+    this.transport?.send({ type: "listRooms" });
+  }
+
+  /** Belepes egy szobaba; kod nelkul a szerver ujat nyit. */
+  join(roomCode: string | undefined, name: string): void {
+    this.transport?.send({ type: "join", protocol: PROTOCOL_VERSION, roomCode, name });
+  }
+
+  /**
+   * Kapcsolat + azonnali belepes egy lepesben.
+   *
+   * A lobby a ket lepest kulon hasznalja (elobb listaz, aztan lep be);
+   * ez a rovid ut a teszteknek es a kozvetlen linkkel erkezoknek szol.
+   */
+  async connect(
+    url: string,
+    roomCode?: string,
+    lagMs = 0,
+    jitterMs = 0,
+    name?: string,
+  ): Promise<void> {
+    await this.open(url, lagMs, jitterMs);
+    this.join(roomCode, name ?? "");
   }
 
   disconnect(): void {
@@ -272,6 +299,10 @@ export class NetworkClient {
         this.match = message.match;
         return;
       }
+
+      case "roomList":
+        this.events.onRoomList?.(message.rooms);
+        return;
 
       case "pong": {
         // A `t` a MI orank szerinti kuldesi ido, valtozatlanul vissza --

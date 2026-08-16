@@ -1,4 +1,4 @@
-import { generateRoomCode } from "@cca/shared";
+import { generateRoomCode, type RoomListing } from "@cca/shared";
 import { Room } from "./room";
 
 /**
@@ -29,6 +29,28 @@ export class RoomManager {
     const room = new Room(code);
     this.rooms.set(code, room);
     return room;
+  }
+
+  /**
+   * A lobbyban listazando szobak.
+   *
+   * Az URES szobak kimaradnak: azok csak a letrehozas es az elso
+   * belepes kozotti pillanatban leteznek (illetve amig a takaritas
+   * el nem tavolitja oket), es egy jatekosnak semmit nem mondanak.
+   *
+   * A sorrend a jatekosszam szerinti: ahol tobben vannak, az
+   * erdekesebb -- ott biztosan van kivel jatszani.
+   */
+  listings(maxPlayers: number): RoomListing[] {
+    return this.all()
+      .filter((room) => !room.isEmpty)
+      .map((room) => ({
+        code: room.code,
+        players: room.playerCount,
+        maxPlayers,
+        phase: room.matchPhase,
+      }))
+      .sort((a, b) => b.players - a.players || a.code.localeCompare(b.code));
   }
 
   /** Ures szoba torlese -- kulonben a memoria idovel tele futna. */

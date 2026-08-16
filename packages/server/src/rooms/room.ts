@@ -310,6 +310,11 @@ export class Room {
   /** Mikor indul az uj meccs (performance.now); 0, ha nem `ended`. */
   private restartAt = 0;
 
+  /** A meccs fazisa -- a lobby listajahoz. */
+  get matchPhase(): MatchPhase {
+    return this.phase;
+  }
+
   matchSnapshot(now: number): MatchSnapshot {
     return {
       phase: this.phase,
