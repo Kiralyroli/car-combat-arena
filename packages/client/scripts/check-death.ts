@@ -18,6 +18,9 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/** A tesztkliensek neve -- a ?name= egyben atugorja a nev-parbeszedet. */
+const testName = "Halal";
+
 /**
  * Mesterseges halozati kesleltetes -- ugyanaz a kapcsolo, mint a tobbi
  * e2e tesztnel. KORABBAN HIANYZOTT: a --lag/--jitter argumentumokat a
@@ -34,9 +37,11 @@ const LAG_MS = argOrEnv("lag", "LAG");
 const JITTER_MS = argOrEnv("jitter", "JITTER");
 
 function clientUrl(hash: string): string {
-  const query =
-    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
-  return `${CLIENT_URL}${query}${hash}`;
+  const lag =
+    LAG_MS > 0 ? `&lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  // A ?name= ATUGORJA a nev-parbeszedet -- kulonben minden e2e futas
+  // ott allna meg, a csatlakozasra varva.
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}${hash}`;
 }
 
 let failures = 0;
@@ -144,6 +149,14 @@ async function main(): Promise<void> {
   // renderelo sebessege ingadozik, ezert a becsapodasi sebesseg -- es
   // vele a sebzes -- futasonkent elter. Szoros hatarnal a teszt neha
   // 1 HP-nal megallt volna.
+  // MONOTON szamlalo: egy robbanas-effekt csak 650 ms-ig el, tehat egy
+  // kesobbi pillanatfelvetel mar nem latna. (Eloszor pont igy mertem,
+  // es a teszt "nem volt robbanas"-t jelentett rendben lezajlott
+  // robbanas mellett.)
+  const explosionsBefore = (await a.evaluate(
+    "window.__spike.view.explosionsSpawned",
+  )) as number;
+
   let destroyed = false;
   let rams = 0;
   for (; rams < 12 && !destroyed; rams++) {
@@ -182,17 +195,53 @@ async function main(): Promise<void> {
     destroyed = (await viewOf(a)).otherHp === 0;
   }
 
+  // ROBBANAS a megsemmisuleskor. Enelkul a masik auto "nyomtalanul
+  // eltunt" a jatekos szemszogebol -- pontosan ez volt a panasz.
+  const explosionsAfter = (await a.evaluate(
+    "window.__spike.view.explosionsSpawned",
+  )) as number;
+  const explosionSeen = explosionsAfter > explosionsBefore;
+
   const dead = await viewOf(a);
-  check("eleg rammeles utan megsemmisul az auto", destroyed, `${rams} rammeles utan`);
   check(
-    "a megsemmisult auto eltunik",
-    dead.otherVisible === false,
-    `lathato = ${dead.otherVisible}`,
+    "a megsemmisulest robbanas kiseri",
+    explosionSeen === true,
+    `${explosionsBefore} -> ${explosionsAfter} robbanas`,
+  );
+  check("eleg rammeles utan megsemmisul az auto", destroyed, `${rams} rammeles utan`);
+  // A RONCS meg egy pillanatig latszik (WRECK_LINGER_MS), csak utana
+  // tunik el. Korabban ugyanabban a kepkockaban pattant ki a vilagbol,
+  // amelyikben meghalt -- a jatekos ezt "egyszeruen eltunt"-kent latta.
+  // Ezert VARUNK az eltunesre, nem egy pillanatot mintazunk.
+  let vanished = false;
+  for (let i = 0; i < 20; i++) {
+    if ((await viewOf(a)).otherVisible === false) { vanished = true; break; }
+    await sleep(200);
+  }
+  check(
+    "a megsemmisult auto vegul eltunik",
+    vanished,
+    vanished ? "a roncs utan" : "lathato maradt",
   );
   check(
     "a megsemmisult autonak nincs fizikai teste",
     dead.otherHasBody === false,
     "kulonben lathatatlan akadaly maradna",
+  );
+
+  // A MECCS kozbeszolhat: az eletek bevezetese ota (Last Car Standing)
+  // egy hosszabb futasban a jatekos KIESHET, es akkor -- helyesen --
+  // nem szuletik ujra. Ilyenkor a lenti ellenorzesek nem a
+  // ujraszuletest merik, hanem a meccs-szabalyt; ezt kulon mondjuk ki,
+  // hogy ne "elromlott ujraszuletes"-kent jelenjen meg.
+  const matchState = (await b.evaluate(`(function () {
+    var s = window.__spike;
+    return { lives: s.net.lives, phase: s.net.match.phase };
+  })()`)) as { lives: number | null; phase: string };
+  check(
+    "a meccs nem szolt kozbe (van meg elete, fut a meccs)",
+    (matchState.lives ?? 0) > 0 && matchState.phase === "playing",
+    `${matchState.lives} elet, fazis: ${matchState.phase}`,
   );
 
   // Ujraszuletes: a szerver kuldi a helyet, a kliens odaall.

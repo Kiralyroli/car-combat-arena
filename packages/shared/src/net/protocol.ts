@@ -15,6 +15,7 @@
  * erintese nelkul.
  */
 
+import type { MatchPhase } from "../match";
 /** Halozati snapshot-rata (Hz). A fizika ettol fuggetlenul 60 Hz -- lasd 15.3. */
 export const SNAPSHOT_HZ = 20;
 
@@ -78,6 +79,13 @@ export interface AimState {
 /** Egy jatekos allapota egy adott szerver-tickben (lasd 15.4). */
 export interface PlayerSnapshot extends WheelVisualState, AimState {
   id: string;
+  /**
+   * A jatekos megjelenitett neve (mar tisztitva -- lasd
+   * sanitizePlayerName). Minden snapshotban ott van, mert az
+   * eredmenyjelzo es az auto folotti felirat is ebbol epul: igy egy
+   * kesobb csatlakozo kliensnek sem kell kulon nev-lekerdezes.
+   */
+  name: string;
   position: [number, number, number];
   /** Quaternion (x, y, z, w). */
   rotation: [number, number, number, number];
@@ -91,6 +99,11 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * tartosan -- barmelyik snapshot helyreallitja a helyes allapotot.
    */
   boostGrants: number;
+  /**
+   * Hany elete van meg (Last Car Standing). 0 = kiesett, nezokent van
+   * jelen -- nem szuletik ujra, es nem is sebezheto.
+   */
+  lives: number;
 }
 
 /**
@@ -184,6 +197,24 @@ export interface JoinedMessage {
   spawn: [number, number, number];
 }
 
+/**
+ * A meccs allapota a snapshotban (Last Car Standing).
+ *
+ * A fazist es a gyoztest a SZERVER dönti el; a kliens csak megjeleniti.
+ * A visszaszamlalasokat HATRALEVO idokent kuldjuk, nem idopontkent --
+ * igy nem kell orajel-szinkron a szerverrel (ugyanaz az elv, mint az
+ * interpolacios puffernel).
+ */
+export interface MatchSnapshot {
+  phase: MatchPhase;
+  /** Hany jatekos van meg talpon (eletben levo eletekkel). */
+  survivors: number;
+  /** A gyoztes azonositoja, vagy null (meg megy a meccs, vagy dontetlen). */
+  winnerId: string | null;
+  /** Mennyi van meg az uj meccsig (ms); 0, ha nem `ended` a fazis. */
+  restartInMs: number;
+}
+
 /** Egy repulo rakéta allapota a snapshotban. */
 export interface RocketSnapshot {
   id: number;
@@ -227,6 +258,8 @@ export interface SnapshotMessage {
    * a kliens a config-bol ismeri.
    */
   pickupsAvailable: boolean[];
+  /** A meccs allapota (Last Car Standing) -- lasd match.ts. */
+  match: MatchSnapshot;
 }
 
 export interface PlayerJoinedMessage {

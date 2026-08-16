@@ -4,14 +4,17 @@ import {
   FIXED_DT,
   HEALTHY_WHEEL,
   MAX_STEPS_PER_FRAME,
+  ROCKET_COOLDOWN_MS,
   NEUTRAL_INPUT as NEUTRAL_DRIVE,
   RapierBackend,
   type VehicleBackend,
   type WheelDamage,
 } from "@cca/shared";
 import { Aim } from "./aim";
-import { initDebugPanel } from "./debugPanel";
-import { hideLoading, Hud, showError } from "./hud";
+import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
+import { DevMode } from "./devMode";
+import { hideLoading, Hud, MatchHud, PlayerHud, Scoreboard, showError } from "./hud";
+import { NameGate } from "./nameGate";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
 import { ExplosionQueue } from "./network/explosionQueue";
@@ -46,9 +49,20 @@ async function main(): Promise<void> {
    * celpontot (sugar-vetites), es AZT kuldjuk a szervernek -- az irany
    * a szerver hiteles pozicioja es a celpont kozott all elo.
    */
+  /**
+   * Mikor kertunk utoljara kilovest (performance.now).
+   *
+   * A hutes kijelzese ebbol indul, nem a szerver valaszabol: igy a
+   * visszajelzes AZONNALI. A szerver ugyanezt a ROCKET_COOLDOWN_MS-t
+   * ervenyesiti, tehat a ketto nem csuszik szet -- legfeljebb egy
+   * elutasitott loves eseten mutatunk rovid hutest folosen.
+   */
+  let lastFireAt = -Infinity;
+
   function fireAtCrosshair(): void {
     const [ndcX, ndcY] = aim.ndc();
     net.fire(view.aimPointAt(ndcX, ndcY));
+    lastFireAt = performance.now();
   }
   aim.onFire(fireAtCrosshair);
 
@@ -78,7 +92,20 @@ async function main(): Promise<void> {
     };
   }
   const hud = new Hud(backend.name, backend.version);
+  const matchHud = new MatchHud();
+  const playerHud = new PlayerHud();
+  const scoreboard = new Scoreboard();
   initDebugPanel();
+
+  // Dev mod: a fizika-csuszkak es a technikai panel CSAK itt latszik.
+  // A jatekosnak a PlayerHud marad (HP, boost, sebesseg, fegyver).
+  const dev = new DevMode();
+  dev.onChange((enabled) => {
+    setDebugPanelVisible(enabled);
+    hud.setVisible(enabled);
+    // A CSS ebbol tudja kikerulni a csuszka-panelt (lasd body.dev).
+    document.body.classList.toggle("dev", enabled);
+  });
 
   input.onAction((action) => {
     if (action === "reset") {
@@ -130,6 +157,15 @@ async function main(): Promise<void> {
 
   /** A boost-tartaly: a Shift ebbol fogy, a pickup ezt tolti. */
   const boostTank = new BoostTank();
+
+  /**
+   * Tavoli jatekosonkent az utoljara KIRAJZOLT HP.
+   *
+   * Ebbol latszik a megsemmisules PILLANATA (elo -> 0 atmenet), amire
+   * robbanast inditunk. Sima allapotbol ez nem derulne ki: a 0 HP
+   * onmagaban csak annyit mond, hogy a kocsi mar halott.
+   */
+  const lastDrawnHp = new Map<string, number>();
   net.on({
     onJoined: (_playerId, roomCode, spawn) => {
       location.hash = roomCode;
@@ -205,16 +241,20 @@ async function main(): Promise<void> {
     console.log(`Mesterseges kesleltetes: ${lagMs} ms (jitter ${jitterMs} ms)`);
   }
 
+  // A nevet a csatlakozas ELOTT kerjuk be: a szerver a "join"
+  // uzenetben kapja meg. A betoltes-jelzot elotte tuntetjuk el, hogy a
+  // parbeszed ne egy "Fizikai motor betoltese..." felirat folott alljon.
+  hideLoading();
+  const playerName = await new NameGate().ask();
+
   net
-    .connect(SERVER_URL, roomFromUrl || undefined, lagMs, jitterMs)
+    .connect(SERVER_URL, roomFromUrl || undefined, lagMs, jitterMs, playerName)
     .catch((err: unknown) => {
       // A halozat hianya NEM allitja meg a jatekot: egyjatekos modban
       // tovabb lehet vezetni (ez a fejlesztes kozben is kenyelmesebb).
       console.warn("Nem sikerult csatlakozni a szerverhez:", err);
       hud.setNetworkStatus("offline", 0);
     });
-
-  hideLoading();
 
   let last = performance.now();
   let accumulator = 0;
@@ -325,7 +365,27 @@ async function main(): Promise<void> {
       currWheels,
       alpha,
     );
-    view.updateCamera(interpolatedChassis);
+    // NEZOMOD: ha elfogytak az eleteink, a sajat autonk elrejtve marad,
+    // es a kamera egy meg talpon levo jatekost kovet.
+    //
+    // A kamerat SZANDEKOSAN nem kell atalakitani ehhez: ugyanazt a
+    // transzform-alaku adatot kapja, csak nem a sajat autonktol. Igy a
+    // kovetes, a simitas es a dolesszog kezelese valtozatlan.
+    const spectating = net.lives !== null && net.lives <= 0;
+    view.setOwnCarVisible(!spectating);
+
+    let cameraTarget = interpolatedChassis;
+    if (spectating) {
+      const alive = net.remotes
+        .ids()
+        .find((id) => (net.remotes.hpOf(id) ?? 0) > 0);
+      const target = alive ? view.remoteCarTransform(alive) : null;
+      // Ha senkit nem talalunk (mindenki kiesett, vagy meg nincs adat),
+      // marad a sajat -- rejtett -- autonk nezopontja: igy a kamera nem
+      // ugrik a vilag kozepere.
+      if (target) cameraTarget = target;
+    }
+    view.updateCamera(cameraTarget);
 
     // --- Halozat: sajat allapot kuldese, tavoli autok interpolacioja ---
     // A sajat autot NEM a szervertol kapjuk vissza (hibrid authority,
@@ -366,19 +426,40 @@ async function main(): Promise<void> {
         backend.addRemoteBody(id);
       }
 
+      const state = net.remotes.sample(id, now);
+      if (!state) continue;
+
+      // A HP a KIRAJZOLT idopillanatbol jon (state.hp), nem a legfrissebb
+      // snapshotbol. A tavoli autot INTERP_DELAY_MS-szel korabbrol
+      // rajzoljuk, tehat a halalnak is ott kell bekovetkeznie -- a friss
+      // HP-val az auto ~100 ms-mal a latott halala ELOTT tunt el, es a
+      // jatekos ezt "egyszeruen eltunt"-kent latta.
+      const remoteHp = state.hp;
+      const wasAlive = (lastDrawnHp.get(id) ?? remoteHp) > 0;
+      lastDrawnHp.set(id, remoteHp);
+
+      // Megsemmisules: robbanas ott, ahol a jatekos az autot LATJA.
+      // Enelkul a kocsi nyomtalanul eltunt.
+      if (wasAlive && remoteHp === 0) {
+        const body = backend.getRemoteBody(id);
+        const at: [number, number, number] = body
+          ? [body.position[0], body.position[1], body.position[2]]
+          : [state.position.x, state.position.y, state.position.z];
+        view.spawnExplosion(at, now);
+      }
+
       // Megsemmisult auto: eltunik, es a FIZIKAI TESTE is megszunik --
-      // kulonben egy lathatatlan akadallyal lehetne utkozni.
-      const remoteHp = net.remotes.hpOf(id);
-      view.setRemoteHp(id, remoteHp);
+      // kulonben egy lathatatlan akadallyal lehetne utkozni. A test a
+      // LATVANNYAL egyutt tunik el, hogy ne lehessen egy mar nem lathato
+      // roncsnak utkozni (es forditva).
+      view.setRemoteName(id, net.remotes.nameOf(id));
+      view.setRemoteHp(id, remoteHp, now);
       if (remoteHp === 0) {
         backend.removeRemoteBody(id);
         continue;
       }
       // Ujraszuletes utan visszakerul a teste.
       if (!backend.getRemoteBody(id)) backend.addRemoteBody(id);
-
-      const state = net.remotes.sample(id, now);
-      if (!state) continue;
 
       // A HELYET a fizikai testrol vesszuk, nem kozvetlenul a halozati
       // mintabol. A test ugyanoda van vezerelve, DE az utkozes lokeset
@@ -435,7 +516,34 @@ async function main(): Promise<void> {
 
     view.render();
 
+    playerHud.update(
+      backend.getTelemetry(),
+      currWheels,
+      net.hp,
+      boostTank.fraction,
+      Math.max(0, ROCKET_COOLDOWN_MS - (renderNow - lastFireAt)),
+    );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
+    scoreboard.update(
+      [
+        // A SAJAT sorunk a halozati rtegbol jon (a szerver tisztitott
+        // neve es a szerver szerinti eletszam).
+        ...(net.playerId && net.ownName
+          ? [{ id: net.playerId, name: net.ownName, lives: net.lives ?? 0 }]
+          : []),
+        ...net.remotes.ids().map((id) => ({
+          id,
+          name: net.remotes.nameOf(id),
+          lives: net.remotes.livesOf(id),
+        })),
+      ],
+      net.playerId,
+    );
+    matchHud.update(
+      net.match,
+      net.lives,
+      net.match.winnerId === null ? null : net.match.winnerId === net.playerId,
+    );
 
     requestAnimationFrame(frame);
   }

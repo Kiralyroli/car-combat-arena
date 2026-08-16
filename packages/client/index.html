@@ -10,6 +10,19 @@
         font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
       }
       * { box-sizing: border-box; }
+
+      /*
+       * A "hidden" attributum ERVENYESULJON az ID-szelektoros
+       * display-szabalyok folott is.
+       *
+       * A bongeszo alap-stiluslapja [hidden] { display: none } szabalyt
+       * ad, de egy #valami { display: flex } szabaly ID-specifikussaga
+       * erosebb -- tehat felulirja, es az elem a "hidden" ellenere
+       * KIRAJZOLODIK. A #match-result eppen igy takarta el az egesz
+       * jatekot: inset: 0 meretben, 72%-os sotet hatterrel, vegig.
+       * Ugyanez fenyegette a #player-hud es a #match-banner elemeket is.
+       */
+      [hidden] { display: none !important; }
       html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1117; }
       canvas { display: block; }
 
@@ -61,9 +74,14 @@
       .wheel.broken { border-color: #da3633; color: #f85149; text-decoration: line-through; }
       .wheel.air { opacity: 0.45; }
 
+      /*
+       * A sugo-sor CSAK dev modban latszik, es a jatekos-HUD FOLE kerul --
+       * kulonben rarajzolodna a HP/BOOST savokra (a ketto ugyanabban a
+       * bal also sarokban van).
+       */
       #help {
         position: fixed;
-        bottom: 12px;
+        bottom: 104px;
         left: 12px;
         padding: 10px 14px;
         background: rgba(13, 17, 23, 0.82);
@@ -228,6 +246,230 @@
         line-height: 1.4;
         margin-top: 3px;
       }
+      /* --- Jatekos-HUD (also sav) --- */
+      #player-hud {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 18px 24px 20px;
+        /* Lagy sotetites alulrol: a HUD olvashato marad vilagos palyan
+           is, de nem vag el egy kemeny savot a kepbol. */
+        /* Enyhe sotetites, hogy a szoveg olvashato legyen -- de ne
+           hasson a jatekra boritott retegnek. */
+        background: linear-gradient(to top, rgba(13, 17, 23, 0.6), transparent 85%);
+        pointer-events: none;
+        user-select: none;
+        font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+      }
+      /*
+       * Dev modban a jobb oldalt 300 px-es csuszka-panel all -- a HUD
+       * jobb oldali blokkjat (rakéta, gumik) kihuzzuk alola, kulonben
+       * eltakarna.
+       */
+      body.dev #player-hud { padding-right: 336px; }
+
+      #player-hud .stack { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+      #player-hud .stack.right { align-items: flex-end; }
+
+      #player-hud .gauge { display: flex; align-items: center; gap: 10px; }
+      #player-hud .cap {
+        width: 52px;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        color: #8b949e;
+      }
+      #player-hud .bar {
+        position: relative;
+        display: block;
+        width: 210px;
+        height: 18px;
+        background: rgba(1, 4, 9, 0.75);
+        border: 1px solid #30363d;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #player-hud .bar i {
+        display: block;
+        height: 100%;
+        width: 100%;
+        /* A savok szelessege sűrűn valtozik; a rovid atmenet elsimitja a
+           20 Hz-es snapshot-lepcsoket, de nem kesik erezhetoen. */
+        transition: width 120ms linear, background-color 200ms linear;
+      }
+      #player-hud .num {
+        min-width: 56px;
+        font-size: 17px;
+        font-variant-numeric: tabular-nums;
+        color: #e6edf3;
+      }
+
+      #player-hud .speedo {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+      }
+      #player-hud .speedo .value {
+        font-size: 62px;
+        font-weight: 700;
+        line-height: 1;
+        color: #e6edf3;
+        font-variant-numeric: tabular-nums;
+      }
+      #player-hud .speedo .unit { font-size: 14px; color: #8b949e; }
+
+      #player-hud .weapon {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 12px;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        background: rgba(1, 4, 9, 0.6);
+      }
+      #player-hud .weapon .state { font-size: 14px; color: #3fb950; }
+      #player-hud .weapon.reloading .state { color: #d29922; }
+
+      #player-hud .tyre-block { display: flex; align-items: center; gap: 10px; }
+      #player-hud .tyres { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+      #player-hud .tyre {
+        width: 34px;
+        height: 12px;
+        border: 1px solid #30363d;
+        border-radius: 2px;
+        background: #1f2429;
+      }
+      #player-hud .tyre.hurt { background: #6b4a1f; border-color: #9e6a03; }
+      #player-hud .tyre.broken { background: #8b2f2a; border-color: #da3633; }
+
+      /*
+       * A felso sav ELENK, mint az also HUD.
+       *
+       * Eloszor halvany szurke szoveggel keszult, es emiatt ugy hatott,
+       * mintha le lenne tiltva -- kulonosen az elenk (zold/cian) also
+       * savok mellett. A jatek allapota nem masodlagos informacio.
+       */
+      /* --- Eredmenyjelzo (jobb felso sarok) --- */
+      #scoreboard {
+        position: fixed;
+        top: 14px;
+        right: 14px;
+        min-width: 190px;
+        padding: 10px 12px;
+        background: rgba(1, 4, 9, 0.72);
+        border: 1px solid #4d5866;
+        border-radius: 8px;
+        font: 13px/1.5 ui-monospace, monospace;
+        color: #e6edf3;
+        pointer-events: none;
+        user-select: none;
+      }
+      /* Dev modban a jobb oldalt a csuszka-panel all -- arrebb toljuk. */
+      body.dev #scoreboard { right: 336px; }
+      #scoreboard .head {
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        color: #9aa7b5;
+        margin-bottom: 6px;
+      }
+      #scoreboard .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+      }
+      #scoreboard .row.self .nm { color: #f0a020; font-weight: bold; }
+      #scoreboard .row.out .nm,
+      #scoreboard .row.out .lv { color: #6e7681; text-decoration: line-through; }
+      #scoreboard .lv { color: #f0a020; letter-spacing: 2px; }
+
+      /* --- Nev megadasa --- */
+      #name-gate {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(1, 4, 9, 0.78);
+        font-family: ui-monospace, monospace;
+        z-index: 50;
+      }
+      #name-gate .box {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 22px 26px;
+        background: #0d1117;
+        border: 1px solid #4d5866;
+        border-radius: 10px;
+        min-width: 300px;
+      }
+      #name-gate .title { font-size: 18px; color: #e6edf3; margin-bottom: 4px; }
+      #name-gate .lbl { font-size: 11px; letter-spacing: 0.14em; color: #9aa7b5; }
+      #name-gate input {
+        padding: 9px 10px;
+        background: #010409;
+        border: 1px solid #30363d;
+        border-radius: 5px;
+        color: #e6edf3;
+        font: 15px ui-monospace, monospace;
+      }
+      #name-gate input:focus { outline: none; border-color: #58a6ff; }
+      #name-gate button {
+        padding: 9px 10px;
+        background: #1f6feb;
+        border: none;
+        border-radius: 5px;
+        color: #fff;
+        font: bold 14px ui-monospace, monospace;
+        cursor: pointer;
+      }
+      #name-gate button:hover { background: #388bfd; }
+
+      #match-banner {
+        position: fixed;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        padding: 9px 20px;
+        background: rgba(1, 4, 9, 0.72);
+        border: 1px solid #4d5866;
+        border-radius: 8px;
+        font: 15px/1.4 ui-monospace, monospace;
+        color: #ffffff;
+        letter-spacing: 0.04em;
+        pointer-events: none;
+      }
+      #match-banner .cap { color: #9aa7b5; font-size: 12px; letter-spacing: 0.14em; }
+      #match-banner .lives { color: #f0a020; letter-spacing: 3px; font-size: 17px; }
+      #match-banner .out { color: #ff6b62; font-weight: bold; }
+      #match-banner .phase { color: #e6edf3; }
+
+      #match-result {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: rgba(13, 17, 23, 0.72);
+        font: 16px/1.5 ui-monospace, monospace;
+        color: #e6edf3;
+        text-align: center;
+        pointer-events: none;
+      }
+      #match-result .title { font-size: 34px; font-weight: bold; }
+      #match-result .win { color: #3fb950; }
+      #match-result .lose { color: #f85149; }
+      #match-result .sub { color: #7d8590; }
     </style>
   </head>
   <body>
@@ -237,7 +479,68 @@
     <div id="help" hidden>
       <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
       <b>Space</b> kezifek &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> reset<br />
-      <b>1 2 3 4</b> kerek kiloves (FL FR RL RR) &nbsp; <b>0</b> kerekek javitasa
+      <b>1 2 3 4</b> kerek kiloves (FL FR RL RR, csak offline) &nbsp; <b>0</b> kerekek javitasa<br />
+      <b>Ctrl+Shift+D</b> fejlesztoi mod ki/be &nbsp; (<b>?dev=1</b> az URL-ben ugyanez)
+    </div>
+    <!--
+      Meccs-allapot kozepen felul (elo szamlalok) es kozepen
+      (eredmenyjelzo). Szandekosan kulon a #hud-tol: az a bal felso
+      sarokban levo, sűrű technikai panel, ez viszont a jatek allapotat
+      mondja -- azt a kepernyo kozepen kell latni, oda, ahova a jatekos
+      amugy is nez.
+    -->
+    <!-- Eredmenyjelzo: ki hany elettel all, eletszam szerint rendezve. -->
+    <div id="scoreboard" hidden></div>
+
+    <!--
+      Nev megadasa indulaskor. A jatek mar fut mogotte (vezetni lehet),
+      csak a csatlakozas var a nevre.
+    -->
+    <div id="name-gate" hidden>
+      <div class="box">
+        <div class="title">Car Combat Arena</div>
+        <label class="lbl" for="name-input">Neved</label>
+        <input id="name-input" type="text" autocomplete="off" spellcheck="false" />
+        <button id="name-go" type="button">Jatek</button>
+      </div>
+    </div>
+
+    <div id="match-banner" hidden></div>
+    <div id="match-result" hidden></div>
+
+    <!--
+      JATEKOS-HUD: a kepernyo also savja. Kulon a #hud-tol, ami a
+      fejlesztoi (dev mod) technikai panel -- lasd devMode.ts.
+    -->
+    <div id="player-hud" hidden>
+      <div class="stack">
+        <div class="gauge hp">
+          <span class="cap">HP</span>
+          <span class="bar"><i id="hp-fill"></i></span>
+          <span class="num" id="hp-num">--</span>
+        </div>
+        <div class="gauge boost">
+          <span class="cap">BOOST</span>
+          <span class="bar"><i id="boost-fill"></i></span>
+          <span class="num" id="boost-num">--</span>
+        </div>
+      </div>
+
+      <div class="speedo">
+        <span class="value" id="speed-num">0</span>
+        <span class="unit">km/h</span>
+      </div>
+
+      <div class="stack right">
+        <div class="weapon" id="weapon">
+          <span class="cap">RAKETA</span>
+          <span class="state" id="weapon-state">KESZ</span>
+        </div>
+        <div class="tyre-block">
+          <span class="cap">GUMIK</span>
+          <div class="tyres" id="tyres"></div>
+        </div>
+      </div>
     </div>
     <div id="debug-panel" hidden></div>
     <script type="module" src="/src/main.ts"></script>

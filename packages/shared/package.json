@@ -20,7 +20,9 @@
     "check:combat": "tsx scripts/check-combat.ts",
     "check:rocket": "tsx scripts/check-rocket.ts",
     "check:wheels": "tsx scripts/check-wheels.ts",
-    "check:pickups": "tsx scripts/check-pickups.ts"
+    "check:pickups": "tsx scripts/check-pickups.ts",
+    "check:match": "tsx scripts/check-match.ts",
+    "check:names": "tsx scripts/check-names.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0"

@@ -26,6 +26,9 @@ const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as con
 /** Milyen magasan lebegjen a HP-sav az auto kozeppontja felett (m). */
 const HP_BAR_HEIGHT = CHASSIS.halfExtents.y + 1.4;
 
+/** A nevtabla a HP-sav FOLE kerul, hogy a ketto ne fedje egymast. */
+const NAME_TAG_HEIGHT = HP_BAR_HEIGHT + 0.7;
+
 /**
  * A rakétaveto magassaga a chassis KOZEPPONTJAHOZ kepest (m).
  *
@@ -67,8 +70,14 @@ interface RemoteCar {
   launcher: { root: THREE.Group; tube: THREE.Object3D };
   /** HP-sav az auto felett (billboard sprite). */
   hpBar: THREE.Sprite;
+  /** Nevtabla a HP-sav felett. */
+  nameTag: THREE.Sprite;
+  /** Az utoljara KIRAJZOLT nev -- csak valtozaskor rajzolunk ujra. */
+  shownName: string;
   /** Az utoljara KIRAJZOLT HP -- csak valtozaskor rajzolunk ujra. */
   shownHp: number;
+  /** Mikor semmisult meg (a KIRAJZOLT idovonalon); null, ha el. */
+  diedAt: number | null;
   /** Halmozott gordulesi szog radianban -- a megtett utbol szamolva. */
   rollAngle: number;
   /** Elozo pozicio a megtett ut merésehez; null az elso frame-ig. */
@@ -124,6 +133,14 @@ export class SceneView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // SZANDEKOSAN nincs tonelekepezes (ACES).
+    //
+    // Kiprobaltam, es rontott: a jelenetet nem HDR-fenyek vilagitjak
+    // (hemisphere + egy nap), ezert az ACES nem a csucsfenyeket szeliditi,
+    // hanem az egesz kepet sotetiti -- meg a `scene.background` szinet is,
+    // tehat a megadott eg-szin helyett egy sokkal sotetebb valtozat
+    // jelent meg. Pont az ellenkezoje annak, amit el akartunk erni.
+    // A szinek igy pontosan ugy jelennek meg, ahogy meg vannak adva.
     document.body.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -537,12 +554,27 @@ export class SceneView {
 
     this.scene.add(group);
     this.explosions.push({ group, core, shock, startedAt: now });
+    this.explosionTotal++;
   }
 
-  /** Hany robbanas-effekt fut eppen -- a tesztek ezt figyelik. */
+  /** Hany robbanas-effekt fut eppen. */
   explosionCount(): number {
     return this.explosions.length;
   }
+
+  /**
+   * Hany robbanas indult el OSSZESEN (monoton no).
+   *
+   * A tesztek ezt figyeljek, ne a fenti pillanatnyi darabszamot: egy
+   * effekt csak 650 ms-ig el, tehat egy kesobbi mintavetel mar nem
+   * latja. Pontosan ez tortent -- a teszt "nem volt robbanas"-t
+   * jelentett olyan futasban, ahol a robbanas rendben lezajlott.
+   */
+  get explosionsSpawned(): number {
+    return this.explosionTotal;
+  }
+
+  private explosionTotal = 0;
 
   /**
    * A futo robbanasok leptetese. A render-ciklusbol hivando.
@@ -617,6 +649,53 @@ export class SceneView {
     return sprite;
   }
 
+  /**
+   * Nevtabla az auto folott.
+   *
+   * Ugyanaz a billboard-technika, mint a HP-savnal: vaszonra rajzolt
+   * szoveg sprite-kent. A nev igy mindig a kamera fele nez, es nem kell
+   * kulon HTML-reteget pozicionalni a 3D-s jelenet fole.
+   *
+   * A szoveget SZOVEGKENT rajzoljuk (fillText), nem HTML-be szurjuk --
+   * egy masik jatekos neve tehat nem tud jelolest injektalni.
+   */
+  private createNameTag(): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 48;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }),
+    );
+    sprite.scale.set(3.4, 0.64, 1);
+    sprite.renderOrder = 999;
+    return sprite;
+  }
+
+  private drawNameTag(sprite: THREE.Sprite, name: string): void {
+    const texture = (sprite.material as THREE.SpriteMaterial).map;
+    if (!texture) return;
+    const canvas = texture.image as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = "bold 26px ui-monospace, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Sotet korvonal: a nev vilagos es sotet hattér elott is olvashato
+    // marad, kulon hatterdoboz nelkul (az takarna a palyat).
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(1, 4, 9, 0.9)";
+    ctx.strokeText(name, canvas.width / 2, canvas.height / 2);
+    ctx.fillStyle = "#e6edf3";
+    ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+    texture.needsUpdate = true;
+  }
+
   private drawHpBar(sprite: THREE.Sprite, hp: number): void {
     const texture = (sprite.material as THREE.SpriteMaterial).map;
     if (!texture) return;
@@ -659,17 +738,54 @@ export class SceneView {
    * kiveszi az utkozes-kiertekelesbol. Enelkul egy "roncs" maradna a
    * palyan, aminek se sebzese, se utkozese nincs, de latszik.
    */
-  setRemoteHp(id: string, hp: number | null): void {
+  /** A tavoli auto folotti nevtabla szovege. */
+  setRemoteName(id: string, name: string): void {
+    const car = this.remoteCars.get(id);
+    if (!car || car.shownName === name) return;
+    car.shownName = name;
+    this.drawNameTag(car.nameTag, name);
+  }
+
+  setRemoteHp(id: string, hp: number | null, now: number): void {
     const car = this.remoteCars.get(id);
     if (!car || hp === null) return;
-    if (car.shownHp === hp) return;
-    car.shownHp = hp;
 
-    const alive = hp > 0;
-    car.wrapper.visible = alive;
-    car.hpBar.visible = alive;
-    if (alive) this.drawHpBar(car.hpBar, hp);
+    if (hp > 0) {
+      // Elo (vagy ujraszuletett) auto.
+      car.diedAt = null;
+      car.wrapper.visible = true;
+      car.hpBar.visible = true;
+      car.nameTag.visible = true;
+      if (car.shownHp !== hp) {
+        car.shownHp = hp;
+        this.drawHpBar(car.hpBar, hp);
+      }
+      return;
+    }
+
+    // Megsemmisult. A HP-sav azonnal eltunik (a 0 HP-t nem kell
+    // kirajzolni), a RONCS viszont marad meg egy pillanatra.
+    if (car.diedAt === null) {
+      car.diedAt = now;
+      car.shownHp = 0;
+      car.hpBar.visible = false;
+      car.nameTag.visible = false;
+    }
+    // A roncs csak a robbanas utan tunik el. Enelkul a kocsi ugyanabban
+    // a kepkockaban pattant ki a vilagbol, amelyikben meghalt -- a
+    // jatekos ezt "egyszeruen eltunt"-kent latta, nem megsemmisulesnek.
+    car.wrapper.visible = now - car.diedAt < SceneView.WRECK_LINGER_MS;
   }
+
+  /**
+   * Meddig marad meg a roncs a megsemmisules utan (ms).
+   *
+   * A robbanas 650 ms; a roncs valamivel tovabb marad, hogy a
+   * jatekosnak legyen ideje osszekapcsolni a kettot. A FIZIKAI teste
+   * viszont AZONNAL megszunik -- azon a rovid szakaszon at lehet hajtani
+   * rajta, ami sokkal kevesbe zavaro, mint egy lathatatlan akadaly.
+   */
+  private static readonly WRECK_LINGER_MS = 900;
 
   /** Megsemmisult-e a tavoli auto (a fizikai teste ilyenkor nem kell). */
   isRemoteCarAlive(id: string): boolean {
@@ -683,6 +799,44 @@ export class SceneView {
 
   get remoteCarCount(): number {
     return this.remoteCars.size;
+  }
+
+  /**
+   * Egy tavoli auto KIRAJZOLT transzformja -- a nezomodhoz.
+   *
+   * Kiesett jatekosnal a kamera egy meg elo jatekost kovet, es ehhez
+   * ugyanaz az `updateCamera` hasznalhato, mint sajat autonal: a
+   * kamera nem tudja, kit kovet.
+   */
+  remoteCarTransform(id: string): Transform | null {
+    const car = this.remoteCars.get(id);
+    if (!car) return null;
+    return {
+      position: [car.wrapper.position.x, car.wrapper.position.y, car.wrapper.position.z],
+      quaternion: [
+        car.wrapper.quaternion.x,
+        car.wrapper.quaternion.y,
+        car.wrapper.quaternion.z,
+        car.wrapper.quaternion.w,
+      ],
+    };
+  }
+
+  /**
+   * A SAJAT autonk lathatosaga.
+   *
+   * Kieses utan elrejtjuk: a jatekos nezo lesz, es a sajat roncsa csak
+   * takarna a kilatast. (A tobbiek amugy is elrejtettek mar, mert a
+   * szerver megsemmisultkent kuldi.)
+   */
+  setOwnCarVisible(visible: boolean): void {
+    this.chassisMesh.visible = visible;
+    for (const wheel of this.wheelGroups) wheel.visible = visible;
+  }
+
+  /** Latszik-e a sajat autonk -- a tesztek ezt olvassak. */
+  get ownCarVisible(): boolean {
+    return this.chassisMesh.visible;
   }
 
   remoteCarIds(): string[] {
@@ -758,6 +912,9 @@ export class SceneView {
     // minden frame-ben az auto fole visszuk (lasd updateRemoteCar).
     const hpBar = this.createHpBar();
     this.scene.add(hpBar);
+    // Nevtabla a HP-sav folott, ugyanezzel a logikaval.
+    const nameTag = this.createNameTag();
+    this.scene.add(nameTag);
 
     this.remoteCars.set(id, {
       wrapper,
@@ -766,7 +923,10 @@ export class SceneView {
       wheelRestY,
       launcher,
       hpBar,
+      nameTag,
+      shownName: "",
       shownHp: -1,
+      diedAt: null,
       rollAngle: 0,
       prevPos: null,
     });
@@ -779,10 +939,12 @@ export class SceneView {
     this.scene.remove(car.wrapper);
     // A HP-sav kulon all a jelenetben, ezert kulon is kell eltavolitani,
     // es a sajat texturajat/anyagat felszabaditani.
-    this.scene.remove(car.hpBar);
-    const material = car.hpBar.material as THREE.SpriteMaterial;
-    material.map?.dispose();
-    material.dispose();
+    for (const sprite of [car.hpBar, car.nameTag]) {
+      this.scene.remove(sprite);
+      const material = sprite.material as THREE.SpriteMaterial;
+      material.map?.dispose();
+      material.dispose();
+    }
     this.remoteCars.delete(id);
   }
 
@@ -827,6 +989,11 @@ export class SceneView {
     car.hpBar.position.set(
       state.position.x,
       state.position.y + HP_BAR_HEIGHT,
+      state.position.z,
+    );
+    car.nameTag.position.set(
+      state.position.x,
+      state.position.y + NAME_TAG_HEIGHT,
       state.position.z,
     );
 
@@ -963,6 +1130,8 @@ export class SceneView {
   }
 
   private setupLights(): void {
+    // Emelve (1.1 -> 1.6), hogy a fem-jellegu PBR anyagok kornyezeti
+    // fenykep nelkul is jol lathatoak legyenek (lasd normalizeMaterials).
     // Emelve (1.1 -> 1.6), hogy a fem-jellegu PBR anyagok kornyezeti
     // fenykep nelkul is jol lathatoak legyenek (lasd normalizeMaterials).
     this.scene.add(new THREE.HemisphereLight(0x9fb4d0, 0x2a2f38, 1.6));

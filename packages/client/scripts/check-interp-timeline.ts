@@ -37,6 +37,7 @@ function check(label: string, ok: boolean, detail: string): void {
 function player(t: number): PlayerSnapshot {
   return {
     id: "P",
+    name: "P",
     position: [0, 0, t],
     rotation: [0, 0, 0, 1],
     velocity: [0, 0, 1],
@@ -48,6 +49,7 @@ function player(t: number): PlayerSnapshot {
     aimPitch: 0,
     hp: 100,
     boostGrants: 0,
+    lives: 3,
   };
 }
 

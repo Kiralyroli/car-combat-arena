@@ -18,6 +18,8 @@ export * from "./types";
 export * from "./wheelVisuals";
 export * from "./wheelDamage";
 export * from "./pickups";
+export * from "./match";
+export * from "./playerName";
 export * from "./combat";
 export * from "./rocket";
 export * from "./physics/rapier";

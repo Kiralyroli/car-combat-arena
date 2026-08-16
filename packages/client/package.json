@@ -15,9 +15,12 @@
     "check:death": "tsx scripts/check-death.ts",
     "check:wheel-damage": "tsx scripts/check-wheel-damage.ts",
     "check:pickup": "tsx scripts/check-pickup.ts",
+    "check:match-flow": "tsx scripts/check-match-flow.ts",
+    "check:dev": "tsx scripts/check-dev-mode.ts",
     "check:rocket-visual": "tsx scripts/check-rocket-visual.ts",
     "check:timeline": "tsx scripts/check-interp-timeline.ts",
     "check:boost": "tsx scripts/check-boost-tank.ts",
+    "check:scoreboard": "tsx scripts/check-scoreboard.ts",
     "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200"
   },
   "dependencies": {

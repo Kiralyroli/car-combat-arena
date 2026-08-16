@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "spike",
+      "name": "client",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "spike", "run", "dev"],
+      "runtimeArgs": ["run", "dev", "--workspace", "@cca/client"],
       "port": 5173
     }
   ]

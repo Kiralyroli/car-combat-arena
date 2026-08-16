@@ -1,18 +1,34 @@
-import type { Telemetry, WheelReadout } from "@cca/shared";
+import type { MatchSnapshot, Telemetry, WheelReadout } from "@cca/shared";
 
+/**
+ * FEJLESZTOI panel: technikai szamlalok (fps, ping, fizikai lepesido,
+ * kerekenkenti tapadas, backend verzio).
+ *
+ * Csak DEV MODBAN latszik -- lasd devMode.ts. A jatekosnak ezek zajok:
+ * eltakarjak azt, amit valojaban nezni akar, es semmilyen dontest nem
+ * hoz beloluk. Amit igen, az a PlayerHud-on van.
+ */
 export class Hud {
   private el: HTMLElement;
   private lastRender = 0;
   private networkStatus = "csatlakozas...";
   private remoteCount = 0;
+  private visible = false;
 
   constructor(private backendName: string, private backendVersion: string) {
     const el = document.getElementById("hud");
     if (!el) throw new Error("#hud nem talalhato");
     this.el = el;
-    this.el.hidden = false;
+  }
+
+  /** Dev modban latszik, kulonben rejtve (a sugo-sorral egyutt). */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    this.el.hidden = !visible;
     const help = document.getElementById("help");
-    if (help) help.hidden = false;
+    if (help) help.hidden = !visible;
+    // A kovetkezo update azonnal rajzoljon, ne varjon a 10 Hz-es utemre.
+    this.lastRender = 0;
   }
 
   /**
@@ -35,6 +51,10 @@ export class Hud {
     /** A boost-tartaly telitettsege (0..1). */
     boostFraction = 1,
   ): void {
+    // Rejtett panelnal semmit nem szamolunk: dev mod nelkul ez a
+    // teljes blokk kimarad a fo ciklusbol.
+    if (!this.visible) return;
+
     // 10 Hz eleg a HUD-nak, ne terhelje a fo ciklust.
     const now = performance.now();
     if (now - this.lastRender < 100) return;
@@ -105,6 +125,269 @@ export class Hud {
       <div class="label">kerekek (tapadas)</div>
       <div class="wheel-grid">${wheelHtml}</div>
     `;
+  }
+}
+
+/**
+ * A JATEKOS HUD-ja: a kepernyo also savja.
+ *
+ * Csak az van rajta, amibol a jatekos dontest hoz: mennyi HP-ja es
+ * boostja van, milyen gyorsan megy, kesz-e a rakéta, es allnak-e meg a
+ * kerekei. A technikai szamlalok (fps, ping, fizikai lepesido, backend
+ * verzio) a FEJLESZTOI panelra kerultek -- lasd devMode.ts.
+ *
+ * A DOM-elemeket EGYSZER kerdezzuk le, es utana csak a valtozo
+ * ertekeket irjuk. A korabbi HUD minden frissitesnel ujraepitette a
+ * teljes innerHTML-t; egy 60 Hz-en frissulo savnal ez folosleges
+ * ujraparszolas.
+ */
+export class PlayerHud {
+  private readonly root: HTMLElement;
+  private readonly hpFill: HTMLElement;
+  private readonly hpNum: HTMLElement;
+  private readonly boostFill: HTMLElement;
+  private readonly boostNum: HTMLElement;
+  private readonly speedNum: HTMLElement;
+  private readonly weapon: HTMLElement;
+  private readonly weaponState: HTMLElement;
+  private readonly tyres: HTMLElement;
+
+  private tyreCells: HTMLElement[] = [];
+  private lastTyreKey = "";
+  private lastWeaponKey = "";
+
+  constructor() {
+    this.root = must("player-hud");
+    this.hpFill = must("hp-fill");
+    this.hpNum = must("hp-num");
+    this.boostFill = must("boost-fill");
+    this.boostNum = must("boost-num");
+    this.speedNum = must("speed-num");
+    this.weapon = must("weapon");
+    this.weaponState = must("weapon-state");
+    this.tyres = must("tyres");
+    this.root.hidden = false;
+  }
+
+  update(
+    t: Telemetry,
+    wheels: WheelReadout[],
+    hp: number | null,
+    boostFraction: number,
+    /** Hatralevo rakéta-hutes (ms); 0 = kesz. */
+    rocketCooldownMs: number,
+  ): void {
+    // HP. Halozat nelkul nincs ertelmes erteke (a szerver dönti el).
+    const hpPercent = hp === null ? 0 : Math.max(0, Math.min(100, hp));
+    this.hpFill.style.width = `${hpPercent}%`;
+    this.hpFill.style.backgroundColor =
+      hpPercent > 60 ? "#3fb950" : hpPercent > 25 ? "#d29922" : "#f85149";
+    this.hpNum.textContent = hp === null ? "--" : `${hp}`;
+
+    const boostPercent = Math.max(0, Math.min(1, boostFraction)) * 100;
+    this.boostFill.style.width = `${boostPercent}%`;
+    this.boostFill.style.backgroundColor =
+      boostPercent > 50 ? "#39d0ff" : boostPercent > 20 ? "#e3b341" : "#f85149";
+    this.boostNum.textContent = `${boostPercent.toFixed(0)}%`;
+
+    this.speedNum.textContent = `${Math.abs(t.speedKmh).toFixed(0)}`;
+
+    // Fegyver. A hutes a SAJAT kilovesunktol indul (lokalis joslat),
+    // ezert azonnal visszajelez -- a szerver dontese ugyanezt a
+    // hutest ervenyesiti.
+    const ready = rocketCooldownMs <= 0;
+    const weaponKey = ready ? "kesz" : `${Math.ceil(rocketCooldownMs / 100)}`;
+    if (weaponKey !== this.lastWeaponKey) {
+      this.lastWeaponKey = weaponKey;
+      this.weapon.classList.toggle("reloading", !ready);
+      this.weaponState.textContent = ready
+        ? "KESZ"
+        : `${(rocketCooldownMs / 1000).toFixed(1)} s`;
+    }
+
+    // Kerekek: csak allapotvaltaskor nyulunk a DOM-hoz.
+    const key = wheels
+      .map((w) => (w.damage.broken ? "b" : w.damage.gripMultiplier < 0.99 ? "h" : "o"))
+      .join("");
+    if (key === this.lastTyreKey) return;
+    this.lastTyreKey = key;
+
+    if (this.tyreCells.length !== wheels.length) {
+      this.tyres.innerHTML = "";
+      this.tyreCells = wheels.map(() => {
+        const cell = document.createElement("div");
+        cell.className = "tyre";
+        this.tyres.appendChild(cell);
+        return cell;
+      });
+    }
+    for (let i = 0; i < wheels.length; i++) {
+      this.tyreCells[i].className = `tyre ${
+        key[i] === "b" ? "broken" : key[i] === "h" ? "hurt" : ""
+      }`.trim();
+    }
+  }
+}
+
+function must(id: string): HTMLElement {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`#${id} nem talalhato`);
+  return el;
+}
+
+/**
+ * Meccs-allapot: felul a szamlalok, kozepen az eredmenyjelzo.
+ *
+ * SZANDEKOSAN kulon osztaly a Hud-tol. A Hud a bal felso technikai
+ * panel (fps, ping, kerekek); ez viszont a JATEK allapota, amit a
+ * kepernyo kozepen kell latni. Egybegyurva az eredmenyjelzo egy
+ * telemetria-sor kozott jelenne meg.
+ */
+export class MatchHud {
+  private readonly banner: HTMLElement;
+  private readonly result: HTMLElement;
+  private lastKey = "";
+
+  constructor() {
+    const banner = document.getElementById("match-banner");
+    const result = document.getElementById("match-result");
+    if (!banner || !result) throw new Error("#match-banner / #match-result nem talalhato");
+    this.banner = banner;
+    this.result = result;
+  }
+
+  /**
+   * @param lives     Sajat eletek szama; null, amig nincs snapshot.
+   * @param isOwnWin  A gyoztes MI vagyunk-e (null = dontetlen vagy meg megy).
+   */
+  update(
+    match: MatchSnapshot,
+    lives: number | null,
+    isOwnWin: boolean | null,
+  ): void {
+    // Csak VALTOZASKOR nyulunk a DOM-hoz: ez a ket elem minden frame-ben
+    // frissulne, pedig masodpercenkent legfeljebb egyszer valtozik
+    // ertelmesen (a visszaszamlalas is egesz masodpercekben).
+    const seconds = Math.ceil(match.restartInMs / 1000);
+    const key = `${match.phase}|${lives}|${match.survivors}|${match.winnerId}|${seconds}|${isOwnWin}`;
+    if (key === this.lastKey) return;
+    this.lastKey = key;
+
+    this.banner.hidden = false;
+    const eliminated = lives !== null && lives <= 0;
+    const livesText =
+      lives === null
+        ? "--"
+        : eliminated
+          ? '<span class="out">KIESTEL</span>'
+          : `<span class="lives">${"●".repeat(lives)}</span>`;
+
+    const phaseText =
+      match.phase === "waiting"
+        ? "varakozas jatekosokra"
+        : match.phase === "ended"
+          ? "meccs vege"
+          : `${match.survivors} jatekos talpon`;
+
+    this.banner.innerHTML =
+      `<span><span class="cap">ELET</span> ${livesText}</span>` +
+      `<span class="phase">${phaseText}</span>`;
+
+    if (match.phase !== "ended") {
+      this.result.hidden = true;
+      return;
+    }
+
+    // Eredmenyjelzo. A "dontetlen" nem elmeleti eset: ha az utolso ketto
+    // egyszerre semmisul meg, senki nem marad talpon.
+    const title =
+      isOwnWin === null
+        ? '<span class="title">DONTETLEN</span>'
+        : isOwnWin
+          ? '<span class="title win">GYOZTEL</span>'
+          : '<span class="title lose">VESZTETTEL</span>';
+
+    this.result.hidden = false;
+    this.result.innerHTML =
+      `${title}<div class="sub">uj meccs ${seconds} masodperc mulva</div>`;
+  }
+}
+
+/** Egy sor az eredmenyjelzon. */
+export interface ScoreRow {
+  id: string;
+  name: string;
+  lives: number;
+}
+
+/**
+ * Eredmenyjelzo: ki hany elettel all, ELETSZAM SZERINT rendezve.
+ *
+ * A legtobb elettel allo van legfelul. Azonos eletszamnal a nev dönt,
+ * hogy a sorrend ne ugralljon ertelmetlenul frame-rol frame-re -- egy
+ * stabil rendezes nelkul ket egyforma allasu jatekos folyamatosan
+ * helyet cserelne.
+ */
+/**
+ * Az eredmenyjelzo SORRENDJE: legtobb elet legfelul.
+ *
+ * Kulon, tiszta fuggveny, hogy DOM nelkul is tesztelheto legyen -- a
+ * sorrend a jatekos szamara lathato szabaly, nem a megjelenites
+ * mellekterméke.
+ *
+ * Azonos eletszamnal a NEV dönt. Enelkul ket egyforma allasu jatekos
+ * sorrendje frame-rol frame-re valtozhatna (a bejaras sorrendje nem
+ * garantalt), es a lista lathatoan ugralna.
+ */
+export function sortScoreRows(rows: readonly ScoreRow[]): ScoreRow[] {
+  return [...rows].sort(
+    (a, b) => b.lives - a.lives || a.name.localeCompare(b.name),
+  );
+}
+
+export class Scoreboard {
+  private readonly el: HTMLElement;
+  private lastKey = "";
+
+  constructor() {
+    this.el = must("scoreboard");
+  }
+
+  update(rows: ScoreRow[], ownId: string | null): void {
+    const sorted = sortScoreRows(rows);
+
+    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}`).join("|");
+    if (key === this.lastKey) return;
+    this.lastKey = key;
+
+    this.el.hidden = sorted.length === 0;
+    this.el.textContent = "";
+    if (sorted.length === 0) return;
+
+    const head = document.createElement("div");
+    head.className = "head";
+    head.textContent = "ALLAS";
+    this.el.appendChild(head);
+
+    for (const row of sorted) {
+      const line = document.createElement("div");
+      line.className = "row";
+      if (row.id === ownId) line.classList.add("self");
+      if (row.lives <= 0) line.classList.add("out");
+
+      const name = document.createElement("span");
+      name.className = "nm";
+      // SZOVEGKENT tesszuk be, nem innerHTML-lel: a nev egy MASIK
+      // jatekostol jon, tehat jelolest tartalmazhatna.
+      name.textContent = row.name;
+
+      const lives = document.createElement("span");
+      lives.className = "lv";
+      lives.textContent = row.lives > 0 ? "●".repeat(row.lives) : "KIESETT";
+
+      line.append(name, lives);
+      this.el.appendChild(line);
+    }
   }
 }
 

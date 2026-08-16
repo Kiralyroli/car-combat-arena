@@ -19,6 +19,14 @@ import { dirname, resolve } from "node:path";
 
 const DEV_SERVER_URL = "http://localhost:5173";
 
+/**
+ * A `--dev` kapcsolo a FEJLESZTOI modot kapcsolja be (fizika-csuszkak,
+ * technikai panel) -- lasd devMode.ts. E nelkul a jatekos-nezetet
+ * kapjuk, ami az alapertelmezett.
+ */
+const DEV_MODE = process.argv.includes("--dev");
+const PAGE_URL = `${DEV_SERVER_URL}?name=Nezo&dev=${DEV_MODE ? 1 : 0}`;
+
 function parseArgs(): { out: string; driveMs: number; waitMs: number } {
   const args = process.argv.slice(2);
   const out = args.find((a) => !a.startsWith("--")) ?? "out/screenshot.png";
@@ -58,8 +66,8 @@ async function main(): Promise<void> {
     });
     page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
-    console.log(`Navigalas: ${DEV_SERVER_URL}`);
-    await page.goto(DEV_SERVER_URL, { waitUntil: "networkidle", timeout: 30_000 });
+    console.log(`Navigalas: ${PAGE_URL}`);
+    await page.goto(PAGE_URL, { waitUntil: "networkidle", timeout: 30_000 });
 
     // Megvarjuk, hogy a fizikai motor betoltodjon (a #loading eltunik).
     await page.waitForSelector("#loading", { state: "detached", timeout: 15_000 });

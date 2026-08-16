@@ -59,6 +59,7 @@ interface Sample {
   brokenMask: number;
   aimYaw: number;
   aimPitch: number;
+  hp: number;
 }
 
 export interface InterpolatedState {
@@ -71,6 +72,16 @@ export interface InterpolatedState {
   brokenMask: number;
   aimYaw: number;
   aimPitch: number;
+  /**
+   * A megjelenitett idopillanathoz tartozo HP.
+   *
+   * SZANDEKOSAN a mintaban van, nem kulon (mindig friss) ertekkent: a
+   * tavoli autot INTERP_DELAY_MS-szel korabbrol rajzoljuk, tehat a
+   * halalnak is ott kell bekovetkeznie. A legfrissebb HP-t hasznalva az
+   * auto ~100 ms-mal AZELOTT tunt el, hogy a latott allapota meghalt
+   * volna -- a jatekos ezt "egyszeruen eltunt"-kent latta.
+   */
+  hp: number;
 }
 
 export class RemotePlayers {
@@ -87,8 +98,22 @@ export class RemotePlayers {
    */
   private readonly hp = new Map<string, number>();
 
+  /** Jatekosonkenti nev a legutobbi snapshotbol. */
+  private readonly names = new Map<string, string>();
+
+  /** Jatekosonkenti eletszam a legutobbi snapshotbol (eredmenyjelzo). */
+  private readonly lives = new Map<string, number>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
+  }
+
+  nameOf(id: string): string {
+    return this.names.get(id) ?? "";
+  }
+
+  livesOf(id: string): number {
+    return this.lives.get(id) ?? 0;
   }
 
   ids(): string[] {
@@ -102,17 +127,23 @@ export class RemotePlayers {
   remove(id: string): void {
     this.buffers.delete(id);
     this.hp.delete(id);
+    this.names.delete(id);
+    this.lives.delete(id);
   }
 
   clear(): void {
     this.buffers.clear();
     this.hp.clear();
+    this.names.clear();
+    this.lives.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
   ingest(players: PlayerSnapshot[], receivedAt: number): void {
     for (const player of players) {
       this.hp.set(player.id, player.hp);
+      this.names.set(player.id, player.name);
+      this.lives.set(player.id, player.lives);
 
       let buffer = this.buffers.get(player.id);
       if (!buffer) {
@@ -130,6 +161,7 @@ export class RemotePlayers {
         brokenMask: player.brokenMask,
         aimYaw: player.aimYaw,
         aimPitch: player.aimPitch,
+        hp: player.hp,
       });
 
       // Regi mintak eldobasa.
@@ -221,6 +253,9 @@ export class RemotePlayers {
       brokenMask: a.brokenMask,
       aimYaw: lerpAngle(a.aimYaw, b.aimYaw, t),
       aimPitch: a.aimPitch + (b.aimPitch - a.aimPitch) * t,
+      // A HP diszkret (a szerver dönti el, nincs koztes ertek), ezert
+      // a brokenMask-hoz hasonloan a REGEBBI mintabol vesszuk at.
+      hp: a.hp,
     };
   }
 

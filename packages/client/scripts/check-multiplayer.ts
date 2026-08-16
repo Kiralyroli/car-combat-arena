@@ -13,6 +13,9 @@ import { WHEEL } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/** A tesztkliensek neve -- a ?name= egyben atugorja a nev-parbeszedet. */
+const testName = "Multi";
+
 /**
  * Mesterseges halozati kesleltetes (oda-vissza ut, ms).
  *   LAG=200 npx tsx scripts/check-multiplayer.ts
@@ -29,9 +32,11 @@ const JITTER_MS = argOrEnv("jitter", "JITTER");
 
 /** A query a hash ELE kerul: .../?lag=200#ABCD */
 function clientUrl(hash: string): string {
-  const query =
-    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
-  return `${CLIENT_URL}${query}${hash}`;
+  const lag =
+    LAG_MS > 0 ? `&lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  // A ?name= ATUGORJA a nev-parbeszedet -- kulonben minden e2e futas
+  // ott allna meg, a csatlakozasra varva.
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}${hash}`;
 }
 
 let failures = 0;
@@ -299,6 +304,18 @@ async function main(): Promise<void> {
   // mas-mas pillanatot irna le, es a teszt sajat magat merne el. Allo
   // helyzetben a lemaradas nulla, tehat a ket ertek osszevetheto.
   await b.keyboard.up("w");
+
+  // ISMERT, SZABAD savra allitjuk B-t a meres elott.
+  //
+  // Korabban onnan mertunk, ahova B az elozo fazisban eljutott -- az
+  // viszont a szerver altal SORSOLT spawn-pontbol indult, es
+  // spawn-tol fuggoen a kocsi mar a rampanak vagy a falnak feszult.
+  // Ilyenkor a 2 masodperces gaz 0.36 m-t adott a varhato ~7 m helyett,
+  // es a meres gyakorlatilag semmit nem ellenorzott (az arany a ket
+  // pici szam kozott meg stimmelt, tehat a teszt meg "at is ment").
+  // Az x = 24-es sav vegig szabad (lasd PICKUP_POINTS es az arena).
+  await b.evaluate(() => (window as any).__spike.backend.reset({ x: 24, y: 1.0, z: 24 }));
+  await sleep(2500);
   await waitForStopped(b);
   await waitForRemoteStable(a);
   const wsBefore = await wheelState(a);
@@ -329,6 +346,17 @@ async function main(): Promise<void> {
   // mintat veszunk es a maximumot nezzuk: egyetlen pillanatnyi minta
   // toreken, mert eppen a kormanyszog felfutasaba (vagy a headless
   // renderelo egy akadasaba) eshet.
+  // ISMERT, SZABAD helyre allitjuk B-t a kormanyzas-meres elott is.
+  //
+  // Az elozo (gordules) meres az x = 24-es savon 60 m-t hajt elore, es
+  // B a fal kozeleben all meg -- onnan kanyarodva azonnal nekifeszul,
+  // es a kormanyszog alig nő (meressel 0.04 rad). Az arena kozepe fele
+  // fordulva van hely a kanyarhoz.
+  await b.evaluate(() => (window as any).__spike.backend.reset({ x: 20, y: 1.0, z: 20 }));
+  await sleep(2500);
+  await waitForSettled(b);
+  await waitForRemoteStable(a);
+
   await b.keyboard.down("w");
   await b.keyboard.down("d");
   let maxFrontSteer = 0;

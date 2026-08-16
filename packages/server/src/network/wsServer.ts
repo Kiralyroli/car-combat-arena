@@ -144,7 +144,11 @@ export class WsServer {
 
     const playerId = randomUUID();
     // A szoba nem ismeri a WebSocketet -- csak egy kuldo fuggvenyt kap.
-    const player = room.add(playerId, (msg) => send(conn.socket, msg));
+    const player = room.add(
+      playerId,
+      (msg) => send(conn.socket, msg),
+      message.name,
+    );
 
     conn.playerId = playerId;
     conn.room = room;

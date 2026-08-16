@@ -13,6 +13,9 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/** A tesztkliensek neve -- a ?name= egyben atugorja a nev-parbeszedet. */
+const testName = "Utkozes";
+
 /**
  * Mesterseges halozati kesleltetes (oda-vissza ut, ms).
  *   LAG=200 npx tsx scripts/check-collision.ts
@@ -29,9 +32,11 @@ const JITTER_MS = argOrEnv("jitter", "JITTER");
 
 /** A query a hash ELE kerul: .../?lag=200#ABCD */
 function clientUrl(hash: string): string {
-  const query =
-    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
-  return `${CLIENT_URL}${query}${hash}`;
+  const lag =
+    LAG_MS > 0 ? `&lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  // A ?name= ATUGORJA a nev-parbeszedet -- kulonben minden e2e futas
+  // ott allna meg, a csatlakozasra varva.
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}${hash}`;
 }
 
 let failures = 0;

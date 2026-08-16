@@ -5,6 +5,7 @@ import {
   wheelsFromNetwork,
   type ClientState,
   type WheelDamage,
+  type MatchSnapshot,
   type ServerMessage,
   type Transport,
 } from "@cca/shared";
@@ -80,6 +81,29 @@ export class NetworkClient {
   pickupsAvailable: boolean[] = [];
 
   /**
+   * A meccs allapota a szerver szerint (Last Car Standing).
+   * Csatlakozas elott varakozonak tekintjuk.
+   */
+  match: MatchSnapshot = {
+    phase: "waiting",
+    survivors: 0,
+    winnerId: null,
+    restartInMs: 0,
+  };
+
+  /** Hany eletunk van meg; null, amig nincs snapshot. */
+  lives: number | null = null;
+
+  /**
+   * A SAJAT nevunk a szerver szerint.
+   *
+   * A snapshotbol vesszuk at, nem a beirt szoveget hasznaljuk: a
+   * szerver tisztitja a nevet (hossz, vezerlokarakterek), tehat amit
+   * kirajzolunk, az legyen ugyanaz, amit a tobbiek latnak.
+   */
+  ownName = "";
+
+  /**
    * Rakéta-kiloves kerese a megcelzott vilagbeli pontra.
    * A kiindulopontot, a huteset es a talalatot a szerver donti el.
    */
@@ -122,6 +146,7 @@ export class NetworkClient {
     roomCode?: string,
     lagMs = 0,
     jitterMs = 0,
+    name?: string,
   ): Promise<void> {
     const socket = await WsTransport.connect(url);
     const transport: Transport =
@@ -139,7 +164,7 @@ export class NetworkClient {
       this.events.onClose?.();
     });
 
-    transport.send({ type: "join", protocol: PROTOCOL_VERSION, roomCode });
+    transport.send({ type: "join", protocol: PROTOCOL_VERSION, roomCode, name });
   }
 
   disconnect(): void {
@@ -224,6 +249,8 @@ export class NetworkClient {
         if (own) {
           this.hp = own.hp;
           this.boostGrants = own.boostGrants;
+          this.lives = own.lives;
+          this.ownName = own.name;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
           // FIZIKAI hatas is (tapadas, kerek-sugar), ezert a hivo
           // beallitja a sajat jarmuvunkon. SZANDEKOSAN nem
@@ -242,6 +269,7 @@ export class NetworkClient {
         // ~100 ms-szal -- 5.5 m-rel -- a celpont elott jart.)
         this.rockets.ingest(message.rockets, now);
         this.pickupsAvailable = message.pickupsAvailable;
+        this.match = message.match;
         return;
       }
 

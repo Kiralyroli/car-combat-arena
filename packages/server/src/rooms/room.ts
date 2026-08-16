@@ -15,10 +15,18 @@ import {
   SPAWN_POINTS,
   PICKUP_POINTS,
   PICKUP_RESPAWN_MS,
-
   withinPickupRange,
+  LIVES_PER_PLAYER,
+  MATCH_RESTART_DELAY_MS,
+  canStart,
+  isMatchOver,
+  survivorsOf,
+  winnerOf,
+  sanitizePlayerName,
   type ClientState,
   type PlayerSnapshot,
+  type MatchPhase,
+  type MatchSnapshot,
   type ServerMessage,
   type WheelDamage,
 } from "@cca/shared";
@@ -37,6 +45,8 @@ const START_HP = MAX_HP;
  */
 export interface ServerPlayer {
   id: string;
+  /** Megjelenitett nev (mar tisztitva -- lasd sanitizePlayerName). */
+  name: string;
   send: (message: ServerMessage) => void;
   state: ClientState;
   /** Melyik SPAWN_POINTS elemet foglalja -- kilepeskor felszabadul. */
@@ -78,6 +88,11 @@ export interface ServerPlayer {
    * onkorrekcios modon tudja, mennyit kell toltenie.
    */
   boostGrants: number;
+  /**
+   * Hany elete van meg (Last Car Standing). 0 = kiesett, nezokent van
+   * jelen. A megsemmisules ebbol von le egyet.
+   */
+  lives: number;
 }
 
 /** Rendezett parkulcs, hogy (a,b) es (b,a) ugyanaz legyen. */
@@ -119,10 +134,16 @@ export class Room {
     return [...this.players.keys()];
   }
 
-  add(id: string, send: (message: ServerMessage) => void): ServerPlayer {
+  add(
+    id: string,
+    send: (message: ServerMessage) => void,
+    name?: string,
+  ): ServerPlayer {
     const spawn = this.allocateSpawn();
     const player: ServerPlayer = {
       id,
+      // A nevet a SZERVER tisztitja: a kliens barmit kuldhet.
+      name: sanitizePlayerName(name, id),
       send,
       state: spawn.state,
       spawnIndex: spawn.index,
@@ -135,6 +156,7 @@ export class Room {
       lastFiredAt: 0,
       deadSince: null,
       boostGrants: 0,
+      lives: LIVES_PER_PLAYER,
     };
     this.players.set(id, player);
     return player;
@@ -262,7 +284,107 @@ export class Room {
   private markDeadIfDestroyed(player: ServerPlayer, now: number): void {
     if (player.hp > 0 || player.deadSince !== null) return;
     player.deadSince = now;
-    console.log(`[room ${this.code}] ${player.id.slice(0, 8)} megsemmisult`);
+
+    // Elet csak FUTO meccsben fogy. Varakozo (egyjatekos) vagy mar
+    // lezart meccsben a megsemmisules csak ujraszuletest jelent --
+    // kulonben az egyedul gyakorlo jatekos harom halal utan kiesne egy
+    // olyan meccsbol, ami el sem indult.
+    if (this.phase === "playing") {
+      player.lives = Math.max(0, player.lives - 1);
+    }
+
+    console.log(
+      `[room ${this.code}] ${player.id.slice(0, 8)} megsemmisult ` +
+        `(${player.lives} elet maradt)`,
+    );
+
+    if (this.phase === "playing" && player.lives === 0) {
+      console.log(`[room ${this.code}] ${player.id.slice(0, 8)} KIESETT`);
+    }
+  }
+
+  // --- Meccs-allapot (Last Car Standing, terv 5. lepcso 2. pont) ---
+
+  private phase: MatchPhase = "waiting";
+  private winnerId: string | null = null;
+  /** Mikor indul az uj meccs (performance.now); 0, ha nem `ended`. */
+  private restartAt = 0;
+
+  matchSnapshot(now: number): MatchSnapshot {
+    return {
+      phase: this.phase,
+      survivors: survivorsOf([...this.players.values()]).length,
+      winnerId: this.winnerId,
+      restartInMs:
+        this.phase === "ended" ? Math.max(0, Math.round(this.restartAt - now)) : 0,
+    };
+  }
+
+  /**
+   * A meccs-allapotgep egy lepese.
+   *
+   * Harom atmenet van:
+   *   waiting -> playing : osszejott a letszam
+   *   playing -> ended   : legfeljebb egy jatekos maradt talpon
+   *   ended   -> playing : lejart a visszaszamlalas (uj meccs)
+   *
+   * A `waiting` fazisban SZANDEKOSAN lehet vezetni es lőni: igy a
+   * korabban erkezo jatekos nem egy ures kepernyot bamul, csak az
+   * eletei nem fogynak.
+   */
+  stepMatch(now: number): void {
+    const players = [...this.players.values()];
+
+    if (this.phase === "waiting") {
+      if (canStart(players.length)) this.startMatch();
+      return;
+    }
+
+    if (this.phase === "playing") {
+      // Ha annyian kilepnek, hogy egyedul maradunk, a meccsnek nincs
+      // ertelme tovabb -- de gyoztest sem hirdetunk ilyenkor
+      // (visszaesunk varakozasba).
+      if (!canStart(players.length)) {
+        this.phase = "waiting";
+        this.winnerId = null;
+        console.log(`[room ${this.code}] keves jatekos -- a meccs varakozik`);
+        return;
+      }
+      if (isMatchOver(players)) this.endMatch(now, players);
+      return;
+    }
+
+    if (this.phase === "ended" && now >= this.restartAt) {
+      if (canStart(players.length)) this.startMatch();
+      else {
+        this.phase = "waiting";
+        this.winnerId = null;
+      }
+    }
+  }
+
+  private startMatch(): void {
+    for (const player of this.players.values()) {
+      player.lives = LIVES_PER_PLAYER;
+      // A meccs kezdetekor MINDENKI AZONNAL jatekban van, a kiesettek is
+      // (kulonben nezok maradnanak az uj meccsben is).
+      this.respawnNow(player);
+    }
+    this.phase = "playing";
+    this.winnerId = null;
+    this.restartAt = 0;
+    console.log(`[room ${this.code}] MECCS INDUL (${this.players.size} jatekos)`);
+  }
+
+  private endMatch(now: number, players: ServerPlayer[]): void {
+    const winner = winnerOf(players);
+    this.phase = "ended";
+    this.winnerId = winner?.id ?? null;
+    this.restartAt = now + MATCH_RESTART_DELAY_MS;
+    console.log(
+      `[room ${this.code}] MECCS VEGE -- ` +
+        (winner ? `gyoztes: ${winner.id.slice(0, 8)}` : "dontetlen"),
+    );
   }
 
   /**
@@ -278,24 +400,44 @@ export class Room {
   respawnExpired(now: number): void {
     for (const player of this.players.values()) {
       if (player.deadSince === null) continue;
+
+      // KIESETT jatekos nem szuletik ujra: nezokent van jelen, amig a
+      // meccs le nem zarul. (A `deadSince` szandekosan marad beallitva,
+      // igy a kliensek tovabbra is elrejtik az autojat, es a szerver
+      // sem vesz at tole allapotot.)
+      if (player.lives <= 0 && this.phase === "playing") continue;
+
       if (now - player.deadSince < RESPAWN_DELAY_MS) continue;
 
-      const spawn = this.allocateSpawn();
-      player.spawnIndex = spawn.index;
-      player.state = spawn.state;
-      player.hp = MAX_HP;
-      // Uj auto, uj esely: a kerekek is javulnak.
-      player.wheels = healthyWheels();
-      player.deadSince = null;
-      // Az ujraszuletes nagy ugras: ne szamitson teleportnak a kovetkezo
-      // ellenorzesnel sem, es a hutes se hozza magaval a regi parokat.
-      player.consecutiveRejects = 0;
-
-      player.send({ type: "respawn", position: spawn.state.position });
-      console.log(
-        `[room ${this.code}] ${player.id.slice(0, 8)} ujraszuletett (spawn ${spawn.index})`,
-      );
+      this.respawnNow(player);
     }
+  }
+
+  /**
+   * Azonnali ujraszuletes: uj spawn-pont, teli HP, ep kerekek.
+   *
+   * Kozos a lejart varakozas utani ujraszuleteshez ES a meccs
+   * indulasahoz. Eloszor a meccs-indulasnal csak `deadSince = now`-t
+   * allitottam ("majd ujraszuletnek"), de attol MINDENKI halott volt az
+   * elso ot masodpercben: nem sebzodtek, es a kliensek elrejtettek az
+   * autojukat. A meccs kezdetekor azonnal jatekban kell lenni.
+   */
+  private respawnNow(player: ServerPlayer): void {
+    const spawn = this.allocateSpawn();
+    player.spawnIndex = spawn.index;
+    player.state = spawn.state;
+    player.hp = MAX_HP;
+    // Uj auto, uj esely: a kerekek is javulnak.
+    player.wheels = healthyWheels();
+    player.deadSince = null;
+    // Az ujraszuletes nagy ugras: ne szamitson teleportnak a kovetkezo
+    // ellenorzesnel sem, es a hutes se hozza magaval a regi parokat.
+    player.consecutiveRejects = 0;
+
+    player.send({ type: "respawn", position: spawn.state.position });
+    console.log(
+      `[room ${this.code}] ${player.id.slice(0, 8)} ujraszuletett (spawn ${spawn.index})`,
+    );
   }
 
   /**
@@ -418,6 +560,7 @@ export class Room {
     for (const player of this.players.values()) {
       snapshot.push({
         id: player.id,
+        name: player.name,
         position: player.state.position,
         rotation: player.state.rotation,
         velocity: player.state.velocity,
@@ -429,6 +572,7 @@ export class Room {
         aimPitch: player.state.aimPitch,
         hp: player.hp,
         boostGrants: player.boostGrants,
+        lives: player.lives,
       });
     }
     return snapshot;

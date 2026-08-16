@@ -54,7 +54,12 @@ export const IMPACT_COOLDOWN_MS = 600;
  * Legyen erezheto buntetes, de ne unalmas varakozas -- a Last Car
  * Standing modban (terv 5. lepcso) ez ugyis eletekre valt at.
  */
-export const RESPAWN_DELAY_MS = 3000;
+/**
+ * A megsemmisules utani ujraszuletes ideje a match.ts-ben van (a
+ * Last Car Standing szabalyok reszekent) -- innen csak ujraexportaljuk,
+ * hogy a ket ertek ne tudjon elcsuszni egymastol.
+ */
+export { RESPAWN_DELAY_MS } from "./match";
 
 /** Fuggoleges atfedes: egymas felett atrepulo autok ne sebezzenek. */
 const VERTICAL_OVERLAP = CHASSIS.halfExtents.y * 2;

@@ -104,10 +104,24 @@ for (const section of SECTIONS) {
   for (const slider of section.sliders) DEFAULTS.set(slider, slider.get());
 }
 
+/**
+ * A fizika-csuszkak lathatosaga.
+ *
+ * CSAK DEV MODBAN latszanak (lasd devMode.ts): futasidoben allitjak a
+ * jarmu fizikajat, tehat egy jatekos kezeben elonyt jelentenenek.
+ */
+export function setDebugPanelVisible(visible: boolean): void {
+  const root = document.getElementById("debug-panel");
+  if (root) root.hidden = !visible;
+}
+
 export function initDebugPanel(): void {
   const root = document.getElementById("debug-panel");
   if (!root) return;
-  root.hidden = false;
+  // A lathatosagot a hivo allitja be a dev mod szerint -- itt
+  // szandekosan REJTVE hagyjuk, hogy egy pillanatra se villanjon fel
+  // jatekos-modban.
+  root.hidden = true;
 
   const header = document.createElement("div");
   header.className = "debug-header";

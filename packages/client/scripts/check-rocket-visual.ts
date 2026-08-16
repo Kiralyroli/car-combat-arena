@@ -20,6 +20,9 @@ import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
+/** A tesztkliensek neve -- a ?name= egyben atugorja a nev-parbeszedet. */
+const testName = "Raketa";
+
 function argOrEnv(name: string, envName: string): number {
   const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
   if (arg) return Number(arg.split("=")[1]);
@@ -30,15 +33,38 @@ const LAG_MS = argOrEnv("lag", "LAG");
 const JITTER_MS = argOrEnv("jitter", "JITTER");
 
 function clientUrl(hash: string): string {
-  const query =
-    LAG_MS > 0 ? `?lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
-  return `${CLIENT_URL}${query}${hash}`;
+  const lag =
+    LAG_MS > 0 ? `&lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
+  // A ?name= ATUGORJA a nev-parbeszedet -- kulonben minden e2e futas
+  // ott allna meg, a csatlakozasra varva.
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}${hash}`;
 }
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
   console.log(`  ${ok ? "OK  " : "HIBA"} ${label} -- ${detail}`);
   if (!ok) failures++;
+}
+
+/**
+ * Olyan meres, aminek ELOFELTETELE van (eleg minta).
+ *
+ * Ha a mintavetel ehezett, a meres nem "elbukott", hanem ERVENYTELEN --
+ * mast jelent a ketto. A futas igy is piros marad, mert a
+ * mintaszam-ellenorzes maga elbukik; de nem allitunk olyat, hogy a
+ * rakéta nem ert celba, amikor valojaban nem volt mibol megallapitani.
+ */
+function checkIfMeasurable(
+  valid: boolean,
+  label: string,
+  ok: boolean,
+  detail: string,
+): void {
+  if (!valid) {
+    console.log(`  ----  ${label} -- nem merheto (kevés minta)`);
+    return;
+  }
+  check(label, ok, detail);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -238,9 +264,10 @@ async function main(): Promise<void> {
   //
   // Az IDOVONAL-egyezest nem ez a meres orzi (allo celpontnal az nem is
   // latszana), hanem a check-interp-timeline.ts egysegteszt.
-  check(
+  checkIfMeasurable(
+    enoughSamples,
     "a kirajzolt rakéta eleri a kirajzolt celpontot",
-    enoughSamples && rv.minGap < 5.8,
+    rv.minGap < 5.8,
     `legkozelebbi tavolsag ${rv.minGap.toFixed(2)} m (talalati pont 3.06 m, snapshot-lepes 2.75 m)`,
   );
 
@@ -274,9 +301,10 @@ async function main(): Promise<void> {
   }
 
   const frozenRatio = paired > 0 ? rv.frozen / paired : 1;
-  check(
+  checkIfMeasurable(
+    enoughSamples,
     "a rakéta folyamatosan mozog (nem snapshotonkent ugrik)",
-    enoughSamples && frozenRatio < 0.2,
+    frozenRatio < 0.2,
     `a mintak ${(frozenRatio * 100).toFixed(0)}%-a volt valtozatlan (${rv.frozen}/${paired}) -- interpolacio nelkul ~66% lenne`,
   );
 
