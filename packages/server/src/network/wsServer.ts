@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
+import type { Server } from "node:http";
 import {
   checkPlausibility,
   PROTOCOL_VERSION,
@@ -41,9 +42,14 @@ export class WsServer {
   private readonly wss: WebSocketServer;
   private readonly rooms: RoomManager;
 
-  constructor(rooms: RoomManager, port: number) {
+  /**
+   * A WebSocket egy MEGLEVO HTTP-szerverre csatlakozik, nem sajat
+   * portra: igy a kliens statikus fajljai es a jatek-kapcsolat ugyanazon
+   * a cimen erhetok el (terv 15.7, lasd httpServer.ts).
+   */
+  constructor(rooms: RoomManager, server: Server) {
     this.rooms = rooms;
-    this.wss = new WebSocketServer({ port });
+    this.wss = new WebSocketServer({ server });
     this.wss.on("connection", (socket) => this.handleConnection(socket));
   }
 

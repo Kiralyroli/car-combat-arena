@@ -6,9 +6,10 @@
   "description": "Node.js authoritative jatekszerver",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "check:net": "tsx scripts/smoke-two-clients.ts"
+    "check:net": "tsx scripts/smoke-two-clients.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --external:ws --external:@dimforge/rapier3d-compat --outfile=dist/server.js"
   },
   "dependencies": {
     "@cca/shared": "*",

@@ -1,0 +1,39 @@
+# Fly.io konfiguracio -- lasd terv 15.7.
+#
+# FONTOS: a szerver ALLAPOTOT tart a memoriaban (szobak, meccsek), es a
+# jatekosok WebSocketen kapcsolodnak hozza. Ezert:
+#   - EGY peldany fut (nincs skalazas tobb gepre): ket peldany kozott a
+#     szobak nem latszananak, es a lobby listaja is szakadozna,
+#   - a gep NEM allhat le tetlensegkor: az osszes futo meccs elveszne.
+
+app = "car-combat-arena"
+primary_region = "fra"   # Frankfurt -- Budapesthez a legkozelebbi jo valasztas
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Egy peldany, mindig eloben.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    # Egy Node folyamat, memoriaban tarolt szobakkal: a terv szerint
+    # MVP-ben ez eleg. A hatarok bőven a varhato letszam folott vannak.
+    soft_limit = 200
+    hard_limit = 250
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

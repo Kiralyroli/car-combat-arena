@@ -22,11 +22,26 @@ import { BoostTank } from "./boostTank";
 import { SceneView } from "./scene";
 
 /**
- * A szerver cime. Fejlesztes kozben a Vite dev-szerver (5173) es a
- * jatekszerver (8080) kulon fut, ezert nem a lap sajat origojahoz
- * igazodunk.
+ * A jatekszerver cime.
+ *
+ * ELESBEN a SAJAT cimunkbol szarmazik: ugyanaz a folyamat szolgalja ki
+ * a klienst es a WebSocketet (terv 15.7). Igy nem kell a szerver cimet
+ * a buildbe egetni, es nincs mixed-content gond sem -- HTTPS-en a
+ * "ws://" blokkolt, "wss://"-t viszont automatikusan kapunk.
+ *
+ * FEJLESZTESBEN ket kulon szerver fut (Vite az 5173-on, jatekszerver a
+ * 8080-on), ezert ott a localhost az alapertelmezes.
+ *
+ * A VITE_SERVER_URL mindkettot felulirja -- ezzel lehet kulon hostolt
+ * szerverre mutatni, ha a ket resz kesobb szetvalik.
  */
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "ws://localhost:8080";
+function defaultServerUrl(): string {
+  if (import.meta.env.DEV) return "ws://localhost:8080";
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${location.host}`;
+}
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? defaultServerUrl();
 
 const BROKEN_WHEEL: WheelDamage = {
   hp: 0,
