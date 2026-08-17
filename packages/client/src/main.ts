@@ -328,8 +328,10 @@ async function main(): Promise<void> {
     if (net.roomCode) roomBadge.show(net.roomCode);
   }
 
-  // A jatekos-HUD csak a lobby utan jelenik meg.
+  // A jatekos-HUD es a celkereszt csak a lobby utan jelenik meg. Offline
+  // modban is ide jutunk, csak lobby nelkul -- ott is jar a celzas.
   playerHud.show();
+  aim.setActive(true);
 
   let last = performance.now();
   let accumulator = 0;
