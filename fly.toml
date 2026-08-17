@@ -1,39 +1,33 @@
-# Fly.io konfiguracio -- lasd terv 15.7.
+# fly.toml app configuration file generated for car-combat-arena on 2026-08-17T17:19:01Z
 #
-# FONTOS: a szerver ALLAPOTOT tart a memoriaban (szobak, meccsek), es a
-# jatekosok WebSocketen kapcsolodnak hozza. Ezert:
-#   - EGY peldany fut (nincs skalazas tobb gepre): ket peldany kozott a
-#     szobak nem latszananak, es a lobby listaja is szakadozna,
-#   - a gep NEM allhat le tetlensegkor: az osszes futo meccs elveszne.
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "car-combat-arena"
-primary_region = "fra"   # Frankfurt -- Budapesthez a legkozelebbi jo valasztas
+app = 'car-combat-arena'
+primary_region = 'fra'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  # Egy peldany, mindig eloben.
-  auto_stop_machines = false
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [http_service.concurrency]
-    type = "connections"
-    # Egy Node folyamat, memoriaban tarolt szobakkal: a terv szerint
-    # MVP-ben ez eleg. A hatarok bőven a varhato letszam folott vannak.
-    soft_limit = 200
+    type = 'connections'
     hard_limit = 250
+    soft_limit = 200
 
-[[http_service.checks]]
-  interval = "30s"
-  timeout = "5s"
-  grace_period = "10s"
-  method = "GET"
-  path = "/health"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
