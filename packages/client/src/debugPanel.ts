@@ -1,21 +1,18 @@
-import { CHASSIS, DRIVE, RECOVERY, STABILIZATION, WHEEL } from "@cca/shared";
+import { ARCADE, CHASSIS, RECOVERY, WHEEL } from "@cca/shared";
 
 /**
  * Elo, csuszkas debug-panel a fizikai parameterek probalgatasahoz.
  *
  * FONTOS: a csuszkak KOZVETLENUL mutaljak a config.ts export const
- * objektumait (pl. `DRIVE.engineForce = ertek`). Ez azert mukodik
+ * objektumait (pl. `ARCADE.maxSpeed = ertek`). Ez azert mukodik
  * valtoztatas nelkul a tobbi kodon, mert a `const` csak az objektum-
- * referenciat zarolja, a tulajdonsagait nem -- es a fizika (rapier.ts)
- * minden lepesben frissen olvassa ki ezeket az ertekeket, nem
- * gyorsitotarazza oket. A kerek- es karosszeria-parameterek is
- * minden lepesben ujra alkalmazodnak (lasd rapier.ts step()), hogy a
- * csuszka-valtoztatas azonnal ervenyesuljon, ne csak a kovetkezo
- * serules-esemenynel.
+ * referenciat zarolja, a tulajdonsagait nem -- es az arkad modell
+ * (arcade.ts) minden lepesben frissen olvassa ki ezeket az ertekeket,
+ * nem gyorsitotarazza oket.
  *
  * Amit NEM lehet igy elo csuszkaval allitani: a karosszeria merete
- * (CHASSIS.halfExtents) es a kerek fizikai sugara a jarmu-letrehozaskor
- * rogzul (addWheel), ezeket csak ujrainditassal (oldal frissitese)
+ * (CHASSIS.halfExtents) es a kerekek elhelyezkedese (WHEEL_LAYOUT) a
+ * vilag felepitesekor rogzul, ezeket csak az oldal frissitesevel
  * lehetne valtoztatni -- ezert nincsenek a listaban.
  */
 
@@ -46,55 +43,48 @@ const SECTIONS: Section[] = [
   {
     title: "Gyorsulás / fékezés",
     sliders: [
-      { label: "Hajtóerő", path: "DRIVE.engineForce", hint: "Mekkora erővel gyorsul a hajtott kerekeken. Magasabb = gyorsabb felpörgés.", get: () => DRIVE.engineForce, set: (v) => (DRIVE.engineForce = v), min: 1000, max: 15000, step: 100 },
-      { label: "Tolatás erő-arány", path: "DRIVE.reverseFactor", hint: "A tolatás ereje a hajtóerőhöz képest. 1,0 = ugyanolyan erős tolatás, mint előre.", get: () => DRIVE.reverseFactor, set: (v) => (DRIVE.reverseFactor = v), min: 0.2, max: 1.5, step: 0.05 },
-      { label: "Boost szorzó", path: "DRIVE.boostMultiplier", hint: "Shift lenyomásakor ennyiszeresére nő a hajtóerő.", get: () => DRIVE.boostMultiplier, set: (v) => (DRIVE.boostMultiplier = v), min: 1, max: 3, step: 0.1 },
-      { label: "Fékerő", path: "DRIVE.brakeForce", hint: "Milyen erősen fékez az S, ha nem gázolsz épp az ellenkező irányba. Magasabb = rövidebb féktáv.", get: () => DRIVE.brakeForce, set: (v) => (DRIVE.brakeForce = v), min: 20, max: 250, step: 5 },
-      { label: "Kézifék erő", path: "DRIVE.handbrakeForce", hint: "A Space (kézifék) ereje a hátsó kerekeken -- csúszáshoz/driftheléshez való.", get: () => DRIVE.handbrakeForce, set: (v) => (DRIVE.handbrakeForce = v), min: 20, max: 300, step: 5 },
+      { label: "Csúcssebesség", path: "ARCADE.maxSpeed", hint: "Meddig gyorsul gázzal. Az autó ezt a sebességet célozza meg, nem egy hajtóerőt -- ezért kiszámítható.", get: () => ARCADE.maxSpeed, set: (v) => (ARCADE.maxSpeed = v), min: 10, max: 60, step: 1, format: (v) => `${v.toFixed(0)} m/s (${(v * 3.6).toFixed(0)} km/h)` },
+      { label: "Csúcssebesség boosttal", path: "ARCADE.boostMaxSpeed", hint: "Ugyanaz, Shift lenyomva.", get: () => ARCADE.boostMaxSpeed, set: (v) => (ARCADE.boostMaxSpeed = v), min: 10, max: 80, step: 1, format: (v) => `${v.toFixed(0)} m/s (${(v * 3.6).toFixed(0)} km/h)` },
+      { label: "Tolatási csúcssebesség", path: "ARCADE.maxReverseSpeed", hint: "Meddig gyorsul hátrafelé.", get: () => ARCADE.maxReverseSpeed, set: (v) => (ARCADE.maxReverseSpeed = v), min: 3, max: 30, step: 1, format: (v) => `${v.toFixed(0)} m/s` },
+      { label: "Gyorsulás", path: "ARCADE.accel", hint: "Milyen gyorsan éri el a csúcssebességet. 20 m/s² mellett kb. 1,5 mp.", get: () => ARCADE.accel, set: (v) => (ARCADE.accel = v), min: 5, max: 60, step: 1, format: (v) => `${v.toFixed(0)} m/s²` },
+      { label: "Gyorsulás boosttal", path: "ARCADE.boostAccel", hint: "Ebből jön a boost 'lökés' érzete -- nem csak a végsebesség számít.", get: () => ARCADE.boostAccel, set: (v) => (ARCADE.boostAccel = v), min: 5, max: 80, step: 1, format: (v) => `${v.toFixed(0)} m/s²` },
+      { label: "Fékezés", path: "ARCADE.brakeDecel", hint: "Amikor a gáz a haladással SZEMBE hat (S menet közben). Magasabb = rövidebb féktáv.", get: () => ARCADE.brakeDecel, set: (v) => (ARCADE.brakeDecel = v), min: 5, max: 80, step: 1, format: (v) => `${v.toFixed(0)} m/s²` },
+      { label: "Motorfék", path: "ARCADE.coastDecel", hint: "Lassulás gáz nélkül. Ez cseng le a robbanások és ütközések lökése is -- alacsony érték = tovább repül az autó.", get: () => ARCADE.coastDecel, set: (v) => (ARCADE.coastDecel = v), min: 0, max: 30, step: 0.5, format: (v) => `${v.toFixed(1)} m/s²` },
     ],
   },
   {
-    title: "Kormányzás",
+    title: "Kanyarodás",
     sliders: [
-      { label: "Max kormányszög", path: "DRIVE.maxSteer (rad)", hint: "A kerekek legnagyobb elfordulási szöge teljes kormánynál.", get: () => deg(DRIVE.maxSteer), set: (v) => (DRIVE.maxSteer = rad(v)), min: 20, max: 70, step: 1, format: (v) => `${v.toFixed(0)}°` },
-      { label: "Kormány fordulási seb.", path: "DRIVE.steerSpeed", hint: "Milyen gyorsan éri el a kormány a célszöget, amikor lenyomod az A/D-t.", get: () => DRIVE.steerSpeed, set: (v) => (DRIVE.steerSpeed = v), min: 2, max: 20, step: 0.5 },
-      { label: "Kormány visszaállás", path: "DRIVE.steerReturnSpeed", hint: "Milyen gyorsan áll vissza egyenesbe a kormány, ha elengeded az A/D-t.", get: () => DRIVE.steerReturnSpeed, set: (v) => (DRIVE.steerReturnSpeed = v), min: 2, max: 20, step: 0.5 },
-      { label: "Célzott kanyarsugár", path: "DRIVE.targetTurnRadius", hint: "Ekkora sugarú ívben fordul a kocsi, FÜGGETLENÜL a sebességtől -- ez adja a 'mennyire éles a kanyar' érzetet. Kisebb = élesebb kanyar.", get: () => DRIVE.targetTurnRadius, set: (v) => (DRIVE.targetTurnRadius = v), min: 2, max: 30, step: 0.5, format: (v) => `${v.toFixed(1)} m` },
-      { label: "Célsugár-simítás", path: "DRIVE.turnRadiusBlendRate", hint: "Milyen gyorsan áll be a tényleges fordulás a célzott sugárhoz. Magasabb = azonnalibb, de rángósabb.", get: () => DRIVE.turnRadiusBlendRate, set: (v) => (DRIVE.turnRadiusBlendRate = v), min: 1, max: 20, step: 0.5 },
-      { label: "Célsugár-asszisztens min. seb.", path: "DRIVE.turnRadiusMinSpeed", hint: "Ez alatt a sebesség alatt az asszisztens teljesen kikapcsol -- indításkor, álló helyzetben kormányozva a természetes fordulás érvényesül, nincs mesterséges lefékezés.", get: () => DRIVE.turnRadiusMinSpeed, set: (v) => (DRIVE.turnRadiusMinSpeed = v), min: 0, max: 10, step: 0.5, format: (v) => `${v.toFixed(1)} m/s` },
-      { label: "Haladási irány igazítása", path: "DRIVE.velocityAlignRate", hint: "Milyen gyorsan igazodik a kocsi tényleges haladási iránya az orr irányához kanyarban. Alacsonyabb = inkább keresztbe csúszik éles kanyarban nagy sebességnél, magasabb = inkább folytonosan kanyarodik csúszás nélkül.", get: () => DRIVE.velocityAlignRate, set: (v) => (DRIVE.velocityAlignRate = v), min: 0, max: 15, step: 0.5 },
-      { label: "Kanyar-erőkorlát (min)", path: "DRIVE.corneringPowerMin", hint: "Kanyarban a hajtóerő ennyiszeresére csökken teljes kormánynál. Ez fékezi, hogy gázzal ne szaladjon el a sebesség kanyarban.", get: () => DRIVE.corneringPowerMin, set: (v) => (DRIVE.corneringPowerMin = v), min: 0.1, max: 1, step: 0.05 },
-      { label: "Kanyar-erőkorlát felfutása", path: "DRIVE.corneringPowerRampSpeed", hint: "Ez alatt a sebesség alatt a fenti korlát még nem (vagy csak részben) hat -- indításkor, alacsony sebességnél kormányozva is teljes hajtóerő jár.", get: () => DRIVE.corneringPowerRampSpeed, set: (v) => (DRIVE.corneringPowerRampSpeed = v), min: 0, max: 20, step: 0.5, format: (v) => `${v.toFixed(1)} m/s` },
-      { label: "Sebességi visszavágás kezdete", path: "DRIVE.steerFalloffSpeed", hint: "Ennél a sebességnél éri el a kormányszög-csökkenés a minimumát -- nagy sebességnél nehezebb éles kanyart venni, ha ez alacsony.", get: () => DRIVE.steerFalloffSpeed, set: (v) => (DRIVE.steerFalloffSpeed = v), min: 10, max: 100, step: 5, format: (v) => `${v.toFixed(0)} m/s` },
-      { label: "Sebességi visszavágás (min)", path: "DRIVE.steerFalloffMin", hint: "Nagy sebességnél a maximális kormányszögnek ennyi hányada marad meg (borulás elleni védelem).", get: () => DRIVE.steerFalloffMin, set: (v) => (DRIVE.steerFalloffMin = v), min: 0.2, max: 1, step: 0.05 },
+      { label: "Max fordulási sebesség", path: "ARCADE.maxYawRate", hint: "Ez a fő 'mennyire éles a kanyar' csúszka. A kanyarsugár ebből jön: sugár = sebesség / fordulási sebesség.", get: () => ARCADE.maxYawRate, set: (v) => (ARCADE.maxYawRate = v), min: 0.5, max: 6, step: 0.1, format: (v) => `${v.toFixed(1)} rad/s (${deg(v).toFixed(0)}°/s)` },
+      { label: "Teljes fordulás sebessége", path: "ARCADE.turnRampSpeed", hint: "Ekkora sebességnél éri el a kormány a teljes hatását. Ez alatt arányosan kevesebb -- álló helyzetben az autó nem pördül meg helyben.", get: () => ARCADE.turnRampSpeed, set: (v) => (ARCADE.turnRampSpeed = v), min: 1, max: 20, step: 0.5, format: (v) => `${v.toFixed(1)} m/s` },
+      { label: "Fordulás csúcssebességnél", path: "ARCADE.turnFactorAtTopSpeed", hint: "Csúcssebességnél a fordulásnak ennyi hányada marad. Alacsonyabb = nagy sebességnél nyugodtabb, de lomhább.", get: () => ARCADE.turnFactorAtTopSpeed, set: (v) => (ARCADE.turnFactorAtTopSpeed = v), min: 0.1, max: 1, step: 0.05 },
+      { label: "Kormány válaszideje", path: "ARCADE.yawAccel", hint: "Milyen gyorsan éri el a fordulás a célértékét. Magasabb = azonnalibb, de rángósabb; ebből cseng le az ütközés okozta pörgés is.", get: () => ARCADE.yawAccel, set: (v) => (ARCADE.yawAccel = v), min: 2, max: 40, step: 0.5, format: (v) => `${v.toFixed(1)} rad/s²` },
+      { label: "Kormányzás levegőben", path: "ARCADE.airSteerAuthority", hint: "Ugratás közben a kormány ennyied része hat -- ennyivel lehet igazítani a landolás irányát.", get: () => ARCADE.airSteerAuthority, set: (v) => (ARCADE.airSteerAuthority = v), min: 0, max: 1, step: 0.05 },
     ],
   },
   {
-    title: "Tapadás (kerekek)",
+    title: "Tapadás / drift",
     sliders: [
-      { label: "Hosszanti tapadás", path: "WHEEL.frictionSlip", hint: "A kerekek tapadása gyorsításkor/fékezéskor. Alacsony = könnyebben megpörög/blokkol a kerék.", get: () => WHEEL.frictionSlip, set: (v) => (WHEEL.frictionSlip = v), min: 0.5, max: 10, step: 0.1 },
-      { label: "Oldaltapadás", path: "WHEEL.sideFrictionStiffness", hint: "A kerekek oldalirányú tapadása -- ez határozza meg elsősorban, mennyire 'harap be' a kanyarba.", get: () => WHEEL.sideFrictionStiffness, set: (v) => (WHEEL.sideFrictionStiffness = v), min: 0.5, max: 8, step: 0.1 },
-      { label: "Első tengely tapadás-szorzó", path: "WHEEL.frontGripMultiplier", hint: "Extra szorzó csak az első kerekekre. Magasabb = kevesebb alkormányzás (understeer).", get: () => WHEEL.frontGripMultiplier, set: (v) => (WHEEL.frontGripMultiplier = v), min: 0.3, max: 2, step: 0.05 },
-      { label: "Hátsó tengely tapadás-szorzó", path: "WHEEL.rearGripMultiplier", hint: "Extra szorzó csak a hátsó kerekekre. Alacsonyabb = könnyebben kicsúszik a far (oversteer/drift).", get: () => WHEEL.rearGripMultiplier, set: (v) => (WHEEL.rearGripMultiplier = v), min: 0.3, max: 2, step: 0.05 },
+      { label: "Oldaltapadás", path: "ARCADE.lateralGrip", hint: "A modell EGYETLEN tapadás-értéke: ilyen ütemben húzza nullába az oldalirányú csúszást. Magas = az autó oda megy, amerre az orra néz.", get: () => ARCADE.lateralGrip, set: (v) => (ARCADE.lateralGrip = v), min: 2, max: 80, step: 1, format: (v) => `${v.toFixed(0)} m/s²` },
+      { label: "Oldaltapadás kézifékkel", path: "ARCADE.driftLateralGrip", hint: "Space lenyomva ennyire esik vissza -- innen jön a drift. Alacsonyabb = hosszabb csúszás.", get: () => ARCADE.driftLateralGrip, set: (v) => (ARCADE.driftLateralGrip = v), min: 0, max: 30, step: 0.5, format: (v) => `${v.toFixed(1)} m/s²` },
+      { label: "Drift fordulás-szorzó", path: "ARCADE.driftYawBoost", hint: "Kézifékkel ennyivel élesebben fordul.", get: () => ARCADE.driftYawBoost, set: (v) => (ARCADE.driftYawBoost = v), min: 1, max: 2.5, step: 0.05 },
     ],
   },
   {
     title: "Felfüggesztés",
     sliders: [
-      { label: "Merevség", path: "WHEEL.suspensionStiffness", hint: "A felfüggesztés rugómerevsége. Magasabb = feszesebb, kevésbé süllyed be teherre/gyorsulásra.", get: () => WHEEL.suspensionStiffness, set: (v) => (WHEEL.suspensionStiffness = v), min: 5, max: 60, step: 1 },
-      { label: "Kompresszió-csillapítás", path: "WHEEL.suspensionCompression", hint: "Csillapítás összenyomódáskor (pl. amikor gödörbe/ütközésbe fut a kerék).", get: () => WHEEL.suspensionCompression, set: (v) => (WHEEL.suspensionCompression = v), min: 0.1, max: 1, step: 0.02 },
-      { label: "Visszaengedés-csillapítás", path: "WHEEL.suspensionRelaxation", hint: "Csillapítás a rugó visszaengedésekor. 1,0 fölött pattoghat/imbolyoghat az autó -- óvatosan.", get: () => WHEEL.suspensionRelaxation, set: (v) => (WHEEL.suspensionRelaxation = v), min: 0.1, max: 1.3, step: 0.02 },
-      { label: "Max felfüggesztési erő", path: "WHEEL.maxSuspensionForce", hint: "A felfüggesztés által kifejthető legnagyobb erő. Túl alacsony érték átdöfheti a talajt (átesik rajta).", get: () => WHEEL.maxSuspensionForce, set: (v) => (WHEEL.maxSuspensionForce = v), min: 10000, max: 150000, step: 1000 },
-      { label: "Nyugalmi hossz", path: "WHEEL.suspensionRestLength", hint: "A felfüggesztés kinyújtott hossza -- ez határozza meg alapvetően a menetmagasságot.", get: () => WHEEL.suspensionRestLength, set: (v) => (WHEEL.suspensionRestLength = v), min: 0.1, max: 0.6, step: 0.01, format: (v) => `${v.toFixed(2)} m` },
+      { label: "Rugóállandó", path: "WHEEL.suspensionStiffness", hint: "Kerekenként. Túl alacsony = az autó leül a talajra; túl magas = merev, pattogós.", get: () => WHEEL.suspensionStiffness, set: (v) => (WHEEL.suspensionStiffness = v), min: 5000, max: 80000, step: 1000, format: (v) => `${(v / 1000).toFixed(0)}k N/m` },
+      { label: "Lengéscsillapítás", path: "WHEEL.suspensionDamping", hint: "E nélkül az autó trambulinként pattogna landoláskor. Túl magas = merev, döccenős.", get: () => WHEEL.suspensionDamping, set: (v) => (WHEEL.suspensionDamping = v), min: 500, max: 12000, step: 100, format: (v) => `${v.toFixed(0)} Ns/m` },
+      { label: "Nyugalmi hossz", path: "WHEEL.suspensionRestLength", hint: "A rugó kinyújtott hossza -- ez adja a menetmagasságot.", get: () => WHEEL.suspensionRestLength, set: (v) => (WHEEL.suspensionRestLength = v), min: 0.1, max: 0.6, step: 0.01, format: (v) => `${v.toFixed(2)} m` },
+      { label: "Max felfüggesztési erő", path: "WHEEL.maxSuspensionForce", hint: "Egy kerék legnagyobb kifejthető ereje. Túl alacsony = nagy eséskor átüt a talajon.", get: () => WHEEL.maxSuspensionForce, set: (v) => (WHEEL.maxSuspensionForce = v), min: 10000, max: 150000, step: 1000 },
     ],
   },
   {
-    title: "Karosszéria / stabilizáció",
+    title: "Karosszéria / talpra állás",
     sliders: [
-      { label: "Szögsebesség-csillapítás", path: "CHASSIS.angularDamping", hint: "Mennyire fékeződik le magától a karosszéria forgása MINDEN irányban (kanyarodás, dőlés, bukdácsolás egyaránt).", get: () => CHASSIS.angularDamping, set: (v) => (CHASSIS.angularDamping = v), min: 0, max: 1, step: 0.02 },
-      { label: "Bukdácsolás/dőlés csillapítás", path: "STABILIZATION.pitchRollDamping", hint: "Külön csillapítás CSAK a bukdácsolásra (gyorsuláskori 'felállás') és oldaldőlésre -- a kanyarodást nem érinti.", get: () => STABILIZATION.pitchRollDamping, set: (v) => (STABILIZATION.pitchRollDamping = v), min: 0.3, max: 1, step: 0.02 },
-      { label: "Csillapítás felső határa", path: "STABILIZATION.skipAboveDeg", hint: "Ez alatt a dőlésszög alatt hat a fenti csillapítás. E fölött (pl. borulás közben) nem avatkozik be, hogy ne zavarja az önfelegyenesedést.", get: () => STABILIZATION.skipAboveDeg, set: (v) => (STABILIZATION.skipAboveDeg = v), min: 10, max: 50, step: 1, format: (v) => `${v.toFixed(0)}°` },
-      { label: "Önfelegyenesítő nyomaték", path: "RECOVERY.torque", hint: "Milyen erős nyomatékkal fordítja vissza az autót a kerekeire, ha felborult vagy oldalára dőlt.", get: () => RECOVERY.torque, set: (v) => (RECOVERY.torque = v), min: 2000, max: 25000, step: 500 },
+      { label: "Szögcsillapítás", path: "CHASSIS.angularDamping", hint: "Csak a bukdácsolást és az oldaldőlést érinti (a kanyarodást a modell közvetlenül állítja). Magasabb = kevesebb imbolygás landolás után.", get: () => CHASSIS.angularDamping, set: (v) => (CHASSIS.angularDamping = v), min: 0, max: 5, step: 0.1 },
+      { label: "Talpra állás ideje", path: "RECOVERY.rightingTime", hint: "Ennyi idő alatt áll vissza a kerekeire egy felborult autó. Garantáltan sikerül.", get: () => RECOVERY.rightingTime, set: (v) => (RECOVERY.rightingTime = v), min: 0.1, max: 3, step: 0.1, format: (v) => `${v.toFixed(1)} mp` },
+      { label: "Talpra állás küszöge", path: "RECOVERY.startAngleDeg", hint: "E fölötti dőlésszögnél indul a visszaállítás. Ez alatt szabadon dőlhet (kanyar, sérült kerék).", get: () => RECOVERY.startAngleDeg, set: (v) => (RECOVERY.startAngleDeg = v), min: 20, max: 120, step: 5, format: (v) => `${v.toFixed(0)}°` },
     ],
   },
 ];

@@ -20,6 +20,7 @@
     "check:combat": "tsx scripts/check-combat.ts",
     "check:rocket": "tsx scripts/check-rocket.ts",
     "check:wheels": "tsx scripts/check-wheels.ts",
+    "check:arcade": "tsx scripts/check-arcade.ts",
     "check:pickups": "tsx scripts/check-pickups.ts",
     "check:match": "tsx scripts/check-match.ts",
     "check:names": "tsx scripts/check-names.ts"

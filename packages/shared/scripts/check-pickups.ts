@@ -19,7 +19,7 @@ import {
   PICKUP_RESPAWN_MS,
   withinPickupRange,
 } from "../src/pickups";
-import { ARENA, CHASSIS, DRIVE, FIXED_DT, SPAWN_POINTS } from "../src/config";
+import { ARCADE, ARENA, CHASSIS, FIXED_DT, SPAWN_POINTS } from "../src/config";
 import { NEUTRAL_INPUT } from "../src/types";
 import { RapierBackend } from "../src/physics/rapier";
 
@@ -170,8 +170,18 @@ async function main(): Promise<void> {
 
   check(
     "a boost erdemben gyorsit",
-    boosted > plain * 1.2,
-    `${plain.toFixed(0)} -> ${boosted.toFixed(0)} km/h (${(((boosted - plain) / plain) * 100).toFixed(0)}%, szorzo ${DRIVE.boostMultiplier})`,
+    boosted.peakKmh > plain.peakKmh * 1.2,
+    `${plain.peakKmh.toFixed(0)} -> ${boosted.peakKmh.toFixed(0)} km/h (${(((boosted.peakKmh - plain.peakKmh) / plain.peakKmh) * 100).toFixed(0)}%, beallitott csucs ${(ARCADE.boostMaxSpeed * 3.6).toFixed(0)} km/h)`,
+  );
+
+  // OR: ha egy kesobbi hangolas gyorsabbra veszi az autot, a futas
+  // kifuthat a savbol es a falnak utkozhet. Enelkul az elozo meres
+  // CSENDBEN hamis lenne -- pontosan ez tortent korabban.
+  const furthest = Math.max(plain.travelled, boosted.travelled);
+  check(
+    "a meres nem futott ki a savbol",
+    furthest < LANE_LENGTH,
+    `${furthest.toFixed(1)} m a szabad ${LANE_LENGTH} m-bol`,
   );
 
   console.log(
@@ -186,16 +196,40 @@ async function main(): Promise<void> {
  * A spawn ugyanaz a szabad sarok, amit a tobbi headless meres hasznal
  * (lasd check-turning.ts) -- az arena kozepen a kocsi akadalyba erne.
  */
-async function accelerate(boost: boolean): Promise<number> {
+/** Egy gyorsitasi futas eredmenye. */
+interface Run {
+  peakKmh: number;
+  /** Meddig jutott el a merosavban (m) -- az utkozes kiszurésehez. */
+  travelled: number;
+}
+
+/**
+ * Merosav: a (25, 25) pontbol a -Z iranyba kb. 62 m szabad hely van az
+ * eszaki falig.
+ *
+ * A meresi ablak SZANDEKOSAN rovid (1.6 mp), es a VEGSEBESSEG helyett a
+ * CSUCSOT nezzuk. Korabban 2.5 mp-ig gyorsitott, es a boostos futas --
+ * eppen mert gyorsabb -- kifutott a savbol es NEKIMENT A FALNAK: a
+ * mert "vegsebesseg" 1 km/h lett. A lassabb futas belefert, tehat a
+ * teszt nem a boostot merte, hanem azt, melyik auto er elobb a falhoz.
+ */
+const LANE_START_Z = 25;
+const LANE_LENGTH = 62;
+
+async function accelerate(boost: boolean): Promise<Run> {
   const backend = new RapierBackend();
   await backend.init();
-  backend.reset({ x: 25, y: 2.5, z: 25 });
+  backend.reset({ x: 25, y: 2.5, z: LANE_START_Z });
   // Leeres es megnyugvas, mielott gazt adnank.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, NEUTRAL_INPUT);
-  for (let i = 0; i < 150; i++) {
+
+  let peakKmh = 0;
+  for (let i = 0; i < 96; i++) {
     backend.step(FIXED_DT, { ...NEUTRAL_INPUT, throttle: 1, boost });
+    peakKmh = Math.max(peakKmh, backend.getTelemetry().speedKmh);
   }
-  return backend.getTelemetry().speedKmh;
+  const z = backend.getChassis().position[2];
+  return { peakKmh, travelled: LANE_START_Z - z };
 }
 
 main();

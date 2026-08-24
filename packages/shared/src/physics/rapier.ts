@@ -1,17 +1,26 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import {
+  ARCADE,
   ARENA,
   CHASSIS,
-  DRIVE,
   GRAVITY,
   RECOVERY,
-  STABILIZATION,
   WHEEL,
   WHEEL_LAYOUT,
 } from "../config";
-import { clamp, cross, dot, eulerToQuat, length, lerp, rotateVec } from "../math";
+import {
+  clamp,
+  cross,
+  dot,
+  eulerToQuat,
+  length,
+  lerp,
+  rotateVec,
+  type Vec3,
+} from "../math";
 import { wheelRadiusFor } from "../wheelVisuals";
 import { explosionFalloff } from "../rocket";
+import { approach, stepArcade, type ArcadeMotion } from "./arcade";
 import {
   HEALTHY_WHEEL,
   type DriveInput,
@@ -21,6 +30,19 @@ import {
   type WheelDamage,
   type WheelReadout,
 } from "../types";
+
+/**
+ * Egy kerek talaj-kapcsolata, a sajat raycastunkbol.
+ *
+ * A regi valtozatban ezt a Rapier jarmu-kontrollere tartotta nyilvan;
+ * mivel az arkad modellben nincs jarmu-kontroller, magunk vezetjuk.
+ */
+interface WheelContact {
+  inContact: boolean;
+  /** A rugo aktualis hossza (m): 0 = teljesen osszenyomva. */
+  suspensionLength: number;
+}
+
 
 /** A felfuggesztes iranya a chassis lokalis rendszereben (lefele). */
 const SUSPENSION_DIR = { x: 0, y: -1, z: 0 };
@@ -173,7 +195,31 @@ export class RapierBackend implements VehicleBackend {
 
   private world!: RAPIER.World;
   private chassis!: RAPIER.RigidBody;
-  private controller!: RAPIER.DynamicRayCastVehicleController;
+  /**
+   * Az arkad modell allapota: az auto sajat rendszereben ertelmezett
+   * sebessegek. Minden lepesben a TENYLEGES testbol toltjuk ujra, hogy
+   * az utkozesek es a robbanasok hatasa benne legyen.
+   */
+  private motion: ArcadeMotion = { forward: 0, lateral: 0, yawRate: 0 };
+
+  /** Kerekenkenti talaj-kapcsolat a sajat raycastjainkbol. */
+  private contacts: WheelContact[] = WHEEL_LAYOUT.map(() => ({
+    inContact: false,
+    suspensionLength: WHEEL.suspensionRestLength,
+  }));
+
+  /**
+   * A kerekek elfordulasa (rad) -- KIZAROLAG megjelenites.
+   *
+   * A kanyarodast a yawRate vegzi, nem a kerekek szoge; ez csak azert
+   * kell, hogy a fordulo auto ne nezzen ki hamisan.
+   */
+  private steerVisual = 0;
+  /** A kerekek gordulesi szoge (rad) -- szinten csak megjelenites. */
+  private wheelRoll: number[] = WHEEL_LAYOUT.map(() => 0);
+
+  /** Ujrahasznositott sugar a felfuggesztes-raycasthez. */
+  private ray!: RAPIER.Ray;
 
   /** Tavoli jatekosok testei es a hozzajuk tartozo jóslat-allapot. */
   private remoteBodies = new Map<string, RemoteBody>();
@@ -184,8 +230,6 @@ export class RapierBackend implements VehicleBackend {
   private damage: WheelDamage[] = WHEEL_LAYOUT.map(() => ({ ...HEALTHY_WHEEL }));
   private stepMsAvg = 0;
   private stepsLastFrame = 0;
-  /** Mennyi ideje van folyamatosan a felegyenesedesi kuszob felett (mp), vagy null. */
-  private tiltedSince: number | null = null;
 
   async init(): Promise<void> {
     await RAPIER.init();
@@ -228,11 +272,6 @@ export class RapierBackend implements VehicleBackend {
       .setAngularDamping(CHASSIS.angularDamping)
       // Az auto ne aludjon el allo helyzetben, kulonben nem indul ujra.
       .setCanSleep(false);
-    // A karosszeria szabadon dolhet/bukdacsolhat (nincs tengelyzaras) --
-    // ez kell a realisztikus erzethez es a kerek-serules lathato
-    // dolesehez. A borulas ellen a steerFalloff (lasd config.ts) es a
-    // mertekletes sideFrictionStiffness ad vedelmet szelsoseges,
-    // tartos, teljes kormanyos kanyaroknal.
     this.chassis = this.world.createRigidBody(bodyDesc);
 
     const colliderDesc = RAPIER.ColliderDesc.cuboid(
@@ -241,462 +280,307 @@ export class RapierBackend implements VehicleBackend {
       CHASSIS.halfExtents.z,
     )
       .setMass(CHASSIS.mass)
-      .setFriction(0.4)
-      .setRestitution(0.1)
+      // ALACSONY surlodas (0.4 -> 0.2). A karosszeria csak akkor er
+      // talajt vagy falat, ha a felfuggesztes kifogyott, vagy ha az
+      // auto felborult -- ilyenkor a magas surlodas BEAKASZTANA a
+      // kocsit. Sikos karosszerianal inkabb lecsuszik a falrol, ami
+      // arkad jatekban sokkal kevesbe frusztralo.
+      .setFriction(0.2)
+      .setRestitution(0.15)
       .setCollisionGroups(COLLISION_LOCAL);
     this.world.createCollider(colliderDesc, this.chassis);
 
-    this.controller = this.world.createVehicleController(this.chassis);
-    this.controller.indexUpAxis = 1;
-    // FIGYELEM: a rapier3d tipusdefinicioban a forward tengely settere
-    // "setIndexForwardAxis" nevu SETTER (nem metodus) -- ezert ertekadas.
-    this.controller.setIndexForwardAxis = 2;
-
-    for (const layout of WHEEL_LAYOUT) {
-      this.controller.addWheel(
-        layout.position,
-        SUSPENSION_DIR,
-        AXLE,
-        WHEEL.suspensionRestLength,
-        WHEEL.radius,
-      );
-    }
-
-    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
-      this.applyWheelTuning(i);
-    }
-  }
-
-  /**
-   * A kerek parametereinek beallitasa a serules-allapot alapjan.
-   *
-   * Ez a spike egyik fo kerdese: minden itt hasznalt setter FUTASIDOBEN,
-   * KEREKENKENT hivhato -- ez teszi lehetove a per-kerek serulest sajat
-   * jarmu-fizika irasa nelkul.
-   */
-  private applyWheelTuning(i: number): void {
-    const d = this.damage[i];
-    const c = this.controller;
-    const grip = d.broken ? 0 : d.gripMultiplier;
-    // Tengelyenkenti (elso/hatso) tapadas-szorzo -- lasd config.ts.
-    const axleGrip = WHEEL_LAYOUT[i].steered
-      ? WHEEL.frontGripMultiplier
-      : WHEEL.rearGripMultiplier;
-
-    c.setWheelFrictionSlip(
-      i,
-      Math.max(0.08, WHEEL.frictionSlip * grip * axleGrip),
-    );
-    c.setWheelSideFrictionStiffness(
-      i,
-      Math.max(0.02, WHEEL.sideFrictionStiffness * grip * axleGrip),
-    );
-    c.setWheelSuspensionCompression(i, WHEEL.suspensionCompression);
-    c.setWheelSuspensionRelaxation(i, WHEEL.suspensionRelaxation);
-    c.setWheelMaxSuspensionTravel(i, WHEEL.maxSuspensionTravel);
-    c.setWheelSuspensionRestLength(i, WHEEL.suspensionRestLength);
-
-    if (d.broken) {
-      // Nincs felfuggesztesi ero -> az auto ledol erre a sarokra.
-      c.setWheelSuspensionStiffness(i, 0);
-      c.setWheelMaxSuspensionForce(i, 0);
-    } else {
-      // Serult (de nem tort) kereknel a rugo is gyengul kicsit.
-      c.setWheelSuspensionStiffness(
-        i,
-        WHEEL.suspensionStiffness * lerp(0.6, 1, d.gripMultiplier),
-      );
-      c.setWheelMaxSuspensionForce(i, WHEEL.maxSuspensionForce);
-    }
-    // A sugar szabalya kozos a rendereléssel (sajat ES tavoli auto) --
-    // lasd wheelVisuals.ts.
-    c.setWheelRadius(i, wheelRadiusFor(d));
+    // Egyetlen sugarat hozunk letre es hasznaljuk ujra: 4 kerek * 60 Hz
+    // felesleges szemetet jelentene lepesenkent.
+    this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
   }
 
   setWheelDamage(index: number, damage: WheelDamage): void {
     if (index < 0 || index >= WHEEL_LAYOUT.length) return;
     this.damage[index] = damage;
-    this.applyWheelTuning(index);
+  }
+
+  /**
+   * A kerekek allapotabol szarmazo tapadas (0..1).
+   *
+   * A regi modellben a serules kerekenkent kulon tapadasi gorbeket
+   * allitott a jarmu-kontrolleren. Az arkad modellben a tapadas
+   * EGYETLEN szam, ezert a negy kerek atlagat adjuk at. A kerekek
+   * egyedi hatasa igy sem vesz el: a tort kerek nem tart, tehat az
+   * auto tenylegesen ledol arra a sarkara (lasd updateSuspension).
+   */
+  private gripScale(): number {
+    let sum = 0;
+    for (const d of this.damage) sum += d.broken ? 0 : d.gripMultiplier;
+    return sum / WHEEL_LAYOUT.length;
   }
 
   step(dt: number, input: DriveInput): void {
     const t0 = performance.now();
 
-    // A debug-panel csuszkai kozvetlenul a config objektumokat
-    // mutaljak -- ezert minden lepesben ujra kell alkalmazni a
-    // kerek- es karosszeria-parametereket, kulonben csak a kovetkezo
-    // serules-valtozaskor ervenyesulnenek. Olcso (4 kerek, nehany
-    // setter hivas + 2 chassis setter), nem szamit a teljesitmenyben.
-    for (let i = 0; i < WHEEL_LAYOUT.length; i++) this.applyWheelTuning(i);
-    this.chassis.setAngularDamping(CHASSIS.angularDamping);
+    // A dev-panel csuszkai kozvetlenul a config objektumot mutaljak,
+    // ezert a testre hato ket erteket minden lepesben ujra beallitjuk.
     this.chassis.setLinearDamping(CHASSIS.linearDamping);
+    this.chassis.setAngularDamping(CHASSIS.angularDamping);
 
-    const speed = this.speedMs();
-    // Pozitiv = az orr fele halad (lasd FORWARD_SIGN).
-    const forwardSpeed = this.controller.currentVehicleSpeed() * FORWARD_SIGN;
+    const quat = this.chassis.rotation();
+    // Az auto sajat, ORTONORMALT bazisa. A sebesseget EBBEN bontjuk
+    // szet, nem vizszintes vetuletben: igy a rampan a hajtoero a rampa
+    // mente hat, nem a levegobe.
+    const forwardAxis = rotateVec(quat, { x: 0, y: 0, z: FORWARD_SIGN });
+    const rightAxis = rotateVec(quat, { x: 1, y: 0, z: 0 });
+    const upAxis = rotateVec(quat, { x: 0, y: 1, z: 0 });
 
-    // --- Kanyar kozbeni hajtoero-korlatozas (friction circle) ---
-    // Valodi gumiabroncsnak veges a tapadasi "koltsegvetese": minel
-    // tobbet hasznal belole oldalirányu (kanyar-) eronek, annal
-    // kevesebb marad hosszanti (gyorsitasi) eronek. Enelkul a sebesseg
-    // gazzal kanyarban is szabadon novekedhetett, ami eltero (nagyobb)
-    // kanyarsugarat eredmenyezett gazzal, mint gaz nelkul -- ez volt a
-    // zavaro "hirtelen befordul, ha elveszem a gazt" erzet oka. A
-    // hajtoero most a kormanyzas mertekevel aranyosan csokken.
-    // Ha mindket kormanyzott (elso) kerek torott, a kormanyzas fizikailag
-    // amugy sem hat (steerAngle nullazva ott lejjebb) -- ilyenkor a
-    // hajtoero-korlatozas felesleges dupla buntetes lenne a mar amugy is
-    // egyenesbe kenyszeritett autonak.
-    const steeredWheelsHealthy = WHEEL_LAYOUT.some(
-      (w, i) => w.steered && !this.damage[i].broken,
+    // 1. Kerek-raycastok: talajkontaktus es a felfuggesztes ereje.
+    const grounded = this.updateSuspension(dt, quat, upAxis);
+
+    // 2. A TENYLEGES sebesseget bontjuk szet -- benne van minden, amit
+    //    az utkozesek es a robbanasok csinaltak vele.
+    const v = this.chassis.linvel();
+    const vertical = dot(v, upAxis);
+    this.motion = {
+      forward: dot(v, forwardAxis),
+      lateral: dot(v, rightAxis),
+      yawRate: this.chassis.angvel().y,
+    };
+
+    // 3. A vezetes-modell lepese (lasd arcade.ts).
+    const next = stepArcade(this.motion, input, dt, {
+      grounded,
+      grip: this.gripScale(),
+    });
+    this.motion = next;
+
+    // 4. Vissza vilagkoordinatakba. A FUGGOLEGES osszetevo valtozatlan
+    //    marad: az a gravitacioe, a rugoke es az utkozeseke.
+    this.chassis.setLinvel(
+      {
+        x:
+          forwardAxis.x * next.forward +
+          rightAxis.x * next.lateral +
+          upAxis.x * vertical,
+        y:
+          forwardAxis.y * next.forward +
+          rightAxis.y * next.lateral +
+          upAxis.y * vertical,
+        z:
+          forwardAxis.z * next.forward +
+          rightAxis.z * next.lateral +
+          upAxis.z * vertical,
+      },
+      true,
     );
-    // Alacsony sebessegnel (pl. induraskor) meg nincs valodi tapadasi
-    // konfliktus -- a korlatozas csak corneringPowerRampSpeed felett
-    // fut fel fokozatosan a teljes mertekere.
-    const speedRamp = clamp(speed / DRIVE.corneringPowerRampSpeed, 0, 1);
-    const corneringDemand = steeredWheelsHealthy
-      ? Math.abs(input.steer) * speedRamp
-      : 0;
-    const enginePowerScale = lerp(1, DRIVE.corneringPowerMin, corneringDemand);
 
-    // --- Hajtoero es fek ---
-    // engineMagnitude: pozitiv = az orr fele tolja.
-    let engineMagnitude = 0;
-    let brakeForce = 0;
+    // A bukdacsolast (X) es az oldaldolest (Z) NEM irjuk felul: azok a
+    // rugoke es az utkozeseke. Csak a fuggoleges tengely koruli
+    // fordulas a mienk.
+    const av = this.chassis.angvel();
+    this.chassis.setAngvel({ x: av.x, y: next.yawRate, z: av.z }, true);
 
-    if (input.throttle > 0) {
-      if (forwardSpeed < -0.5) {
-        brakeForce = DRIVE.brakeForce;
-      } else {
-        engineMagnitude =
-          DRIVE.engineForce *
-          (input.boost ? DRIVE.boostMultiplier : 1) *
-          enginePowerScale;
-      }
-    } else if (input.throttle < 0) {
-      if (forwardSpeed > 0.5) {
-        brakeForce = DRIVE.brakeForce;
-      } else {
-        engineMagnitude =
-          -DRIVE.engineForce * DRIVE.reverseFactor * enginePowerScale;
-      }
-    } else {
-      // Motorfek
-      brakeForce = DRIVE.brakeForce * 0.06;
-    }
+    // 5. Talpra allas, ha felborult.
+    this.applyRighting(dt, upAxis);
 
-    // Vissza a controller nyers (chassis +Z) tengelyere.
-    const engineForce = engineMagnitude * FORWARD_SIGN;
-
-    // --- Kormanyzas sebessegfuggo csillapitassal ---
-    const falloff = lerp(
-      1,
-      DRIVE.steerFalloffMin,
-      clamp(speed / DRIVE.steerFalloffSpeed, 0, 1),
-    );
-    // FORWARD_SIGN: a kormanyzott kerekek most a -Z (orr) oldalon vannak,
-    // ami a forgatonyomatek elojelet is megforditja a raycast vehicle
-    // controllerben -- enelkul a "jobbra" input a vilag -X iranyaba
-    // forditana a kocsit, ami a kamera nezeteben screen-balra esne.
-    const steerAngle = FORWARD_SIGN * input.steer * DRIVE.maxSteer * falloff;
-
-    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
-      const layout = WHEEL_LAYOUT[i];
-      const broken = this.damage[i].broken;
-
-      // Tort kerek nem hajt es nem kormanyoz.
-      this.controller.setWheelEngineForce(
-        i,
-        layout.driven && !broken ? engineForce : 0,
-      );
-      this.controller.setWheelSteering(
-        i,
-        layout.steered && !broken ? steerAngle : 0,
-      );
-
-      let brake = brakeForce;
-      if (input.handbrake) {
-        brake = layout.driven ? DRIVE.handbrakeForce : DRIVE.brakeForce * 0.5;
-      }
-      this.controller.setWheelBrake(i, broken ? 0 : brake);
-    }
-
-    const tiltAngle = this.applySelfRighting(dt);
-
-    this.controller.updateVehicle(dt);
+    // 6. Kerek-latvany (kormanyszog, gordules) -- a fizikat nem erinti.
+    this.updateWheelVisuals(dt, input, next.forward);
 
     // A tavoli testeknel feljegyezzuk, hova kerulnenek PUSZTAN a
     // beallitott sebessegtol -- a lepes utan ebbol derul ki, hogy erte-e
     // oket kulso ero (azaz nekunk mentek, vagy mi nekik).
     for (const entry of this.remoteBodies.values()) {
       const p = entry.body.translation();
-      const v = entry.body.linvel();
-      entry.expected = { x: p.x + v.x * dt, z: p.z + v.z * dt };
+      const bv = entry.body.linvel();
+      entry.expected = { x: p.x + bv.x * dt, z: p.z + bv.z * dt };
     }
 
     this.world.step();
     this.detectRemoteCollisions();
-
-    let wheelsOnGround = 0;
-    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
-      if (this.controller.wheelIsInContact(i)) wheelsOnGround++;
-    }
-
-    const skipAbove = (STABILIZATION.skipAboveDeg * Math.PI) / 180;
-    if (tiltAngle < skipAbove) {
-      this.applyPitchRollStabilization();
-      // Levegoben (egy kerek sincs a talajon) a kanyarsugar-asszisztens
-      // kikapcsol -- kormanyzassal amugy sem lehetne forgatni a kocsit,
-      // ha egyik kerek sem er talajt, ez csak reala kene juttatna.
-      if (wheelsOnGround > 0) {
-        // A haladasi irany igazitasa (applyVelocityAlignment) az
-        // applyTurnRadiusAssist BELSEJEBOL fut, ugyanazon feltetelek
-        // mellett (steer/sebesseg-kuszob) -- lasd ott a dokumentaciot.
-        // ELOJELES sebesseg: tolatasnal negativ (lasd ott).
-        this.applyTurnRadiusAssist(dt, forwardSpeed, input.steer);
-      }
-    }
 
     const elapsed = performance.now() - t0;
     this.stepMsAvg = this.stepMsAvg * 0.9 + elapsed * 0.1;
     this.stepsLastFrame++;
   }
 
+  /**
+   * Kerek-raycastok es a felfuggesztes ereje.
+   *
+   * Ez potolja a Rapier jarmu-kontrolleret. Minden kerek csatlakozasi
+   * pontjabol egy sugarat lovunk az auto "lefele" iranyaba; ha az a
+   * rugo hosszan belul talalatot ad, rugoerot fejtunk ki A KEREK
+   * HELYEN. Az ero TAMADASPONTJA a lenyeg: ettol dol be a kocsi
+   * kanyarban es ettol bukik elore fekezeskor, magatol. A regi
+   * modellben ugyanezt kulon stabilizacios kodnak kellett eloallitania,
+   * majd utana csillapitania.
+   *
+   * @returns er-e legalabb egy kerek a talajt
+   */
+  private updateSuspension(
+    dt: number,
+    quat: { x: number; y: number; z: number; w: number },
+    upAxis: Vec3,
+  ): boolean {
+    // FONTOS: a Rapierben az addForce/addForceAtPoint TARTOS erot ad
+    // hozza, ami resetForces()-ig ervenyben marad -- nem lepesenkent
+    // torlodik, mint egy impulzus. E nelkul a rugoerok lepesrol lepesre
+    // osszeadodnak: merve az auto a foldet erintve felgyulemlett 4 x 60
+    // kN-nal orokre felfele gyorsult (240 m/s^2), meg a levegoben is.
+    this.chassis.resetForces(false);
+    this.chassis.resetTorques(false);
+
+    const p = this.chassis.translation();
+    const down = { x: -upAxis.x, y: -upAxis.y, z: -upAxis.z };
+    const rest = WHEEL.suspensionRestLength;
+    let grounded = false;
+
+    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
+      const contact = this.contacts[i];
+      const previous = contact.suspensionLength;
+
+      if (this.damage[i].broken) {
+        // Tort kerek nem tart semmit: az auto ledol arra a sarkara, es
+        // a karosszeria fogja fel a sulyt.
+        contact.inContact = false;
+        contact.suspensionLength = rest;
+        continue;
+      }
+
+      const offset = rotateVec(quat, WHEEL_LAYOUT[i].position);
+      const origin = {
+        x: p.x + offset.x,
+        y: p.y + offset.y,
+        z: p.z + offset.z,
+      };
+      const radius = wheelRadiusFor(this.damage[i]);
+
+      this.ray.origin = origin;
+      this.ray.dir = down;
+      const hit = this.world.castRay(
+        this.ray,
+        rest + radius,
+        true,
+        undefined,
+        COLLISION_LOCAL,
+        undefined,
+        this.chassis,
+      );
+
+      if (!hit) {
+        contact.inContact = false;
+        contact.suspensionLength = rest;
+        continue;
+      }
+
+      grounded = true;
+      contact.inContact = true;
+      contact.suspensionLength = clamp(hit.timeOfImpact - radius, 0, rest);
+
+      // Rugo + lengescsillapito. A csillapitas a rugo hosszanak
+      // VALTOZASI utemebol jon: e nelkul a rugo tisztan tarolna es
+      // visszaadna az energiat, azaz az auto trambulinkent pattogna
+      // landolaskor.
+      const compression = rest - contact.suspensionLength;
+      const rate = (previous - contact.suspensionLength) / Math.max(dt, 1e-4);
+      const force = clamp(
+        WHEEL.suspensionStiffness * compression + WHEEL.suspensionDamping * rate,
+        0,
+        WHEEL.maxSuspensionForce,
+      );
+
+      this.chassis.addForceAtPoint(
+        { x: upAxis.x * force, y: upAxis.y * force, z: upAxis.z * force },
+        origin,
+        true,
+      );
+    }
+
+    return grounded;
+  }
+
+  /**
+   * Talpra allitas borulas utan.
+   *
+   * Nem nyomatekkal dolgozik, hanem a karosszeria elfordulasat igazitja
+   * vissza fuggoleges ala, lepesenkent a hatralevo szog egy hanyadaval.
+   * Igy MINDIG sikerul, es mindig ugyanannyi ideig tart -- lasd RECOVERY.
+   *
+   * @returns az aktualis dolesszog (radian)
+   */
+  private applyRighting(dt: number, upAxis: Vec3): number {
+    // Szog az auto sajat "felfele" iranya es a valodi fuggoleges kozott.
+    const tilt = Math.acos(clamp(upAxis.y, -1, 1));
+    const start = (RECOVERY.startAngleDeg * Math.PI) / 180;
+    if (tilt <= start) return tilt;
+
+    // A tengely, ami az auto "fel" iranyat a vilag "fel" iranyaba viszi.
+    let axis = cross(upAxis, { x: 0, y: 1, z: 0 });
+    let len = length(axis);
+    if (len < 1e-4) {
+      // Pontosan fejen allo auto: a kereszt-szorzat nulla hosszu, tehat
+      // nincs belole ertelmes irany. Barmelyik VIZSZINTES tengely jo --
+      // csak valasztani kell egyet, kulonben a kocsi beragadna a fejen
+      // allo, instabil egyensulyi helyzetben.
+      axis = { x: 1, y: 0, z: 0 };
+      len = 1;
+    }
+    const nx = axis.x / len;
+    const ny = axis.y / len;
+    const nz = axis.z / len;
+
+    const fraction = clamp(dt / RECOVERY.rightingTime, 0, 1);
+    // Vilag-rendszerbeli forgatas: delta * jelenlegi.
+    const rotated = quatMul(
+      quatAxisAngle(nx, ny, nz, tilt * fraction),
+      toQ(this.chassis.rotation()),
+    );
+    this.chassis.setRotation(rotated, true);
+
+    // A megmarado porges atlenditene a fuggolegesen, es a kocsi a masik
+    // oldalara dolne. A FUGGOLEGES tengely koruli forgast (y) nem
+    // bantjuk: az a kormany dolga.
+    const av = this.chassis.angvel();
+    this.chassis.setAngvel(
+      {
+        x: av.x * RECOVERY.spinDamping,
+        y: av.y,
+        z: av.z * RECOVERY.spinDamping,
+      },
+      true,
+    );
+
+    return tilt;
+  }
+
+  /**
+   * A kerekek LATVANYA: kormanyszog es gordules.
+   *
+   * Egyik sem hat vissza a fizikara -- a kanyart a yawRate vegzi.
+   * Azert kell megis, mert elfordulatlan kerekkel kanyarodo (vagy allo
+   * kerekkel szaguldo) auto azonnal hamisnak latszik.
+   */
+  private updateWheelVisuals(
+    dt: number,
+    input: DriveInput,
+    forwardSpeed: number,
+  ): void {
+    const target =
+      FORWARD_SIGN * clamp(input.steer, -1, 1) * ARCADE.visualSteerAngle;
+    const rate =
+      Math.abs(input.steer) > 0.01 ? ARCADE.steerSpeed : ARCADE.steerReturnSpeed;
+    this.steerVisual = approach(
+      this.steerVisual,
+      target,
+      rate * ARCADE.visualSteerAngle * dt,
+    );
+
+    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
+      if (this.damage[i].broken) continue;
+      const radius = Math.max(0.05, wheelRadiusFor(this.damage[i]));
+      this.wheelRoll[i] += (forwardSpeed * dt) / radius;
+    }
+  }
+
   private speedMs(): number {
     const v = this.chassis.linvel();
     return Math.hypot(v.x, v.y, v.z);
-  }
-
-  /**
-   * Onfelegyenesites: ha az auto oldalra dolt vagy fejre allt, egy
-   * fokozatosan erosodo forgatonyomatek mindig visszaforgatja a
-   * kerekeire, ahelyett hogy stabilan megallna az oldalan/tetejen.
-   *
-   * Kuszobbol indul (RECOVERY.startAngleDeg), hogy a normal
-   * vezetesi dolest (kanyar, kerek-serules) ne erintse -- azok
-   * jellemzoen jokkal a kuszob alatt maradnak.
-   */
-  /** @returns az aktualis dolesszog (radian) -- lasd applyPitchRollStabilization. */
-  private applySelfRighting(dt: number): number {
-    const q = this.chassis.rotation();
-    const localUpWorld = rotateVec(q, { x: 0, y: 1, z: 0 });
-    const worldUp = { x: 0, y: 1, z: 0 };
-
-    const cosTilt = clamp(dot(localUpWorld, worldUp), -1, 1);
-    const tiltAngle = Math.acos(cosTilt);
-
-    const startAngle = (RECOVERY.startAngleDeg * Math.PI) / 180;
-    if (tiltAngle <= startAngle) {
-      this.tiltedSince = null;
-      return tiltAngle;
-    }
-
-    // Idobeli eszkalacio: minel tovabb ragad a dolesszog a kuszob
-    // felett (pl. egy nagy, stabil lapjan pihen, ahol a kontaktus-
-    // szolver ellenall a gyenge korrekcionak), annal erosebb nyomatek
-    // hat -- igy MINDIG van eleg ero a vegso kitoreshez.
-    this.tiltedSince = (this.tiltedSince ?? 0) + dt;
-    const escalation = lerp(
-      1,
-      RECOVERY.escalationMax,
-      clamp(this.tiltedSince / RECOVERY.escalationTime, 0, 1),
-    );
-
-    const maxSeverityAngle = (RECOVERY.maxSeverityAngleDeg * Math.PI) / 180;
-    const severity = clamp(
-      (tiltAngle - startAngle) / (maxSeverityAngle - startAngle),
-      0,
-      1,
-    );
-
-    let axis = cross(localUpWorld, worldUp);
-    const axisLen = length(axis);
-    if (axisLen < 1e-3) {
-      // Kozel pontosan fejen all (instabil egyensuly) -- a termeszetes
-      // korrekcios irany majdnem nulla hosszu, rogzitett tengellyel
-      // inditjuk el a forgast.
-      axis = RECOVERY.fallbackAxis;
-    } else {
-      axis = { x: axis.x / axisLen, y: axis.y / axisLen, z: axis.z / axisLen };
-    }
-
-    const torqueMag = RECOVERY.torque * severity * escalation;
-    this.chassis.applyTorqueImpulse(
-      {
-        x: axis.x * torqueMag * dt,
-        y: axis.y * torqueMag * dt,
-        z: axis.z * torqueMag * dt,
-      },
-      true,
-    );
-
-    // Mertekletes extra csillapitas, hogy a konnyen mozdithato
-    // esetekben (pl. sik talajrol fejre allitva) ne lendüljön at a
-    // celon -- a nagy, stabil lapjan pihenő esetnel ugyis a kontaktus-
-    // szolver adja a domans ellenallast, ott ez alig szamit.
-    const av = this.chassis.angvel();
-    this.chassis.setAngvel(
-      {
-        x: av.x * RECOVERY.angularDampingDuringRecovery,
-        y: av.y * RECOVERY.angularDampingDuringRecovery,
-        z: av.z * RECOVERY.angularDampingDuringRecovery,
-      },
-      true,
-    );
-    return tiltAngle;
-  }
-
-  /**
-   * Extra csillapitas a bukdacsolas (X) es dontes (Z) tengelyeken,
-   * FUGGETLENUL a kanyarodastol (Y) -- lasd STABILIZATION.pitchRollDamping
-   * dokumentacioja config.ts-ben. Csak akkor hat, ha a doles jokkal a
-   * felegyenesedesi kuszob (RECOVERY.startAngleDeg) ALATT van -- egy
-   * biztonsagi savval (STABILIZATION.skipAboveDeg), kulonben pontosan
-   * a kuszobon atlepve elfojtana a felegyenesedeshez meg szukseges
-   * lenduletet, es az auto elakadna a kuszob kozeleben.
-   */
-  private applyPitchRollStabilization(): void {
-    const av = this.chassis.angvel();
-    this.chassis.setAngvel(
-      {
-        x: av.x * STABILIZATION.pitchRollDamping,
-        y: av.y,
-        z: av.z * STABILIZATION.pitchRollDamping,
-      },
-      true,
-    );
-  }
-
-  /**
-   * Kozvetlen, sebessegtol fuggetlen kanyarsugar-celzas -- lasd
-   * DRIVE.targetTurnRadius dokumentacioja config.ts-ben. A valos
-   * gumitapadas-alapu kanyarodas fizikailag korlatozott nagy
-   * sebessegnel (v^2/r); ez a mechanizmus felulirja azt egy kozvetlen
-   * celzott szogsebesseggel, hogy a kanyarsugar kb. allando maradjon
-   * barmilyen sebessegnel.
-   *
-   * A cel-szogsebesseget SIMITVA kozelitjuk meg (nem egyszeri
-   * impulzussal), hogy ne lokjön/rango be a kormanyzas kezdetekor --
-   * ugyanaz a mintazat, mint az onfelegyenesedesnel korabban bevalt.
-   */
-  private applyTurnRadiusAssist(
-    dt: number,
-    forwardSpeed: number,
-    steerInput: number,
-  ): void {
-    if (Math.abs(steerInput) < 0.01) return;
-    // Alacsony sebessegnel (pl. inditaskor) kikapcsol, ne fojtsa el a
-    // termeszetes, gumitapadas-alapu forgast -- lasd config.ts.
-    if (Math.abs(forwardSpeed) < DRIVE.turnRadiusMinSpeed) return;
-
-    // FONTOS: ELOJELES haladasi sebesseg, nem a sebesseg nagysaga.
-    // Tolatasnal negativ, igy a celzott forgas iranya magatol
-    // megfordul -- ahogy egy valodi autonal is (hatramenetben ugyanaz a
-    // kormanyallas az ellenkezo iranyba forgatja a kocsit). Elojel
-    // nelkul az asszisztens tolatas kozben a ROSSZ iranyba eroltette a
-    // forgast, es a termeszetes fizika ellen dolgozva lefekezte az
-    // autot: meresben 42.6 km/h helyett csak 9.3 km/h maradt.
-    //
-    // FORWARD_SIGN: ugyanaz az elojel-logika, mint a kormanyszognel
-    // (lasd fent) -- igy a celzott forgas a tenyleges kormanyzas
-    // iranyaba mutat, nem ellene.
-    const targetYawRate =
-      (FORWARD_SIGN * steerInput * forwardSpeed) / DRIVE.targetTurnRadius;
-
-    const av = this.chassis.angvel();
-
-    // Az asszisztens CSAK HOZZAADHAT forgast, elvenni nem.
-    //
-    // A feladata az volt, hogy NAGY sebessegnel megszoritsa a kanyart,
-    // ahol a gumitapadas fizikailag korlatoz (v^2/r). Alacsony
-    // sebessegen -- es kulonosen TOLATASNAL -- a termeszetes fordulas
-    // amugy is elesebb a celzottnal (meresben 1.11 vs 0.83 rad/s), ott
-    // tehat csak visszafogna, mikozben az iranyigazitas a gumik ellen
-    // dolgozna: a tolatas + kormanyzas igy 19.4 km/h helyett 10.6-ra
-    // esett vissza. Ez volt a "beakadas".
-    if (
-      Math.sign(targetYawRate) === Math.sign(av.y) &&
-      Math.abs(av.y) >= Math.abs(targetYawRate)
-    ) {
-      return;
-    }
-
-    const blend = clamp(DRIVE.turnRadiusBlendRate * dt, 0, 1);
-    const newYawRate = lerp(av.y, targetYawRate, blend);
-    this.chassis.setAngvel({ x: av.x, y: newYawRate, z: av.z }, true);
-
-    this.applyVelocityAlignment(dt, steerInput, forwardSpeed);
-  }
-
-  /**
-   * A fenti szogsebesseg-celzas CSAK a karosszeria FORGASAT allitja be
-   * -- a linearis lendulet (a kocsi tenyleges HALADASI iranya) magatol
-   * nem kovetne ezt gyorsan, mert ahhoz valodi oldalirányu gumitapadasi
-   * ero kellene. Enelkul nagy sebessegnel/eles kormanynal az orr gyorsan
-   * az uj irany fele fordul, de a kocsi meg a REGI iranyba csuszik tovabb
-   * -- ez "keresztbe csuszasnak" tunt eles kanyarban. Itt a linearis
-   * sebesseg-vektor iranyat SIMITVA az orr vilagkoordinata-iranyahoz
-   * igazitjuk (a nagysagat valtozatlanul hagyva), hogy a mozgas iranya
-   * kovesse a kanyarodast.
-   *
-   * KIPROBALVA, DE ELVETVE: a tomegkozeppont helyett a HATSO TENGELY
-   * sebesseget igazitani (merevtest-kinematikaval visszaszamolva a
-   * tomegkozeppontra) fizikailag pontosabb lenne (a fordulas a hatso
-   * tengely korul pivotalna, nem a karosszeria kozepen -- ez adna a
-   * valodi "elso kerekek huznak be" erzetet). A gyakorlatban viszont
-   * MEG KIS (0.3-0.5 kozotti) reszleges hatso-eltolassal is kaotikusan
-   * instabil volt: a rakenyszeritett oldalirányu tomegkozeppont-sebesseg
-   * tulzott csuszast okoz az ELSO kerekeknel, amit a Rapier sajat
-   * gumitapadas-modellje (DynamicRayCastVehicleController) minden
-   * lepesben ellensulyozni probal -- ez a ket rendszer egymassal
-   * "harcolva" energiat pumpal a rendszerbe. A legrosszabb resz: a
-   * stabilitasi hatar KESNYES volt -- pusztan 5 extra fizikai lepes
-   * (0.08 mp tobblet kanyarodas) egy addig stabilnak tuno beallitast
-   * hirtelen osszeomlasba vitt. Ez jatszhato jatekban (valtozo
-   * kormanyzasi idotartammal) elfogadhatatlanul kiszamithatatlan lenne.
-   * A "kerekek forditsak be, ne a test" erzetet ezert INKABB a valodi
-   * gumitapadas-fizikan keresztul erjuk el -- lasd WHEEL.frontGripMultiplier
-   * / rearGripMultiplier config.ts-ben -- ami nem kenyszerit semmit,
-   * csak a mar amugy is stabil Rapier-szimulaciot allitja arrebb.
-   */
-  private applyVelocityAlignment(
-    dt: number,
-    steerInput: number,
-    forwardSpeed: number,
-  ): void {
-    if (Math.abs(steerInput) < 0.01) return;
-
-    const lv = this.chassis.linvel();
-    const horizSpeedSq = lv.x * lv.x + lv.z * lv.z;
-    if (horizSpeedSq < 0.25) return;
-    const horizSpeed = Math.sqrt(horizSpeedSq);
-
-    // A HALADAS iranya, nem feltetlenul az orre: tolatasnal a kocsi a
-    // farka fele megy. Enelkul az igazitas tolatas kozben 180 fokkal
-    // vissza akarna forditani a mozgast, tehat kozvetlenul a tolatas
-    // ellen dolgozna -- ez okozta a "beakadast".
-    const travelSign = forwardSpeed < 0 ? -1 : 1;
-    const nose = rotateVec(this.chassis.rotation(), { x: 0, y: 0, z: -1 });
-    const noseLen = Math.hypot(nose.x, nose.z) || 1;
-    const noseX = (nose.x / noseLen) * travelSign;
-    const noseZ = (nose.z / noseLen) * travelSign;
-
-    const dirX = lv.x / horizSpeed;
-    const dirZ = lv.z / horizSpeed;
-
-    const blend = clamp(DRIVE.velocityAlignRate * dt, 0, 1);
-    const newDirX = lerp(dirX, noseX, blend);
-    const newDirZ = lerp(dirZ, noseZ, blend);
-    const newLen = Math.hypot(newDirX, newDirZ) || 1;
-
-    this.chassis.setLinvel(
-      {
-        x: (newDirX / newLen) * horizSpeed,
-        y: lv.y,
-        z: (newDirZ / newLen) * horizSpeed,
-      },
-      true,
-    );
   }
 
   getChassis(): Transform {
@@ -715,40 +599,41 @@ export class RapierBackend implements VehicleBackend {
 
   getWheels(): WheelReadout[] {
     const chassisQuat = this.chassis.rotation();
+    const p = this.chassis.translation();
     const dirWorld = rotateVec(chassisQuat, SUSPENSION_DIR);
     const out: WheelReadout[] = [];
 
     for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
-      const hardPoint = this.controller.wheelHardPoint(i);
-      const suspLen = this.controller.wheelSuspensionLength(i) ?? 0;
-      const steering = this.controller.wheelSteering(i) ?? 0;
-      // FORWARD_SIGN: a Rapier a wheelRotation-t is a chassis nyers
-      // (+Z) "elore" tengelyehez kepest konyveli el, nem a mi -Z orr-
-      // konvenciunkhoz -- enelkul a kerekek vizualisan hatrafele
-      // pergnek forditva, holott az auto elorehalad.
-      const roll = FORWARD_SIGN * (this.controller.wheelRotation(i) ?? 0);
-      const radius = this.controller.wheelRadius(i) ?? WHEEL.radius;
+      const layout = WHEEL_LAYOUT[i];
+      const contact = this.contacts[i];
+      const damage = this.damage[i];
+      const radius = wheelRadiusFor(damage);
+      const suspLen = contact.suspensionLength;
 
-      // A kerek kozeppontja: a raycast kiindulopontjabol a felfuggesztes
-      // iranyaba, a rugo aktualis hossza szerint.
-      const cx = (hardPoint?.x ?? 0) + dirWorld.x * suspLen;
-      const cy = (hardPoint?.y ?? 0) + dirWorld.y * suspLen;
-      const cz = (hardPoint?.z ?? 0) + dirWorld.z * suspLen;
+      // A kerek kozeppontja: a csatlakozasi pontbol a felfuggesztes
+      // iranyaba, a rugo AKTUALIS hossza szerint.
+      const offset = rotateVec(chassisQuat, layout.position);
+      const cx = p.x + offset.x + dirWorld.x * suspLen;
+      const cy = p.y + offset.y + dirWorld.y * suspLen;
+      const cz = p.z + offset.z + dirWorld.z * suspLen;
+
+      // Tort kerek nem kormanyoz -- ez latszik is rajta.
+      const steering = layout.steered && !damage.broken ? this.steerVisual : 0;
 
       // chassis * kormanyszog(Y) * gordules(tengely)
       const qSteer = quatAxisAngle(0, 1, 0, steering);
-      const qRoll = quatAxisAngle(AXLE.x, AXLE.y, AXLE.z, roll);
+      const qRoll = quatAxisAngle(AXLE.x, AXLE.y, AXLE.z, this.wheelRoll[i]);
       const q = quatMul(quatMul(toQ(chassisQuat), qSteer), qRoll);
 
       out.push({
-        id: WHEEL_LAYOUT[i].id,
+        id: layout.id,
         position: [cx, cy, cz],
         quaternion: [q.x, q.y, q.z, q.w],
-        inContact: this.controller.wheelIsInContact(i),
+        inContact: contact.inContact,
         suspensionLength: suspLen,
         steering,
         radius,
-        damage: this.damage[i],
+        damage,
       });
     }
     return out;
@@ -756,8 +641,8 @@ export class RapierBackend implements VehicleBackend {
 
   getTelemetry(): Telemetry {
     let onGround = 0;
-    for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
-      if (this.controller.wheelIsInContact(i)) onGround++;
+    for (const contact of this.contacts) {
+      if (contact.inContact) onGround++;
     }
     const t: Telemetry = {
       speedKmh: this.speedMs() * 3.6,
@@ -1053,7 +938,15 @@ export class RapierBackend implements VehicleBackend {
     this.chassis.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
     this.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    this.tiltedSince = null;
+    // Az arkad modell allapota is nullazodik, kulonben az ujraszuletett
+    // auto orokolne az elozo elet lendueletet es porgeset.
+    this.motion = { forward: 0, lateral: 0, yawRate: 0 };
+    for (const contact of this.contacts) {
+      contact.inContact = false;
+      contact.suspensionLength = WHEEL.suspensionRestLength;
+    }
+    this.steerVisual = 0;
+    this.wheelRoll.fill(0);
   }
 
   dispose(): void {

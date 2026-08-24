@@ -18,7 +18,7 @@
  * Futtatas: npm run check:reverse
  */
 import { RapierBackend } from "../src/physics/rapier";
-import { FIXED_DT } from "../src/config";
+import { ARCADE, FIXED_DT } from "../src/config";
 import { NEUTRAL_INPUT, type DriveInput } from "../src/types";
 
 /** Szabad terulet: tolatasnal +Z fele halad, itt 60 m-nyi hely van. */
@@ -48,7 +48,15 @@ async function drive(input: Partial<DriveInput>, seconds: number): Promise<Resul
   // Leerés/megallapodas.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, { ...NEUTRAL_INPUT });
 
-  const startYaw = yawOf(backend.getChassis().quaternion);
+  let previousYaw = yawOf(backend.getChassis().quaternion);
+  // OSSZEGZETT elfordulas, lepesenkent.
+  //
+  // Korabban ez a kezdo es a vegso irany kulonbsege volt, +-180 fokra
+  // csonkolva. Az arkad modellel a kocsi 3 masodperc alatt TOBB MINT
+  // EGY TELJES KORT fordul, ami korbeer: a 425 fokos fordulas 65
+  // foknak latszott, es a hatramenet iranya is azonosnak tunt az
+  // eloremenettel. A hiba a MERESBEN volt, nem a fizikaban.
+  let yawSum = 0;
   let peakKmh = 0;
   let minWheelsOnGround = 4;
 
@@ -57,23 +65,33 @@ async function drive(input: Partial<DriveInput>, seconds: number): Promise<Resul
     const t = backend.getTelemetry();
     peakKmh = Math.max(peakKmh, t.speedKmh);
     minWheelsOnGround = Math.min(minWheelsOnGround, t.wheelsOnGround);
+
+    const yaw = yawOf(backend.getChassis().quaternion);
+    let step = yaw - previousYaw;
+    // Egyetlen lepes alatt nem fordulhat felkort -- ami annak latszik,
+    // az a -pi..pi hataron valo atlepes.
+    while (step > Math.PI) step -= 2 * Math.PI;
+    while (step < -Math.PI) step += 2 * Math.PI;
+    yawSum += step;
+    previousYaw = yaw;
   }
 
-  let delta = yawOf(backend.getChassis().quaternion) - startYaw;
-  while (delta > Math.PI) delta -= 2 * Math.PI;
-  while (delta < -Math.PI) delta += 2 * Math.PI;
-
-  return { peakKmh, yawDeg: (delta * 180) / Math.PI, minWheelsOnGround };
+  return { peakKmh, yawDeg: (yawSum * 180) / Math.PI, minWheelsOnGround };
 }
 
 async function main(): Promise<void> {
   console.log("=== Tolatas regresszios teszt ===\n");
 
   const straight = await drive({ throttle: -1 }, 3);
+  // A kuszob a BEALLITOTT tolatasi csucsbol jon, nem kalibralatlan
+  // allandobol: igy a teszt azt meri, amit allitunk (a kocsi eleri a
+  // sajat tolatasi csucsat), es nem bukik el attol, ha a hangolas
+  // valtozik.
+  const reverseTopKmh = ARCADE.maxReverseSpeed * 3.6;
   check(
     "tolatas egyenesen felgyorsul",
-    straight.peakKmh > 40,
-    `${straight.peakKmh.toFixed(1)} km/h 3 masodperc alatt`,
+    straight.peakKmh > reverseTopKmh * 0.9,
+    `${straight.peakKmh.toFixed(1)} km/h 3 masodperc alatt (csucs: ${reverseTopKmh.toFixed(1)})`,
   );
 
   const turning = await drive({ throttle: -1, steer: 1 }, 3);

@@ -1,4 +1,4 @@
-import { DRIVE, FIXED_DT, type DriveInput } from "@cca/shared";
+import { ARCADE, FIXED_DT, type DriveInput } from "@cca/shared";
 
 const KEY_MAP: Record<string, string> = {
   KeyW: "forward",
@@ -131,11 +131,11 @@ export class Input {
     const steerTarget = (left ? -1 : 0) + (right ? 1 : 0);
     if (steerTarget === 0) {
       // Visszaall kozepre
-      const delta = DRIVE.steerReturnSpeed * FIXED_DT;
+      const delta = ARCADE.steerReturnSpeed * FIXED_DT;
       if (Math.abs(this.steerValue) <= delta) this.steerValue = 0;
       else this.steerValue -= Math.sign(this.steerValue) * delta;
     } else {
-      this.steerValue += steerTarget * DRIVE.steerSpeed * FIXED_DT;
+      this.steerValue += steerTarget * ARCADE.steerSpeed * FIXED_DT;
       this.steerValue = Math.max(-1, Math.min(1, this.steerValue));
     }
 

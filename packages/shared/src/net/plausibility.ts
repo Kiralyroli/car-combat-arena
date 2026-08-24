@@ -23,11 +23,13 @@ import type { ClientState } from "./protocol";
 /**
  * Legnagyobb hihető sebesseg (m/s).
  *
- * Meres szerint a kocsi csucssebessege boosttal 44.6 m/s (160 km/h).
- * A hatart bőven fole tesszuk, mert legitim modon is gyorsulhat ennel
- * jobban: rampárol leugorva, vagy ha egy masik auto nagy sebesseggel
- * meglöki. Egy sebesseg-hack ennel nagysagrendekkel tobbet allitana,
- * tehat a laza hatar is kiszuri -- a szoros hatar viszont jatszhato
+ * A kocsi csucssebessege boosttal ARCADE.boostMaxSpeed (44 m/s, 158
+ * km/h). A hatart bőven fole tesszuk, mert legitim modon is gyorsulhat
+ * ennel jobban: rampárol leugorva, vagy ha egy masik auto nagy
+ * sebesseggel meglöki -- es az arkad modell SZANDEKOSAN nem vagja
+ * vissza azonnal a tobbletet, hanem hagyja lecsengeni (coastDecel).
+ * Egy sebesseg-hack ennel nagysagrendekkel tobbet allitana, tehat a
+ * laza hatar is kiszuri -- a szoros hatar viszont jatszhato
  * helyzetekben adna hamis riasztast.
  */
 export const MAX_PLAUSIBLE_SPEED = 60;

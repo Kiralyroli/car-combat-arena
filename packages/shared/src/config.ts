@@ -1,6 +1,8 @@
 /**
- * Kozos konfiguracio. Mindket fizikai backend UGYANEZEKET az ertekeket
- * hasznalja -- ez teszi az osszehasonlitast ervényesse.
+ * Kozos konfiguracio: a kliens es a szerver UGYANEBBOL dolgozik.
+ *
+ * A vezetes-modell parametereit az ARCADE blokk irja le (lasd lentebb
+ * es physics/arcade.ts).
  *
  * Tengely-konvencio (jobbkezes): X = jobb, Y = fel, Z = -1 (negativ) = elore.
  *
@@ -30,50 +32,60 @@ export const CHASSIS = {
   mass: 1000,
   /** Ide kerul vissza reset-nel. */
   spawn: { x: 0, y: 2.5, z: 0 },
-  linearDamping: 0.05,
   /**
-   * Tovabb csokkentve (0.16 -> 0.1) -- meg kevesebb ellenallas az
-   * iranyvaltasnal. Az onfelegyenesedes (RECOVERY) sajat, kulon
-   * csillapitast hasznal borulaskor, tehat ez itt nem az utolso
-   * biztonsagi tenyezo tobbe.
+   * NULLA, szandekosan: a lassulast teljes egeszeben az arkad modell
+   * intezi (coastDecel / brakeDecel). Egy motor-szintu csillapitas
+   * ezekkel PARHUZAMOSAN hatna, tehat a csucssebesseg es a fektav mar
+   * nem abbol jonne ki, ami az ARCADE blokkban all -- pont azt a
+   * "ket reteg egymas ellen" helyzetet hoznank vissza, ami miatt ez
+   * a modell keszult.
    */
-  angularDamping: 0.1,
+  linearDamping: 0,
+  /**
+   * A fuggoleges tengely koruli fordulast (yaw) a modell kozvetlenul
+   * allitja, tehat ezt a csillapitast gyakorlatilag csak a BUKDACSOLAS
+   * es az OLDALDOLES erzi. Ott viszont jol jon: e nelkul a kocsi a
+   * rugoin sokaig imbolyogna landolas es utkozes utan.
+   */
+  angularDamping: 1.2,
 };
 
+/**
+ * Kerek- es felfuggesztes-parameterek.
+ *
+ * Az arkad modellben a kerek NEM szimulalt gumiabroncs: nincs
+ * csuszasi gorbe, nincs tapadasi koltsegvetes. A kerek ket dolgot ad:
+ * a felfuggesztes rugoja tartja a karosszeriat a talaj folott (ettol
+ * dol be kanyarban es ettol landol rugalmasan), es a sugara adja a
+ * gorduleset a megjeleniteshez. A TAPADAST teljes egeszeben az ARCADE
+ * blokk irja le, nem ez.
+ */
 export const WHEEL = {
   /** A Sedan modell kerekeinek tenyleges sugara (~0.345 m, kerekitve). */
   radius: 0.35,
+  /** A rugo kinyujtott hossza -- ez adja a menetmagassagot. */
   suspensionRestLength: 0.3,
-  suspensionStiffness: 24,
   /**
-   * FONTOS: a relaxation (visszaengedeskori csillapitas) NE legyen
-   * nagyobb 1-nel -- 1 feletti ertek energiat ad hozza landolaskor,
-   * ami pattogast (trambulin-hatas) okoz. Korabban 1.2 volt, ez okozta
-   * az "akadozo" mozgast (lasd EREDMENYEK.md).
+   * Rugoallando (N/m) KEREKENKENT.
+   *
+   * Nyugalomban a negy kereknek egyutt a teljes sulyt kell tartania:
+   * 1000 kg * 9.81 / 4 = kb. 2450 N kerekenkent. Ha azt akarjuk, hogy
+   * ez kb. feluton (0.15 m benyomodasnal) alljon be, a rugoallando
+   * 2450 / 0.15 = kb. 16000 N/m. Ennel feszesebbre vesszuk, hogy az
+   * auto ne "ulepedjen" le gyorsulaskor es kanyarban.
    */
-  suspensionCompression: 0.82,
-  suspensionRelaxation: 0.88,
+  suspensionStiffness: 30_000,
+  /**
+   * Lengescsillapitas (N per m/s).
+   *
+   * E nelkul a rugo tisztan energiat tarolna es visszaadna: az auto
+   * landolas utan trambulinkent pattogna. A kritikus csillapitas
+   * kozelebe lonek (2 * sqrt(k * m/4) = 2 * sqrt(30000 * 250) = kb.
+   * 5500), kicsit ala, hogy maradjon egy kis rugalmas erzet.
+   */
+  suspensionDamping: 4200,
+  /** Egy kerek felfuggesztese ennel nagyobb erot nem fejt ki (N). */
   maxSuspensionForce: 60_000,
-  maxSuspensionTravel: 0.35,
-  /** Hosszanti tapadas. Ez a fo "grip" ertek, amit a serules csokkent. */
-  frictionSlip: 3.5,
-  /**
-   * Oldalirányu tapadas szorzo -- magasabb = feszesebb kanyarodas, de
-   * tobb oldalirányu G-ero is (borulas kockazat). Eredeti: 1.0.
-   * Tovabb emelve (2.3 -> 2.8) a fürgebb kanyarodas erdekeben -- az
-   * onfelegyenesedes fedezi a borulas kockazatat.
-   */
-  sideFrictionStiffness: 3.5,
-  /**
-   * Kulon szorzo az elso (kormanyzott) es hatso (hajto) kerekek
-   * tapadasara -- a frictionSlip es sideFrictionStiffness ertekere
-   * hat MEG EGYSZER, tengelyenkent. 1.0 = nincs elteres. Magasabb
-   * elso ertek = kevesebb alkormanyzas (understeer), magasabb hatso
-   * ertek = stabilabb hatso resz (kevesebb kicsuszas/oversteer).
-   * Debug-panelen allithato (lasd debugPanel.ts).
-   */
-  frontGripMultiplier: 1.0,
-  rearGripMultiplier: 1.0,
 };
 
 export type WheelId = "FL" | "FR" | "RL" | "RR";
@@ -93,9 +105,10 @@ export interface WheelLayout {
 // Y-t abbol szamoljuk: talajmagassag - CHASSIS.halfExtents.y = 0.35 - 0.755.
 export const WHEEL_LAYOUT: WheelLayout[] = [
   // Elso (kormanyzott) kerekek: negativ Z -- az orr iranyaban.
-  // FL/FR z-je egyseges (-1.495, a modell -1.49/-1.50 atlaga) -- a nagy
-  // sideFrictionStiffness mellett mar az eredeti 0.01 m-es aszimmetria
-  // is erezheto oldalirányu huzast/csuszast okozott egyenes vezetesnel.
+  // FL/FR z-je egyseges (-1.495, a modell -1.49/-1.50 atlaga). A regi,
+  // gumitapadas-alapu modellben mar ez a 0.01 m-es aszimmetria is
+  // erezheto elhuzast okozott egyenesben; az arkad modell erre nem
+  // erzekeny, de a szimmetria igy is helyesebb.
   { id: "FL", position: { x: -0.79, y: -0.405, z: -1.495 }, steered: true, driven: false },
   { id: "FR", position: { x: 0.79, y: -0.405, z: -1.495 }, steered: true, driven: false },
   // Hatso (hajto) kerekek: pozitiv Z. X szinten szimmetrizalva (-0.78 -> -0.79).
@@ -103,177 +116,169 @@ export const WHEEL_LAYOUT: WheelLayout[] = [
   { id: "RR", position: { x: 0.79, y: -0.405, z: 1.45 }, steered: false, driven: true },
 ];
 
-export const DRIVE = {
+/**
+ * ARKAD vezetes-modell.
+ *
+ * Ez a modell SZANDEKOSAN nem szimulal gumiabroncsot. A korabbi
+ * valtozat egy raycast-alapu, valodi tapadasi gorbevel dolgozo jarmu-
+ * fizika volt, amire kesobb negy kulon asszisztens kerult (celzott
+ * kanyarsugar, haladasi irany igazitasa, kanyar-erokorlat, sebessegi
+ * kormany-visszavagas), hogy iranyithato legyen. A ket reteg egymas
+ * ellen dolgozott: minden hangolas az egyik oldalon elrontott valamit
+ * a masikon.
+ *
+ * Helyette itt HAROM mennyiseget vezerlunk kozvetlenul:
+ *
+ *   1. az orr iranyaba eso sebesseget (gaz/fek),
+ *   2. az oldalirányu sebesseget (tapadas -- nullaba huzzuk),
+ *   3. a fuggoleges tengely koruli fordulast (kormany).
+ *
+ * Mindharmat KORLATOZOTT VALTOZASI SEBESSEGGEL allitjuk, nem
+ * ertekadassal. Ez a kulcs: igy az utkozes, a robbanas es a rampa
+ * lokese valodi marad (a Rapier valtoztatja a sebesseget, mi csak
+ * fokozatosan hozzuk vissza), mikozben az iranyitas kiszamithato.
+ * Egy egyszeru "sebesseg = elore * gaz" ertekadas eltuntetne minden
+ * utkozest -- ezert nincs olyan sehol.
+ */
+export const ARCADE = {
+  /** Csucssebesseg gazzal (m/s). 30 m/s = 108 km/h. */
+  maxSpeed: 30,
+  /** Csucssebesseg boosttal (m/s). 44 m/s = 158 km/h. */
+  boostMaxSpeed: 44,
+  /** Csucssebesseg tolatasnal (m/s). */
+  maxReverseSpeed: 11,
+
+  /** Gyorsulas (m/s^2). 20-szal a csucssebesseg kb. 1.5 mp alatt megvan. */
+  accel: 20,
+  /** Gyorsulas boosttal (m/s^2) -- erezhetoen lokjon egyet. */
+  boostAccel: 34,
   /**
-   * Hajtoero kerekenkent (N). Tovabb emelve 5200 -> 7500 -- altalanos
-   * fürgeseg-keres miatt (gyorsulas, tolatas, fordulas mind erintett).
+   * Lassulas, amikor a gaz a haladassal SZEMBE hat (m/s^2).
+   * Ez az "S menet kozben" fek: 30 m/s-rol kb. 0.8 mp alatt all meg.
    */
-  engineForce: 7500,
-  /** Boost szorzo. */
-  boostMultiplier: 1.9,
-  /** Tolatas ereje a hajtoero aranyaban. Emelve 0.55 -> 0.75. */
-  reverseFactor: 0.75,
-  /** Fekero kerekenkent. Emelve 78 -> 105: meg fürgebb fekezes. */
-  brakeForce: 105,
-  /** Kezifek (csak hatso kerekek). */
-  handbrakeForce: 150,
-  /** Maximalis kormanyszog radianban (~54 fok). Tovabb emelve 0.78 -> 0.95. */
-  maxSteer: 0.95,
-  /** Kormany elforditasi sebesseg (rad/s). Tovabb emelve 7.5 -> 10. */
-  steerSpeed: 10,
-  /** Kormany visszaallasi sebesseg (rad/s). Emelve 6.5 -> 8.5. */
-  steerReturnSpeed: 8.5,
+  brakeDecel: 38,
   /**
-   * Nagy sebessegnel csokkentett kormanyszog -- realis viselkedes es
-   * borulas elleni biztonsag, de mivel mostantol van onfelegyenesedes
-   * biztonsagi halokent (RECOVERY), ERŐSEN tovabb puhithato (44/0.55 ->
-   * 70/0.75) anelkul, hogy tartos felfordulast okozna -- legrosszabb
-   * esetben az onfelegyenesedes helyrehozza. Ez kozvetlenul azt a
-   * panaszt cimzi, hogy nagy sebessegnel az auto "szinte nem is
-   * kanyarodik".
-   */
-  steerFalloffSpeed: 70,
-  steerFalloffMin: 0.75,
-  /**
-   * "Friction circle": teljes kormanynal (input.steer = 1) a hajtoero
-   * ennyiszeresere csokken (0..1). VISSZAVETTUK (0.3 -> 0.55) -- tul
-   * agresszivan vagta vissza a sebesseget, ami miatt a kanyarodashoz
-   * szukseges oldalirányu tapadasi ero is elveszett (alacsony
-   * sebessegnel alig van kanyarodo-ero), ez okozta azt az erzetet,
-   * hogy "alig fordul" -- inkabb a nagyobb sideFrictionStiffness
-   * es maxSteer vegzci a munkat, nem a sebesseg-elvetel.
-   */
-  corneringPowerMin: 0.55,
-  /**
-   * Ez alatt a sebesseg alatt (m/s) a fenti korlatozas NEM (meg nem
-   * teljes mertekben) hat -- allo helyzetben/inditaskor kormanyozva
-   * is teljes hajtoero jar, mert nincs meg valodi "tapadasi koltsegvetes"-
-   * konfliktus alacsony sebessegnel. E felett linearisan felfut a teljes
-   * korlatozasig. Enelkul kormanyozva inditaskor az auto alig indult el,
-   * mert a hajtoero azonnal corneringPowerMin-re esett, meg 0 km/h-nal is.
-   */
-  corneringPowerRampSpeed: 8,
-  /**
-   * KOZVETLEN, sebessegtol fuggetlen kanyarsugar-celzas. A valodi
-   * gumitapadas fizikailag korlatozza, mennyire szorithato a
-   * kanyarsugar nagy sebessegnel (v^2/r osszefugges) -- barmennyire is
-   * emeljuk a sideFrictionStiffness-t, ez a korlat nem tuszamlelheto
-   * at csak a tapadassal, es mellekhatasokat (egyenes-vezetesi
-   * csuszas) is okoz. Ehelyett a kormanyzas iranyaba mutato
-   * szogsebesseget KOZVETLENUL a celsugarhoz igazitjuk minden lepesben
-   * (lasd rapier.ts applyTurnRadiusAssist) -- ez garantalja, hogy a
-   * kocsi kb. ekkora sugarban fordul, FUGGETLENUL a sebessegtol.
-   */
-  targetTurnRadius: 6,
-  /** Milyen gyorsan kozelit a tenyleges szogsebesseg a celsugarhoz (1/s). */
-  turnRadiusBlendRate: 9,
-  /**
-   * Ez alatt a sebesseg alatt (m/s) az asszisztens teljesen KIKAPCSOL,
-   * a termeszetes (gumitapadas-alapu) forgast semmi nem korlatozza.
-   * Enelkul, mivel a celzott szogsebesseg egyenesen aranyos a
-   * sebesseggel (targetYawRate = v / targetTurnRadius), inditaskor
-   * (v approx 0) az asszisztens szinte nullara huzta volna a
-   * szogsebesseget MEG AKKOR IS, ha a kormany mar teljesen be volt
-   * fordulva -- ez okozta, hogy inditaskor kormanyozva alig fordult
-   * az auto.
-   */
-  turnRadiusMinSpeed: 2.5,
-  /**
-   * Milyen gyorsan igazitja a tenyleges mozgas iranyat (linearis
-   * sebesseg-vektor) az orr iranyahoz kanyarodas kozben (1/s). A
-   * fenti szogsebesseg-celzas CSAK a karosszeria FORGASAT allitja be
-   * kozvetlenul -- a linearis lendulet (merre HALAD a kocsi) magatol
-   * nem kovetne ezt, mert ahhoz valodi oldalirányu gumitapadasi ero
-   * kellene, ami nagy sebessegnel/eles kormanynal fizikailag nem eleg
-   * gyors. Enelkul az orr gyorsan az uj irany fele fordul, de a kocsi
-   * meg a REGI iranyba csuszik tovabb -- ez nezett ki ugy, mintha
-   * "keresztbe csuszna" eles kanyarban, nagy sebessegnel. 0 = kikapcsolva
-   * (csak a karosszeria fordul, a csuszas erzete visszater).
+   * Lassulas gaz nelkul (m/s^2) -- motorfek.
    *
-   * FONTOS: legalabb akkora legyen, mint turnRadiusBlendRate -- ha az
-   * iranyitas lassabban kovetne, mint ahogy az orr fordul, az atmeneti
-   * fazisban meg mindig keresztbe allna a kocsi minden eles kanyar
-   * elejen. Emelve 4 -> 12, mert a 4 nem tudta lekovetni a 9-es
-   * turnRadiusBlendRate-et, es meg mindig erezhetoen "keresztbe allt"
-   * az auto eles kanyarban.
+   * Ez fut akkor is, ha a kocsi a csucssebesseg FOLE kerult (rampa,
+   * robbanas, lokes): a tobblet lassan cseng le, nem vagjuk vissza
+   * azonnal a maximumra. Igy egy nagy lokes latvanyos marad.
    */
-  velocityAlignRate: 12,
+  coastDecel: 7,
+
+  /**
+   * Legnagyobb fordulasi szogsebesseg (rad/s). 2.7 rad/s = 155 fok/s.
+   *
+   * Ebbol jon a kanyarsugar: r = v / yawRate. 20 m/s-nal ez 7.4 m --
+   * eles, gokart-szeru iv. A sugar tehat NEM allando (mint a regi
+   * "celzott kanyarsugar" asszisztensnel), hanem sebesseggel no, ami
+   * termeszetesebb erzet.
+   */
+  maxYawRate: 2.7,
+  /**
+   * Ekkora sebessegnel (m/s) er el a fordulas a teljes ereju
+   * ertekehez. Ez alatt aranyosan kevesebb -- allo helyzetben a kocsi
+   * nem pordul meg a helyben, csak haladas kozben fordul.
+   */
+  turnRampSpeed: 6,
+  /**
+   * Csucssebessegnel a fordulasnak ennyi hanyada marad.
+   *
+   * Nem azert, hogy "realis" legyen, hanem hogy nagy sebessegnel ne
+   * legyen rangatos az iranyitas -- teljes erovel fordulva 30 m/s-nal
+   * a kocsi 11 m sugaru ivet irna le, ami kezelhetetlenul ideges.
+   */
+  turnFactorAtTopSpeed: 0.6,
+  /**
+   * Milyen gyorsan eri el a fordulas a celerteket (rad/s^2).
+   *
+   * Szinten korlatozott valtozas, nem ertekadas: ha egy utkozes
+   * megporgeti a kocsit, a porges lecsengese ebbol adodik -- nem
+   * tunik el egyik lepesrol a masikra.
+   */
+  yawAccel: 12,
+  /**
+   * Levegoben a kormany ennyied resze hat.
+   *
+   * Nem nulla: ugratas utan lehessen igazitani a landolas iranyat --
+   * ez arkad jatekban alapelvaras. De nem is 1, hogy a levego ne
+   * legyen ugyanolyan iranyithato, mint a talaj.
+   */
+  airSteerAuthority: 0.3,
+
+  /**
+   * Oldalirányu tapadas (m/s^2): ekkora "eronek" megfelelo utemben
+   * huzzuk nullaba az oldalirányu sebesseget.
+   *
+   * Ez az EGYETLEN dolog, ami a tapadast leirja. Magas ertek =
+   * az auto oda megy, amerre az orra nez. Amiert megis korlatos es
+   * nem azonnali: egy oldalrol kapott lokes (masik auto, robbanas)
+   * igy latvanyosan elcsusztatja a kocsit, mielott visszaall.
+   */
+  lateralGrip: 34,
+  /** Kezifekkel (Space) ennyire esik vissza -- innen jon a drift. */
+  driftLateralGrip: 7,
+  /** Kezifekkel ennyivel elesebben fordul. */
+  driftYawBoost: 1.3,
+
+  /**
+   * A kormany-input simitasa a kliensen (1/s) -- lasd Input.read.
+   *
+   * Nem a fizika resze: a billentyus vezetes lenne kapcsolgatos
+   * nelkule (a gomb 0-rol azonnal 1-re ugrik).
+   */
+  steerSpeed: 10,
+  steerReturnSpeed: 12,
+
+  /**
+   * Az ELSO kerekek LATVANY szerinti elfordulasa teljes kormanynal
+   * (radian, kb. 30 fok).
+   *
+   * Kizarolag megjelenites: a fordulast a yawRate vegzi, nem a kerek
+   * szoge. Azert kell megis, mert kerek nelkul fordulo auto hamisan
+   * nezne ki.
+   */
+  visualSteerAngle: 0.52,
 };
 
+/**
+ * Talpra allas borulas utan.
+ *
+ * A regi valtozat NYOMATEKKAL probalta visszaforditani a kocsit, es
+ * mivel egy nagy, lapos oldalan pihenő auto ellenall, kellett hozza
+ * fokozatos eszkalacio, kulon csillapitas es egy tartalek tengely a
+ * pontosan fejen allo esetre. Sok alkatresz egyetlen garancia nelkul.
+ *
+ * Itt ehelyett a KAROSSZERIA ELFORDULASAT igazitjuk vissza fuggoleges
+ * ala, lepesenkent egy adott hanyaddal. Ez nem "fizikus" megoldas, de
+ * arkad jatekban pontosan ez kell: mindig sikerul, mindig ugyanannyi
+ * ideig tart, es a jatekos nem esik ki a meccsbol egy szerencsetlen
+ * borulas miatt. A fuggoleges tengely koruli iranyt (merre nez az orr)
+ * NEM bantjuk -- csak a dolest es a bukdacsolast.
+ */
 export const RECOVERY = {
   /**
-   * Ez alatt a dolesszog alatt (fok) NULLA a felegyenesito nyomatek --
-   * ez fedezi a normal kanyar-dolest es a kerek-serules vizualis
-   * dolesét is, hogy azok szabadon, korrekcio nelkul jelenjenek meg.
-   * Csak ezen tul (kb. oldalra dolt/tetejere allt allapot) lep eletbe.
+   * Ez alatt a dolesszog (fok) alatt nincs beavatkozas.
+   *
+   * Bőven a normal kanyar-doles es a kerek-serules miatti megdoles
+   * folott: azok igy szabadon, korrekcio nelkul latszanak.
    */
-  startAngleDeg: 60,
+  startAngleDeg: 55,
   /**
-   * Ennel a dolesszognel (fok) mar a maximalis nyomatek hat -- NEM
-   * 180-nal, mert egy oldalara dolt auto (kb. 90 fok, a legszelesebb
-   * lapjan pihen) legalabb annyira stabil/nehezen billentheto, mint a
-   * fejen allo (180 fok), a kisebb tehetetlensegi nyomatek miatt a
-   * korrekcios tengely korul.
+   * Ennyi ido alatt all teljesen talpra (mp).
+   *
+   * A jatekos valasztasa: borulhasson fel, de gyorsan alljon vissza.
+   * Fel masodperc eleg ahhoz, hogy a borulas latvanya megmaradjon, es
+   * eleg rovid ahhoz, hogy egy robbanas ne vegyen ki a jatekbol.
    */
-  maxSeverityAngleDeg: 115,
+  rightingTime: 0.5,
   /**
-   * A felegyenesito nyomatek alap-maximuma (N*m). A Sedan modellre valo
-   * atallaskor a nagyobb/magasabb karosszeria kb. 1.8x-ára novelte a
-   * forgasi tehetetlensegi nyomatekot a borulas-tengelyek koruk --
-   * ezert 6000 -> 11500-ra emelve (lasd EREDMENYEK.md).
+   * Talpra allas kozben a porges visszafogasa (szorzo lepesenkent).
+   *
+   * E nelkul a kocsi atlendulne a fuggolegesen es a masik oldalara
+   * dolne -- a korrekcio ugyanis a forgast is oroksegul kapja.
    */
-  torque: 11500,
-  /**
-   * Extra szogsebesseg-csillapitas felegyenesedes kozben (0-1, 1 =
-   * nincs csillapitas). Tiszta nyomatek (csillapitas nelkul)
-   * tullenditene a celon a konnyen mozdithato eseteknel (pl. sik
-   * talajrol fejre alitva) -- ez fekezi azt anelkul, hogy a nagy,
-   * stabil lapjan pihenő autonal "elnyelne" a korrekciot (ott a
-   * kontaktus-szolver ugyis eros ellenallast ad).
-   */
-  angularDampingDuringRecovery: 0.93,
-  /**
-   * Ha a dolesszog ENNYI IDEIG (mp) folyamatosan a kuszob felett marad
-   * (pl. az auto egy nagy, stabil lapjan pihen, ahol a kontaktus-
-   * szolver ellenall a gyenge korrekcionak), a nyomatek fokozatosan,
-   * legfeljebb escalationMax-szorosara no. Ez garantalja, hogy MINDIG
-   * legyen eleg ero a kitoreshez, barmilyen stabil pihenő helyzetbol.
-   */
-  escalationTime: 1.5,
-  escalationMax: 3,
-  /**
-   * A 180 fokos (pontosan fejen allo) allapot instabil egyensuly --
-   * ott a termeszetes (kereszt-szorzat alapu) korrekcios irany majdnem
-   * nulla hosszusagu, tehat gyakorlatilag nem inditana el a forgast.
-   * Ilyenkor egy rogzitett tartalek-tengely körül adunk egy kezdo
-   * loketet, hogy mindig el tudjon indulni valamelyik iranyba.
-   */
-  fallbackAxis: { x: 0, y: 0, z: 1 },
-};
-
-export const STABILIZATION = {
-  /**
-   * Kulon, EXTRA csillapitas a bukdacsolas (pitch, X tengely) es a
-   * dontes (roll, Z tengely) iranyaban -- FUGGETLENUL a kanyarodastol
-   * (yaw, Y tengely), amit nem erint. Enelkul az agilis-hangolashoz
-   * lecsokkentett CHASSIS.angularDamping (lasd fent) azt is
-   * eredmenyezte, hogy gyorsulasnal az auto orra felallt (a hatso
-   * kerekekre hato hajtoero dontonyomateka nem csillapodott le), es
-   * folyamatosan oldalra dülöngélt. 0..1, 1 = nincs extra hatas,
-   * kisebb ertek = erosebb csillapitas. Csak akkor hat, ha az auto
-   * NEM az onfelegyenesedesi kuszob felett van (RECOVERY.startAngleDeg)
-   * -- borulas utani felallasnal a RECOVERY sajat csillapitasa dontsa el.
-   */
-  pitchRollDamping: 0.65,
-  /**
-   * Csak EZ ALATT a dolesszog (fok) alatt lep eletbe a fenti
-   * csillapitas -- szandekosan JOKKAL a RECOVERY.startAngleDeg (60 fok)
-   * kuszob alatt, biztonsagi savval. Enelkul, ha pontosan a kuszobon
-   * lepne at hatasba, elfojtana a felegyenesedeshez meg szukseges
-   * lendületet, es az auto elakadna kb. 60 fok korul, sosem erve el a
-   * teljesen felallo helyzetet.
-   */
-  skipAboveDeg: 30,
+  spinDamping: 0.85,
 };
 
 /** Statikus arena-elem: doboz. Ugyanebbol keszul a mesh es a collider. */
