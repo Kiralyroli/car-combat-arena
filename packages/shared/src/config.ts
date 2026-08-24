@@ -291,7 +291,7 @@ export interface ArenaBox {
   color: number;
 }
 
-const ARENA_HALF = 40;
+export const ARENA_HALF = 40;
 const WALL_H = 2;
 
 export const ARENA: ArenaBox[] = [

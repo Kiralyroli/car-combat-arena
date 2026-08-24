@@ -73,6 +73,7 @@ export class GameLoop {
         // talalatu fegyver ebbol tekeri vissza a celpontokat.
         room.recordPoses(now);
         room.stepWeapons(FIXED_DT, now, this.tick);
+        room.updateRespawnPlans();
         room.respawnExpired(now);
         room.collectPickups(now);
         room.stepMatch(now);
@@ -98,7 +99,7 @@ export class GameLoop {
         type: "snapshot",
         tick: this.tick,
         time: now,
-        players: room.buildSnapshot(),
+        players: room.buildSnapshot(now),
         rockets: room.rockets.toSnapshot(),
         tracers: room.drainTracers(),
         pickupsAvailable: room.pickupsAvailable(now),

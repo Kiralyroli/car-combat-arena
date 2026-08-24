@@ -430,7 +430,14 @@
       #respawn-pick {
         position: fixed;
         left: 50%;
-        top: 58%;
+        /*
+           A meccs-sav ALA, a palya kepe FOLE.
+           A halal alatt a kamera az egesz arenat mutatja, rajta a
+           valaszthato helyekkel -- a kepernyo kozepere vagy aljara tett
+           panel EPPEN azokat takarna el, amikre kattintani kell. Ez a
+           sav viszont amugy is ures.
+        */
+        top: 9%;
         transform: translateX(-50%);
         font-family: ui-monospace, monospace;
         z-index: 40;
@@ -690,7 +697,7 @@
     <div id="respawn-pick" hidden>
       <div class="box">
         <div class="hdr">ÚJJÁSZÜLETÉS <span id="respawn-in"></span></div>
-        <div class="sub">Most válthatsz fegyvert</div>
+        <div class="sub">Most válthatsz fegyvert — és a pályára kattintva helyet is</div>
         <div id="respawn-weapons" class="weapons">
           <button type="button" class="weapon" data-weapon="cannon">
             <span class="wname">Ágyú</span>

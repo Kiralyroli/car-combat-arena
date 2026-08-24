@@ -10,6 +10,7 @@ import {
   type VehicleBackend,
   type WheelDamage,
   DEFAULT_WEAPON,
+  RESPAWN_DELAY_MS,
   toWeaponId,
   weaponPivot,
   type TracerSnapshot,
@@ -81,7 +82,26 @@ async function main(): Promise<void> {
    */
   let lastFireAt = -Infinity;
 
+  /**
+   * Kattintas a halal alatt: HELYVALASZTAS, nem loves.
+   *
+   * Ugyanaz a gomb, mas jelentes -- de a ketto sosem eshet egybe: halott
+   * autoval nem lehet tuzelni. Igy nem kell kulon kezelot bekotni, es a
+   * jatekosnak sem kell mas gombot keresnie.
+   *
+   * @returns Elnyelte-e a kattintast.
+   */
+  function pickSpawnAtCrosshair(): boolean {
+    if (net.pendingSpawn === null) return false;
+    const [ndcX, ndcY] = aim.ndc();
+    const index = view.spawnChoiceAt(ndcX, ndcY);
+    if (index === null) return false;
+    net.chooseSpawn(index);
+    return true;
+  }
+
   function fireAtCrosshair(): void {
+    if (pickSpawnAtCrosshair()) return;
     // CSAK az agyu sul el kattintasra. A gepfegyver a nyomva tartast
     // jelzi az allapotaban (ClientState.firing), es a lovesek utemet a
     // szerver adja -- lasd Room.stepWeapons. Ha itt is lonenk, minden
@@ -225,6 +245,9 @@ async function main(): Promise<void> {
 
   /** Fegyvervalaszto a halal-kepernyon (ujraszuletesig hasznalhato). */
   const respawnPick = new RespawnWeaponPick((weapon) => net.selectWeapon(weapon));
+
+  /** Mikor haltunk meg (lokalis ora) -- a visszaszamlalashoz. */
+  let diedAt: number | null = null;
 
   /** A boost-tartaly: a Shift ebbol fogy, a pickup ezt tolti. */
   const boostTank = new BoostTank();
@@ -440,6 +463,8 @@ async function main(): Promise<void> {
     for (const id of net.remotes.ids()) {
       // Megsemmisult autonak nincs teste -- lasd lentebb.
       if (net.remotes.hpOf(id) === 0) continue;
+      view.setRemoteProtected(id, net.remotes.isProtected(id));
+
       const state = net.remotes.sample(id, now);
       if (!state) continue;
       backend.updateRemoteBody(
@@ -517,7 +542,22 @@ async function main(): Promise<void> {
       // ugrik a vilag kozepere.
       if (target) cameraTarget = target;
     }
-    view.updateCamera(cameraTarget);
+    // Ujraszuletesre varva a kamera a LEENDO helyre nez: ott derul ki,
+    // hova kerulunk, es kik vannak a kozelben. Kiesett jatekosnal
+    // (nincs tobb elet) ez ertelmetlen -- o vegleg nezo.
+    const awaitingRespawn =
+      !spectating && net.hp !== null && net.hp <= 0 && net.pendingSpawn !== null;
+
+    if (awaitingRespawn) {
+      view.previewArena();
+      view.showSpawnChoices(net.spawnOptions, net.pendingSpawnIndex);
+    } else {
+      view.updateCamera(cameraTarget);
+      if (view.spawnChoiceCount > 0) view.clearSpawnChoices();
+    }
+
+    // Ujraszuletesi pajzs (a tavoli autoke a lentebbi ciklusban).
+    view.setOwnProtected(net.ownProtected);
 
     // --- Halozat: sajat allapot kuldese, tavoli autok interpolacioja ---
     // A sajat autot NEM a szervertol kapjuk vissza (hibrid authority,
@@ -654,6 +694,8 @@ async function main(): Promise<void> {
       view.spawnTracer(tracer.from, tracer.to, tracer.hit, renderNow);
     }
     view.updateTracers(renderNow);
+    view.updateShields(renderNow);
+    view.updateSpawnChoices(renderNow);
 
     view.render();
 
@@ -670,9 +712,17 @@ async function main(): Promise<void> {
     // A halal-kepernyo fegyvervalasztoja: csak amig varunk az
     // ujraszuletesre. Kiesett jatekosnak (nincs tobb elete) mar nincs
     // ertelme, ezert ott sem latszik.
+    // A varakozas hatralevo ideje. A kliens a SAJAT halalanak
+    // idopontjabol szamolja: enelkul kulon protokoll-mezo kellene egy
+    // olyan szamhoz, amit a kliens amugy is tud (a HP-jat latja).
+    const dead = net.hp !== null && net.hp <= 0;
+    if (!dead) diedAt = null;
+    else if (diedAt === null) diedAt = renderNow;
+
     respawnPick.update(
-      net.hp !== null && net.hp <= 0 && (net.lives ?? 0) > 0,
+      dead && (net.lives ?? 0) > 0,
       net.ownWeapon,
+      diedAt === null ? 0 : Math.max(0, RESPAWN_DELAY_MS - (renderNow - diedAt)),
     );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
     scoreboard.update(

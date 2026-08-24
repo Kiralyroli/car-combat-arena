@@ -103,6 +103,15 @@ export class WsServer {
         }
         return;
 
+      case "chooseSpawn":
+        // A jatekos maga valasztja meg az ujraszuletesi helyet. A szerver
+        // ellenorzi, hogy varakozik-e egyaltalan, es hogy a pont szabad-e
+        // -- lasd Room.chooseSpawn.
+        if (conn.room && conn.playerId) {
+          conn.room.chooseSpawn(conn.playerId, message.index);
+        }
+        return;
+
       case "fire":
         // A kiloves iranyat es helyet a SZERVER szamolja a jatekos
         // allapotabol -- a kliens csak kerni tud (lasd FireMessage).

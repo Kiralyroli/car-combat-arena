@@ -93,6 +93,24 @@ export class NetworkClient {
   /** A gepfegyver hoszintje (0..100) a szerver szerint. */
   heat = 0;
 
+  /** Serthetetlenek vagyunk-e eppen (ujraszuletes utan). */
+  ownProtected = false;
+
+  /**
+   * Hova fogunk ujraszuletni -- vagy null, ha elunk.
+   *
+   * KULON uzenetben jon (nem a snapshotban), mert csak rank tartozik:
+   * a snapshotot mindenki megkapja, tehat abbol az ellenfel megtudna,
+   * hol varjon rank. Lasd RespawnPlanMessage.
+   */
+  pendingSpawn: [number, number, number] | null = null;
+
+  /** A leendo hely sorszama (SPAWN_POINTS indexe), vagy null. */
+  pendingSpawnIndex: number | null = null;
+
+  /** Amibol valaszthatunk -- a szabad spawn-pontok sorszamai. */
+  spawnOptions: number[] = [];
+
   /**
    * A legutobb FELDOLGOZOTT szerver-tick.
    *
@@ -227,6 +245,18 @@ export class NetworkClient {
   }
 
   /**
+   * Ujraszuletesi hely kerese.
+   *
+   * Mint a fegyvervaltasnal: a szerver dönti el, elfogadja-e (csak
+   * varakozas kozben, csak szabad pontra). Elutasitasnal nem jon
+   * hibauzenet -- egyszeruen nem erkezik uj terv, es a jelolo a regin
+   * marad. Igy nincs ket forras ugyanarra az adatra.
+   */
+  chooseSpawn(index: number): void {
+    this.transport?.send({ type: "chooseSpawn", index });
+  }
+
+  /**
    * Kapcsolat + azonnali belepes egy lepesben.
    *
    * A lobby a ket lepest kulon hasznalja (elobb listaz, aztan lep be);
@@ -337,6 +367,7 @@ export class NetworkClient {
           this.boostGrants = own.boostGrants;
           this.ownWeapon = own.weapon;
           this.heat = own.heat;
+          this.ownProtected = own.protected;
           this.lives = own.lives;
           this.ownName = own.name;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
@@ -388,7 +419,20 @@ export class NetworkClient {
       case "respawn":
         // A szerver megmondja, hova szuletunk ujra -- a sajat autonkat
         // csak mi tudjuk athelyezni (hibrid modell, terv 15.4).
+        // Megszulettunk: a terv betoltott, mar nincs mire varni.
+        this.pendingSpawn = null;
+        this.pendingSpawnIndex = null;
+        this.spawnOptions = [];
         this.events.onRespawn?.(message.position);
+        return;
+
+      case "respawnPlan":
+        // Hova fogunk szuletni. A halal-kepernyo ide viszi a kamerat,
+        // hogy a jatekos MAR A SZULETES ELOTT lassa a helyet es a
+        // kornyeken levo ellenfeleket.
+        this.pendingSpawn = message.position;
+        this.pendingSpawnIndex = message.index;
+        this.spawnOptions = message.options;
         return;
 
       case "playerLeft":

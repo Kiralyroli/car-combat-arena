@@ -23,6 +23,7 @@ export * from "./playerName";
 export * from "./combat";
 export * from "./rocket";
 export * from "./weapons";
+export * from "./spawn";
 export * from "./physics/arcade";
 export * from "./physics/rapier";
 export * from "./net/protocol";

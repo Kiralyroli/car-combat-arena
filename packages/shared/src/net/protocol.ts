@@ -45,7 +45,7 @@ export const INTERP_DELAY_MS = 100;
  * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
  * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -139,6 +139,15 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * egy elveszett csomag sem csusztatja el tartosan.
    */
   heat: number;
+  /**
+   * Serthetetlen-e eppen (ujraszuletes utani rovid vedelem).
+   *
+   * MINDENKI latja, nem csak az erintett: az ellenfelnek is tudnia
+   * kell, hogy most hiaba lo -- ezert a kliens attetszove teszi a
+   * vedett autot. Egy rejtett vedelem csak ertelmetlen "miert nem fogy
+   * a HP-ja" elmenyt adna.
+   */
+  protected: boolean;
 }
 
 /**
@@ -273,6 +282,7 @@ export type ClientMessage =
   | StateMessage
   | PingMessage
   | SelectWeaponMessage
+  | ChooseSpawnMessage
   | FireMessage;
 
 // --- Szerver -> kliens ---
@@ -418,6 +428,48 @@ export interface RespawnMessage {
   position: [number, number, number];
 }
 
+/**
+ * A leendo ujraszuletesi hely -- CSAK az erintett jatekosnak.
+ *
+ * SZANDEKOSAN nem a snapshotban megy: azt mindenki megkapja, tehat az
+ * ellenfel megtudna, hova fogsz megjelenni, es odaallhatna varni. Pont
+ * az ellen vedekezunk, amit az ilyen szivargas okozna.
+ *
+ * A halal ot masodperce alatt tobbszor is erkezhet: a szerver ujra-
+ * ertekeli a tervet, ahogy a harc mozog (lasd Room.updateRespawnPlans).
+ * A kliens ide viszi a kamerat, igy a jatekos MAR A SZULETES ELOTT
+ * latja a helyet es a kornyeken levo ellenfeleket.
+ */
+export interface RespawnPlanMessage {
+  type: "respawnPlan";
+  position: [number, number, number];
+  /** A valasztott spawn-pont sorszama (SPAWN_POINTS indexe). */
+  index: number;
+  /**
+   * Amibol valaszthat a jatekos -- a szabad spawn-pontok sorszamai.
+   *
+   * A koordinatak nem kellenek: a kliens ugyanabbol a SPAWN_POINTS
+   * listabol dolgozik. A foglaltsag NEM arulja el senki helyzetet: egy
+   * pontot az tart foglalva, aki ODA szuletett -- akar percekkel
+   * korabban, tovabbhajtva azota.
+   */
+  options: number[];
+}
+
+/**
+ * A jatekos MAGA valasztja meg, hova szulessen ujja.
+ *
+ * Opcionalis: aki nem valaszt, azt a szerver ajanlata viszi (az
+ * ellenfelektol legtavolabbi szabad pont). Aki viszont valaszt, annak a
+ * dontese ALL -- a szerver ilyenkor nem irja felul, meg akkor sem, ha
+ * kozben veszelyesebbe valik. A sajat dontest nem vesszuk el a
+ * jatekostol; a kockazat is az ove.
+ */
+export interface ChooseSpawnMessage {
+  type: "chooseSpawn";
+  index: number;
+}
+
 export interface ErrorMessage {
   type: "error";
   code: "bad_protocol" | "room_full" | "room_not_found" | "bad_message";
@@ -437,6 +489,7 @@ export type ServerMessage =
   | PlayerJoinedMessage
   | PlayerLeftMessage
   | RespawnMessage
+  | RespawnPlanMessage
   | ExplosionMessage
   | PongMessage
   | ErrorMessage;

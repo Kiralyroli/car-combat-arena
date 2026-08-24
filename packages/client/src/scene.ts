@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   WEAPON_MOUNT,
+  SPAWN_POINTS,
+  ARENA_HALF,
   ARENA,
   CAMERA,
   CHASSIS,
@@ -657,6 +659,88 @@ export class SceneView {
     }
   }
 
+  // --- Ujraszuletesi pajzs ---
+  //
+  // A frissen szuletett jatekos rovid ideig serthetetlen (lasd
+  // SPAWN_PROTECTION_MS). Ezt LATNI kell -- kulonben a tamado csak
+  // annyit tapasztalna, hogy a talalatai nem fognak, es azt hinne,
+  // hibas a jatek.
+  //
+  // SZANDEKOSAN kulon buborek, es nem az auto attetszove tetele: az
+  // autok kozos anyagokon osztoznak (csak a karosszeria-szin sajat),
+  // tehat az atlatszosag atterjedne a tobbi autora is.
+
+  private shieldGeometry: THREE.SphereGeometry | null = null;
+
+  private readonly shields = new Map<
+    string,
+    { mesh: THREE.Mesh; material: THREE.MeshBasicMaterial }
+  >();
+
+  /** A sajat autonk pajzsa; a kulcs SZANDEKOSAN nem lehet jatekos-id. */
+  private static readonly OWN_SHIELD = "#own";
+
+  setOwnProtected(active: boolean): void {
+    this.setShield(SceneView.OWN_SHIELD, this.chassisMesh, active);
+  }
+
+  setRemoteProtected(id: string, active: boolean): void {
+    const car = this.remoteCars.get(id);
+    if (!car) return;
+    this.setShield(id, car.wrapper, active);
+  }
+
+  /** Hany pajzs lathato eppen -- a tesztek ezt olvassak. */
+  get shieldsActive(): number {
+    return this.shields.size;
+  }
+
+  private setShield(key: string, parent: THREE.Object3D, active: boolean): void {
+    const existing = this.shields.get(key);
+    if (!active) {
+      if (!existing) return;
+      existing.mesh.removeFromParent();
+      existing.material.dispose();
+      this.shields.delete(key);
+      return;
+    }
+    if (existing) {
+      // Mar van, de gazdat valthatott (ujra hozzaadott tavoli auto).
+      if (existing.mesh.parent !== parent) parent.add(existing.mesh);
+      return;
+    }
+
+    if (!this.shieldGeometry) {
+      // Akkora, hogy az egesz autot befedje (a kocsi kb. 4.9 m hosszu).
+      this.shieldGeometry = new THREE.SphereGeometry(3, 20, 14);
+    }
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x6fd3ff,
+      transparent: true,
+      opacity: 0.18,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(this.shieldGeometry, material);
+    mesh.position.y = CHASSIS.halfExtents.y;
+    parent.add(mesh);
+    this.shields.set(key, { mesh, material });
+  }
+
+  /**
+   * A pajzsok lüktetese.
+   *
+   * Nem diszites: a mozgo feluletet a szem akkor is eszreveszi, ha a
+   * kocsi eppen all -- egy statikus, halvany gomb konnyen elveszne a
+   * jelenetben.
+   */
+  updateShields(now: number): void {
+    const pulse = 0.14 + 0.07 * Math.sin(now / 120);
+    for (const shield of this.shields.values()) {
+      shield.material.opacity = pulse;
+    }
+  }
+
   updateExplosions(now: number): void {
     for (let i = this.explosions.length - 1; i >= 0; i--) {
       const fx = this.explosions[i];
@@ -1008,6 +1092,7 @@ export class SceneView {
   }
 
   removeRemoteCar(id: string): void {
+    this.setShield(id, this.scene, false);
     const car = this.remoteCars.get(id);
     if (!car) return;
     this.scene.remove(car.wrapper);
@@ -1353,6 +1438,197 @@ export class SceneView {
     const lookTarget = new THREE.Vector3(...chassis.position);
     lookTarget.y += CAMERA.lookAtHeight;
     this.camLook.lerp(lookTarget, CAMERA.lookAtLerp);
+    this.camera.lookAt(this.camLook);
+  }
+
+  // --- Valaszthato ujraszuletesi helyek ---
+  //
+  // A halal varakozasa alatt a jatekos az EGESZ palyat latja felulrol,
+  // rajta minden szabad spawn-ponttal. A sajate kiemelve; a tobbire rá
+  // lehet kattintani, ha mashova szeretne.
+  //
+  // CSAK a sajat kliensen letezik: hogy hova szuletunk, es mibol
+  // valaszthatunk, szemelyes informacio (lasd RespawnPlanMessage) -- az
+  // ellenfel nem lathatja.
+
+  private choiceGeometry: {
+    ring: THREE.RingGeometry;
+    beam: THREE.CylinderGeometry;
+    hit: THREE.CircleGeometry;
+  } | null = null;
+
+  private readonly spawnChoices = new Map<
+    number,
+    { group: THREE.Group; ring: THREE.MeshBasicMaterial; beam: THREE.MeshBasicMaterial }
+  >();
+
+  private selectedSpawn: number | null = null;
+
+  /** Hany valaszthato hely latszik -- a tesztek ezt olvassak. */
+  get spawnChoiceCount(): number {
+    return this.spawnChoices.size;
+  }
+
+  /** Melyik hely van kiemelve -- a tesztek ezt olvassak. */
+  get selectedSpawnIndex(): number | null {
+    return this.selectedSpawn;
+  }
+
+  /**
+   * A valaszthato helyek megjelenitese.
+   *
+   * @param options  A szabad spawn-pontok sorszamai (a szervertol).
+   * @param selected Amelyikre eppen szuletnenk.
+   */
+  showSpawnChoices(options: readonly number[], selected: number | null): void {
+    for (const [index, marker] of this.spawnChoices) {
+      if (options.includes(index)) continue;
+      this.scene.remove(marker.group);
+      marker.ring.dispose();
+      marker.beam.dispose();
+      this.spawnChoices.delete(index);
+    }
+    this.selectedSpawn = selected;
+
+    for (const index of options) {
+      if (this.spawnChoices.has(index)) continue;
+      const point = SPAWN_POINTS[index];
+      if (!point) continue;
+
+      if (!this.choiceGeometry) {
+        this.choiceGeometry = {
+          ring: new THREE.RingGeometry(2.6, 3.3, 40),
+          beam: new THREE.CylinderGeometry(2.6, 2.6, 9, 24, 1, true),
+          // Nagyobb, LATHATATLAN korlap a kattintashoz: a gyuru maga
+          // vekony, es a felulnezetbol nagyon apronak latszik.
+          hit: new THREE.CircleGeometry(5, 24),
+        };
+      }
+      const geometry = this.choiceGeometry;
+
+      const group = new THREE.Group();
+      group.position.set(point.x, 0, point.z);
+
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const ring = new THREE.Mesh(geometry.ring, ringMaterial);
+      ring.rotateX(-Math.PI / 2);
+      ring.position.y = 0.06;
+      group.add(ring);
+
+      const beamMaterial = new THREE.MeshBasicMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const beam = new THREE.Mesh(geometry.beam, beamMaterial);
+      beam.position.y = 4.5;
+      group.add(beam);
+
+      // A kattintas-felulet: opacity 0, de NEM visible=false -- a
+      // rejtett objektumot a sugarkoveto atugorja.
+      const hit = new THREE.Mesh(
+        geometry.hit,
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+      );
+      hit.rotateX(-Math.PI / 2);
+      hit.position.y = 0.04;
+      hit.userData.spawnIndex = index;
+      group.add(hit);
+
+      this.scene.add(group);
+      this.spawnChoices.set(index, { group, ring: ringMaterial, beam: beamMaterial });
+    }
+  }
+
+  /**
+   * Egy valaszthato hely vilagbeli poziciója -- vagy null.
+   *
+   * A tesztek ebbol vetitik ki a kepernyore, hogy oda tudjanak
+   * kattintani; a jatek maga nem hasznalja.
+   */
+  spawnChoicePosition(index: number): [number, number, number] | null {
+    const marker = this.spawnChoices.get(index);
+    if (!marker) return null;
+    const p = marker.group.position;
+    return [p.x, p.y, p.z];
+  }
+
+  /** Minden jelolo eltuntetese (ujraszuletes utan). */
+  clearSpawnChoices(): void {
+    this.showSpawnChoices([], null);
+  }
+
+  /**
+   * Melyik helyre mutat a celkereszt -- vagy null.
+   *
+   * A halal alatt a kattintas nem loves, hanem helyvalasztas
+   * (lasd main.ts).
+   */
+  spawnChoiceAt(ndcX: number, ndcY: number): number | null {
+    if (this.spawnChoices.size === 0) return null;
+    this.ndc.set(ndcX, ndcY);
+    this.raycaster.setFromCamera(this.ndc, this.camera);
+
+    const groups = [...this.spawnChoices.values()].map((m) => m.group);
+    for (const hit of this.raycaster.intersectObjects(groups, true)) {
+      const index = hit.object.userData.spawnIndex;
+      if (typeof index === "number") return index;
+    }
+    return null;
+  }
+
+  /**
+   * A jelolok lüktetese es szinezese.
+   *
+   * A kivalasztott arany es hatarozott, a tobbi halvany kek: igy egy
+   * pillantasbol latszik, hova kerulunk -- es hogy van mibol valasztani.
+   */
+  updateSpawnChoices(now: number): void {
+    const pulse = 0.5 + 0.25 * Math.sin(now / 260);
+    for (const [index, marker] of this.spawnChoices) {
+      const chosen = index === this.selectedSpawn;
+      marker.ring.color.setHex(chosen ? 0xe3b341 : 0x6fd3ff);
+      marker.beam.color.setHex(chosen ? 0xe3b341 : 0x6fd3ff);
+      marker.ring.opacity = chosen ? pulse : 0.3;
+      marker.beam.opacity = chosen ? pulse * 0.25 : 0.07;
+    }
+  }
+
+  /**
+   * Kamera a LEENDO ujraszuletesi hely fole, a halal varakozasa alatt.
+   *
+   * Az ot masodperc kulonben teljesen ures ido: a jatekos a sajat
+   * roncsat nezi, es semmit nem tud meg arrol, hova kerul, sem arrol,
+   * hol vannak a tobbiek. Innen viszont MINDKETTOT latja -- az
+   * ellenfeleket is, mert azok amugy is ki vannak rajzolva.
+   *
+   * SZANDEKOSAN ugyanazt a simito allapotot (camPos, camLook) hasznalja,
+   * mint az updateCamera: igy a halalba es a szuletesbe valo atmenet
+   * folyamatos, nem ugras.
+   */
+  previewArena(): void {
+    // Az EGESZ arena latszik, nem csak a spawn kornyeke: igy derul ki,
+    // hol all az ellenfel, es melyik szabad hely van tole tavol.
+    //
+    // A tavolsag szamitott, nem talalgatott: 62 fokos fuggoleges
+    // latoszognel a 80 m-es palya befoglalasahoz kb. 67 m kell -- a
+    // dontott nezet miatt ennel bovebben merunk.
+    const desired = new THREE.Vector3(0, ARENA_HALF * 1.75, ARENA_HALF * 1.45);
+    // GYORSABB atmenet, mint a jatek kozbeni kamerakovetes.
+    //
+    // A halal ablaka mindossze ot masodperc, es ez alatt kell attekinteni
+    // a palyat es helyet valasztani. A megszokott, lagy kovetessel
+    // (0.12) az odaerkezes maga elvinne kozel harom masodpercet -- a
+    // rendelkezesre allo ido tobb mint felet.
+    const PREVIEW_LERP = 0.32;
+    this.camPos.lerp(desired, PREVIEW_LERP);
+    this.camera.position.copy(this.camPos);
+
+    this.camLook.lerp(new THREE.Vector3(0, 0, 0), PREVIEW_LERP);
     this.camera.lookAt(this.camLook);
   }
 

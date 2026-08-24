@@ -102,6 +102,15 @@ export class RemotePlayers {
   /** Jatekosonkenti eletszam a legutobbi snapshotbol (eredmenyjelzo). */
   private readonly lives = new Map<string, number>();
 
+  /**
+   * Ki serthetetlen eppen (ujraszuletes utani rovid vedelem).
+   *
+   * A kliens ebbol teszi attetszove az autot -- enelkul a jatekos csak
+   * annyit latna, hogy a talalatai nem fognak, es azt hinne, hibas a
+   * jatek.
+   */
+  private readonly protectedIds = new Set<string>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
@@ -112,6 +121,10 @@ export class RemotePlayers {
 
   livesOf(id: string): number {
     return this.lives.get(id) ?? 0;
+  }
+
+  isProtected(id: string): boolean {
+    return this.protectedIds.has(id);
   }
 
   ids(): string[] {
@@ -127,6 +140,7 @@ export class RemotePlayers {
     this.hp.delete(id);
     this.names.delete(id);
     this.lives.delete(id);
+    this.protectedIds.delete(id);
   }
 
   clear(): void {
@@ -134,6 +148,7 @@ export class RemotePlayers {
     this.hp.clear();
     this.names.clear();
     this.lives.clear();
+    this.protectedIds.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
@@ -142,6 +157,8 @@ export class RemotePlayers {
       this.hp.set(player.id, player.hp);
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
+      if (player.protected) this.protectedIds.add(player.id);
+      else this.protectedIds.delete(player.id);
 
       let buffer = this.buffers.get(player.id);
       if (!buffer) {

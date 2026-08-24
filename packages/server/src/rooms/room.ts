@@ -14,6 +14,11 @@ import {
   wheelWorldPosition,
   MAX_HP,
   SPAWN_POINTS,
+  SPAWN_PROTECTION_MS,
+  pickSpawnIndex,
+  shouldRepickSpawn,
+  spawnSafety,
+  type SpawnThreat,
   PICKUP_POINTS,
   PICKUP_RESPAWN_MS,
   withinPickupRange,
@@ -64,6 +69,43 @@ export interface ServerPlayer {
   state: ClientState;
   /** Melyik SPAWN_POINTS elemet foglalja -- kilepeskor felszabadul. */
   spawnIndex: number;
+  /**
+   * Meddig serthetetlen (performance.now); 0 = nem az.
+   *
+   * Az ujraszuletes utani rovid vedelem. AZERT kell, mert az arena
+   * geometriaja miatt nincs biztonsagos spawn-pont: mind a 8 pont
+   * lotavolsagon belul van egymastol (lasd spawn.ts).
+   */
+  protectedUntil: number;
+  /**
+   * A kivalasztott ujraszuletesi hely, amig halott -- vagy null.
+   *
+   * Mar a HALAL PILLANATABAN eldol, hogy a jatekos a varakozas alatt
+   * lathassa (a kliens odaviszi a kamerat). A harc mozgasat kovetve
+   * frissulhet, lasd updateRespawnPlans.
+   */
+  pendingSpawnIndex: number | null;
+  /**
+   * Hol semmisult meg -- vagy null, ha el.
+   *
+   * A valasztas ezt bunteti: aki megolt, jo esellyel meg ott van, tehat
+   * oda visszaszuletni a legrosszabb, ami tortenhet.
+   */
+  deathPosition: [number, number, number] | null;
+  /**
+   * A jatekos MAGA valasztotta-e a helyet.
+   *
+   * Ilyenkor a szerver NEM irja felul az ajanlataval, meg akkor sem, ha
+   * kozben veszelyesebbe valik: a sajat dontest nem vesszuk el tole.
+   */
+  spawnChosenManually: boolean;
+  /**
+   * A legutobb ELKULDOTT terv lenyomata.
+   *
+   * Enelkul minden tickben mennne egy uzenet (60/mp, jatekosonkent),
+   * pedig a terv masodpercekig valtozatlan.
+   */
+  planKey: string;
   hp: number;
   /**
    * Kerekenkenti serules -- a SZERVER birtokolja (terv 4.6).
@@ -194,7 +236,7 @@ export class Room {
     name?: string,
     weapon?: WeaponId,
   ): ServerPlayer {
-    const spawn = this.allocateSpawn();
+    const spawn = this.allocateSpawn(null);
     const player: ServerPlayer = {
       id,
       // A nevet a SZERVER tisztitja: a kliens barmit kuldhet.
@@ -202,6 +244,11 @@ export class Room {
       send,
       state: spawn.state,
       spawnIndex: spawn.index,
+      protectedUntil: 0,
+      pendingSpawnIndex: null,
+      deathPosition: null,
+      spawnChosenManually: false,
+      planKey: "",
       hp: START_HP,
       wheels: healthyWheels(),
       lastSeq: -1,
@@ -271,6 +318,12 @@ export class Room {
         // Megsemmisult auto nem sebez es nem sebzodik: a roncs nincs
         // jelen a palyan (a kliensek is elrejtik).
         if (a.deadSince !== null || b.deadSince !== null) continue;
+        // A frissen szuletett sem -- SEM KAP, SEM AD sebzest.
+        //
+        // A "sem ad" nem reszletkerdes: enelkul a vedelem fegyverre
+        // valna, es a serthetetlen jatekos bunteten kosolhatna szet a
+        // mezonyt. Igy viszont a talalkozas egyszeruen nem tortenik meg.
+        if (this.isProtected(a, now) || this.isProtected(b, now)) continue;
 
         const key = pairKey(a.id, b.id);
         const lastImpact = this.lastImpactAt.get(key) ?? 0;
@@ -344,6 +397,11 @@ export class Room {
   private markDeadIfDestroyed(player: ServerPlayer, now: number): void {
     if (player.hp > 0 || player.deadSince !== null) return;
     player.deadSince = now;
+    player.deathPosition = [...player.state.position];
+    player.protectedUntil = 0;
+    // Uj halal, uj dontes: a korabbi kezi valasztas nem oroklodik.
+    player.spawnChosenManually = false;
+    player.planKey = "";
 
     // Elet csak FUTO meccsben fogy. Varakozo (egyjatekos) vagy mar
     // lezart meccsben a megsemmisules csak ujraszuletest jelent --
@@ -401,7 +459,7 @@ export class Room {
     const players = [...this.players.values()];
 
     if (this.phase === "waiting") {
-      if (canStart(players.length)) this.startMatch();
+      if (canStart(players.length)) this.startMatch(now);
       return;
     }
 
@@ -420,7 +478,7 @@ export class Room {
     }
 
     if (this.phase === "ended" && now >= this.restartAt) {
-      if (canStart(players.length)) this.startMatch();
+      if (canStart(players.length)) this.startMatch(now);
       else {
         this.phase = "waiting";
         this.winnerId = null;
@@ -428,12 +486,12 @@ export class Room {
     }
   }
 
-  private startMatch(): void {
+  private startMatch(now: number): void {
     for (const player of this.players.values()) {
       player.lives = LIVES_PER_PLAYER;
       // A meccs kezdetekor MINDENKI AZONNAL jatekban van, a kiesettek is
       // (kulonben nezok maradnanak az uj meccsben is).
-      this.respawnNow(player);
+      this.respawnNow(player, now);
     }
     this.phase = "playing";
     this.winnerId = null;
@@ -474,7 +532,7 @@ export class Room {
 
       if (now - player.deadSince < RESPAWN_DELAY_MS) continue;
 
-      this.respawnNow(player);
+      this.respawnNow(player, now);
     }
   }
 
@@ -487,11 +545,20 @@ export class Room {
    * elso ot masodpercben: nem sebzodtek, es a kliensek elrejtettek az
    * autojukat. A meccs kezdetekor azonnal jatekban kell lenni.
    */
-  private respawnNow(player: ServerPlayer): void {
-    const spawn = this.allocateSpawn();
+  private respawnNow(player: ServerPlayer, now: number): void {
+    const spawn = this.allocateSpawn(player);
     player.spawnIndex = spawn.index;
     player.state = spawn.state;
     player.hp = MAX_HP;
+    // Rovid serthetetlenseg. Nem kenyelmi funkcio: az arenaban nincs
+    // biztonsagos spawn-pont (mind lotavon belul van), tehat enelkul a
+    // frissen szuletett jatekos vedtelen -- es itt minden halal egy
+    // ELETBE kerul, nem csak bosszusag.
+    player.protectedUntil = now + SPAWN_PROTECTION_MS;
+    player.pendingSpawnIndex = null;
+    player.deathPosition = null;
+    player.spawnChosenManually = false;
+    player.planKey = "";
     // Uj auto, uj esely: a kerekek is javulnak.
     player.wheels = healthyWheels();
     player.deadSince = null;
@@ -578,6 +645,8 @@ export class Room {
     if (!rocket) return false;
 
     player.lastFiredAt = now;
+    // Aki lo, az mar nem menekul, hanem harcol.
+    player.protectedUntil = 0;
     return true;
   }
 
@@ -596,6 +665,7 @@ export class Room {
     for (const explosion of this.rockets.step(dt, now, targets)) {
       for (const player of this.players.values()) {
         if (player.deadSince !== null) continue;
+        if (this.isProtected(player, now)) continue;
         // A KEREKEK kulon sebzodnek, kerekenkenti tavolsag szerint
         // (terv 4.6). Ezt a body-sebzes ELOTT vegezzuk el, hogy a
         // megsemmisulessel egy tickben letort kerek is bekeruljon az
@@ -779,6 +849,8 @@ export class Room {
       const result = stepMachinegun(player.mg, wantsToFire, now, dtMs);
       player.mg = result.state;
       if (result.shots === 0) continue;
+      // Aki lo, az mar nem menekul, hanem harcol.
+      player.protectedUntil = 0;
 
       // A jatekos oda lo, ahol a tobbieket LATJA -- tehat a multban.
       const viewTime = now - this.rewindMsFor(player, tick);
@@ -818,6 +890,10 @@ export class Room {
         if (shot.hitId === null) continue;
         const victim = this.players.get(shot.hitId);
         if (!victim || victim.deadSince !== null) continue;
+        // A nyomjelzo SZANDEKOSAN talalatnak latszik: geometriailag az
+        // is volt. Hogy miert nem fogy a HP, azt az attetszo auto
+        // mutatja meg -- lasd PlayerSnapshot.protected.
+        if (this.isProtected(victim, now)) continue;
 
         victim.hp = Math.max(0, victim.hp - MACHINEGUN.damage);
         this.markDeadIfDestroyed(victim, now);
@@ -830,7 +906,7 @@ export class Room {
    * sajat magat szuri ki. Igy egyetlen kozos uzenet mehet mindenkinek,
    * nem kell jatekosonkent kulon osszeallitani.
    */
-  buildSnapshot(): PlayerSnapshot[] {
+  buildSnapshot(now: number): PlayerSnapshot[] {
     const snapshot: PlayerSnapshot[] = [];
     for (const player of this.players.values()) {
       snapshot.push({
@@ -850,27 +926,171 @@ export class Room {
         lives: player.lives,
         weapon: player.weapon,
         heat: player.mg.heat,
+        protected: this.isProtected(player, now),
       });
     }
     return snapshot;
   }
 
   /**
-   * A legelso olyan spawn-pont, amit meg senki nem foglal.
+   * Serthetetlen-e eppen a jatekos.
    *
-   * A pontok az arena akadalyait elkerulve, kezzel vannak megadva
-   * (lasd SPAWN_POINTS a config.ts-ben) -- egy szamitott kor nem
-   * mukodne, mert az akadalyok nem szimmetrikusak. Kilepes utan a
-   * felszabadult pont ujra kiadhato, ezert a FOGLALTSAGOT nezzuk, nem
-   * a jatekosok szamat: kulonben egy kilepes-belepes utan ketten
-   * kaphatnak ugyanazt a helyet.
+   * Egy helyen definialva, mert MINDEN sebzes-utvonalnak ugyanazt kell
+   * kerdeznie -- utkozes, robbanas, gepfegyver. Ha az egyik kimaradna,
+   * a vedelem csendben lyukas lenne.
    */
-  private allocateSpawn(): { index: number; state: ClientState } {
-    const taken = new Set<number>();
-    for (const player of this.players.values()) taken.add(player.spawnIndex);
+  private isProtected(player: ServerPlayer, now: number): boolean {
+    return now < player.protectedUntil;
+  }
 
-    let index = SPAWN_POINTS.findIndex((_, i) => !taken.has(i));
-    if (index < 0) index = this.players.size % SPAWN_POINTS.length;
+  /**
+   * Azok a spawn-pontok, amiket MAS jatekos nem foglal.
+   *
+   * Az elo jatekos a sajat pontjat foglalja, a halott pedig a
+   * TERVEZETTET -- kulonben ketten ugyanoda szuletnenek, ami pont
+   * annak a bajnak a sulyosbitasa lenne, amit meg akarunk oldani.
+   *
+   * A pontok kezzel vannak megadva (lasd SPAWN_POINTS a config.ts-ben);
+   * egy szamitott kor nem mukodne, mert az akadalyok nem szimmetrikusak.
+   */
+  private freeSpawnIndices(self: ServerPlayer | null): number[] {
+    const taken = new Set<number>();
+    for (const player of this.players.values()) {
+      if (player === self) continue;
+      taken.add(
+        player.deadSince === null
+          ? player.spawnIndex
+          : (player.pendingSpawnIndex ?? player.spawnIndex),
+      );
+    }
+    const free = SPAWN_POINTS.map((_, i) => i).filter((i) => !taken.has(i));
+    // Nyolc jatekosnal elfogyhatnak; ilyenkor inkabb utkozzon a
+    // valasztas, mint hogy ne legyen hova szuletni.
+    return free.length > 0 ? free : SPAWN_POINTS.map((_, i) => i);
+  }
+
+  /** Az ELO ellenfelek, a valasztas szamara: hol vannak, merre celoznak. */
+  private threatsAgainst(self: ServerPlayer | null): SpawnThreat[] {
+    const threats: SpawnThreat[] = [];
+    for (const player of this.players.values()) {
+      if (player === self || player.deadSince !== null) continue;
+      threats.push({
+        position: player.state.position,
+        aimYaw: player.state.aimYaw,
+        aimPitch: player.state.aimPitch,
+      });
+    }
+    return threats;
+  }
+
+  /**
+   * A halott jatekosok ujraszuletesi tervenek karbantartasa.
+   *
+   * Minden tickben fut, mert a harc mozog: egy 5 masodperccel korabban
+   * biztonsagos pont kozben halalossa valhat. A csere viszont csak
+   * ERDEMI romlasnal tortenik (shouldRepickSpawn) -- kulonben a
+   * jatekos egy villogo, kiszamithatatlan elonezetet latna.
+   */
+  updateRespawnPlans(): void {
+    for (const player of this.players.values()) {
+      if (player.deadSince === null) continue;
+      // Kiesett jatekos nem szuletik ujra: neki nincs mit tervezni.
+      if (player.lives <= 0 && this.phase === "playing") continue;
+      this.planRespawn(player);
+    }
+  }
+
+  private planRespawn(player: ServerPlayer): void {
+    const free = this.freeSpawnIndices(player);
+    const current = player.pendingSpawnIndex;
+    const currentValid = current !== null && free.includes(current);
+
+    // A KEZI valasztas all. Ha kozben mas foglalta el a pontot, viszont
+    // vissza kell venni az ajanlast -- kulonben a jatekos egy olyan
+    // helyre keszulne, ahova nem kerulhet.
+    if (player.spawnChosenManually) {
+      if (currentValid) {
+        this.sendRespawnPlan(player);
+        return;
+      }
+      player.spawnChosenManually = false;
+    }
+
+    const threats = this.threatsAgainst(player);
+    const safetyOf = (index: number): number =>
+      spawnSafety(SPAWN_POINTS[index], threats, player.deathPosition);
+
+    if (currentValid) {
+      const best = Math.max(...free.map(safetyOf));
+      if (!shouldRepickSpawn(safetyOf(current), best)) {
+        this.sendRespawnPlan(player);
+        return;
+      }
+    }
+
+    player.pendingSpawnIndex = pickSpawnIndex(free, threats, player.deathPosition);
+    this.sendRespawnPlan(player);
+  }
+
+  /**
+   * A jatekos SAJAT valasztasa arrol, hova szulessen ujja.
+   *
+   * Opcionalis: aki nem valaszt, azt az ajanlat viszi. A szerver
+   * ellenorzi, hogy egyaltalan varakozik-e, es hogy a pont szabad-e --
+   * a kliens barmit kuldhet.
+   */
+  chooseSpawn(id: string, index: number): void {
+    const player = this.players.get(id);
+    if (!player || player.deadSince === null) return;
+    if (!Number.isInteger(index)) return;
+    if (index < 0 || index >= SPAWN_POINTS.length) return;
+    if (!this.freeSpawnIndices(player).includes(index)) return;
+
+    player.pendingSpawnIndex = index;
+    player.spawnChosenManually = true;
+    this.sendRespawnPlan(player);
+  }
+
+  /**
+   * A terv kikuldese -- CSAK az erintettnek, es csak ha valtozott.
+   *
+   * A snapshot mindenkihez eljut, tehat abban nem mehet: az ellenfel
+   * megtudna, hova varjon (lasd RespawnPlanMessage).
+   */
+  private sendRespawnPlan(player: ServerPlayer): void {
+    const index = player.pendingSpawnIndex;
+    if (index === null) return;
+
+    const options = this.freeSpawnIndices(player);
+    const key = `${index}|${options.join(",")}`;
+    if (key === player.planKey) return;
+    player.planKey = key;
+
+    const point = SPAWN_POINTS[index];
+    player.send({
+      type: "respawnPlan",
+      position: [point.x, point.y, point.z],
+      index,
+      options,
+    });
+  }
+
+  /**
+   * A jatekos ujraszuletesi helye -- lehetoleg a mar megtervezett.
+   *
+   * A tervet azert tartjuk meg, mert a jatekos a halal-kepernyon MAR
+   * AZT NEZTE: oda vitte a kamerat, es a kornyeket felmerte. Mashova
+   * ejteni pont azt a felkeszulest dobna el, amiert az egesz keszult.
+   */
+  private allocateSpawn(self: ServerPlayer | null): { index: number; state: ClientState } {
+    const free = this.freeSpawnIndices(self);
+    // Belepeskor (self = null) meg nincs terv -- de a valasztas ilyenkor
+    // is nezi az ellenfeleket: senki ne csatlakozzon egy celkeresztbe.
+    const planned = self?.pendingSpawnIndex ?? null;
+    const index =
+      planned !== null && free.includes(planned)
+        ? planned
+        : pickSpawnIndex(free, this.threatsAgainst(self), self?.deathPosition ?? null);
 
     const point = SPAWN_POINTS[index];
     return {
