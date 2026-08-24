@@ -20,7 +20,8 @@ import {
   spawnSafety,
   type SpawnThreat,
   PICKUP_POINTS,
-  PICKUP_RESPAWN_MS,
+  pickupRespawnMs,
+  HEALTH_RESTORE,
   withinPickupRange,
   LIVES_PER_PLAYER,
   MATCH_RESTART_DELAY_MS,
@@ -373,14 +374,32 @@ export class Room {
       if (player.deadSince !== null) continue;
 
       for (let i = 0; i < PICKUP_POINTS.length; i++) {
+        const pickup = PICKUP_POINTS[i];
         if (this.pickupReadyAt[i] > now) continue;
-        if (!withinPickupRange(player.state.position, PICKUP_POINTS[i])) continue;
+        if (!withinPickupRange(player.state.position, pickup)) continue;
 
-        this.pickupReadyAt[i] = now + PICKUP_RESPAWN_MS;
+        // TELI eletnel nem vesszuk fel: kulonben a mellette elhajto,
+        // sertetlen jatekos elvinne azt, amire masnak tenyleg szuksege
+        // van -- ugy, hogy neki semmit nem er.
+        //
+        // A boostnal ez nem tehetó meg: a tartaly a KLIENSNEL van (terv
+        // 15.4), a szerver nem tudja, mennyi van benne.
+        if (pickup.kind === "health" && player.hp >= MAX_HP) continue;
+
+        this.pickupReadyAt[i] = now + pickupRespawnMs(pickup.kind);
+
+        if (pickup.kind === "health") {
+          player.hp = Math.min(MAX_HP, player.hp + HEALTH_RESTORE);
+          console.log(
+            `[room ${this.code}] ${player.id.slice(0, 8)} felvette a ${i}. eletet ` +
+              `(${player.hp} HP)`,
+          );
+          continue;
+        }
+
         // A visszatoltest a KLIENS vegzi el (nala van a tartaly); a
         // szerver csak konyveli, hogy jar neki egy.
         player.boostGrants++;
-
         console.log(
           `[room ${this.code}] ${player.id.slice(0, 8)} felvette a ${i}. boostot`,
         );

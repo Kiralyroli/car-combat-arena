@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
+    "check:pickup-effects": "tsx scripts/check-pickup-effects.ts",
     "check:spawn-protection": "tsx scripts/check-spawn-protection.ts",
     "check:rewind": "tsx scripts/check-rewind.ts",
     "check:net": "tsx scripts/smoke-two-clients.ts",

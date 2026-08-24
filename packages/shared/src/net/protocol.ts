@@ -45,7 +45,7 @@ export const INTERP_DELAY_MS = 100;
  * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
  * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * A kerekek LATVANY-allapota.

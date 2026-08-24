@@ -14,6 +14,7 @@
  * Futtatas: npx tsx scripts/check-pickup.ts [--lag=200 --jitter=60]
  */
 import { chromium, type Browser, type Page } from "playwright";
+import { MAX_HP, PICKUP_POINTS } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
@@ -155,6 +156,32 @@ async function main(): Promise<void> {
     !availableAfter,
     "a szerver dontott, nem A kliense",
   );
+
+  // --- ELET-PICKUP: teli elettel NEM tunik el ---
+  //
+  // A szerver ismeri a HP-t, tehat vissza tudja tartani a felvetelt --
+  // kulonben a sertetlen jatekos elvinne azt, amire masnak tenyleg
+  // szuksege van. A szabalyt a check:pickup-effects meri pontosan; itt
+  // az a kerdes, hogy a teljes lancon at is igy viselkedik-e.
+  //
+  // (A boostnal ez nem tehetó meg: a tartaly a kliensnel van.)
+  const healthIndex = PICKUP_POINTS.findIndex((point) => point.kind === "health");
+  if (healthIndex >= 0) {
+    const point = PICKUP_POINTS[healthIndex];
+    await a.evaluate(
+      ([x, z]) => (window as any).__spike.backend.reset({ x, y: 1.0, z }),
+      [point.x, point.z],
+    );
+    await sleep(1500);
+
+    const hp = (await a.evaluate("window.__spike.net.hp")) as number;
+    const stillThere = (await available(b, healthIndex)) === true;
+    check(
+      "teli elettel az elet-pickup a helyen marad",
+      hp === MAX_HP && stillThere,
+      `${hp} HP-val athajtva, a pickup ${stillThere ? "megvan" : "eltunt"}`,
+    );
+  }
 
   let respawned = false;
   for (let i = 0; i < 40; i++) {

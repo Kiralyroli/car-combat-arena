@@ -16,9 +16,13 @@ import {
   BOOST_REFILL_MS,
   PICKUP_POINTS,
   PICKUP_RADIUS,
-  PICKUP_RESPAWN_MS,
+  BOOST_RESPAWN_MS,
+  HEALTH_RESPAWN_MS,
+  HEALTH_RESTORE,
+  pickupIndicesOf,
   withinPickupRange,
 } from "../src/pickups";
+import { MAX_HP } from "../src/combat";
 import { ARCADE, ARENA, CHASSIS, FIXED_DT, SPAWN_POINTS } from "../src/config";
 import { NEUTRAL_INPUT } from "../src/types";
 import { RapierBackend } from "../src/physics/rapier";
@@ -51,8 +55,38 @@ async function main(): Promise<void> {
   // tartaly elfogy, egy pickup korul korozve VEGTELEN boost lenne.
   check(
     "az ujra-felbukkanas hosszabb, mint egy teljes tartaly elhasznalasa",
-    PICKUP_RESPAWN_MS > BOOST_CAPACITY_MS,
-    `${PICKUP_RESPAWN_MS} ms varakozas / ${BOOST_CAPACITY_MS} ms boost`,
+    BOOST_RESPAWN_MS > BOOST_CAPACITY_MS,
+    `${BOOST_RESPAWN_MS} ms varakozas / ${BOOST_CAPACITY_MS} ms boost`,
+  );
+
+  // --- Az ELET ritkabb, mint a boost ---
+  //
+  // Ez a fajta lenyege. Ket iranybol merjuk, mert kulon-kulon egyik sem
+  // eleg: keves pont surun ujratoltve, vagy sok pont ritkan, ugyanolyan
+  // bo ellatast adna. Ha ugyanolyan konnyen jutna hozza barki, a
+  // sebzesnek nem lenne tetje -- mindenki elmenne foltozni magat.
+  const boosts = pickupIndicesOf("boost");
+  const healths = pickupIndicesOf("health");
+
+  check(
+    "kevesebb elet-pickup van, mint boost",
+    healths.length > 0 && healths.length < boosts.length,
+    `${healths.length} elet / ${boosts.length} boost`,
+  );
+  check(
+    "az elet ritkabban tolodik vissza, mint a boost",
+    HEALTH_RESPAWN_MS > BOOST_RESPAWN_MS,
+    `${HEALTH_RESPAWN_MS} ms / ${BOOST_RESPAWN_MS} ms`,
+  );
+
+  // --- A gyogyulas nem torli el a parbajt ---
+  //
+  // Teljes visszatoltesnel az nyerne, aki eloszor er oda: a mar
+  // megsebzett ellenfel egy pillanat alatt ujra teljes ertekű lenne.
+  check(
+    "az elet-pickup nem gyogyit teljesen",
+    HEALTH_RESTORE > 0 && HEALTH_RESTORE < MAX_HP,
+    `${HEALTH_RESTORE} HP a ${MAX_HP}-bol`,
   );
 
   console.log("\nFelvetel:");

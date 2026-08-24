@@ -445,7 +445,9 @@ export class SceneView {
 
   // --- Boost pickupok ---
 
-  private pickupMeshes: THREE.Mesh[] = [];
+  // Object3D, nem Mesh: az elet-pickup kereszt alaku, tehat CSOPORT
+  // (ket hasabbol), a boost viszont egyetlen oktaeder.
+  private pickupMeshes: THREE.Object3D[] = [];
 
   /**
    * A pickupok letrehozasa (egyszer) es allapotuk frissitese.
@@ -457,20 +459,33 @@ export class SceneView {
   syncPickups(available: boolean[], now: number): void {
     if (this.pickupMeshes.length === 0) {
       // Oktaeder: jol lathatoan "nem a palya resze", es olcso.
-      const geometry = new THREE.OctahedronGeometry(0.7);
+      const boostGeometry = new THREE.OctahedronGeometry(0.7);
+      // Az ELET keresztet formaz, es zold. KET jelzes egyszerre (alak
+      // ES szin): a szin magaban szinvakoknak nem elegendo, az alak
+      // pedig messzirol, apró meretben mosodik el.
+      const armLong = new THREE.BoxGeometry(1.5, 0.45, 0.45);
+      const armShort = new THREE.BoxGeometry(0.45, 1.5, 0.45);
+
       for (const point of PICKUP_POINTS) {
-        const mesh = new THREE.Mesh(
-          geometry,
-          new THREE.MeshStandardMaterial({
-            color: 0x39d0ff,
-            emissive: 0x1a6a8a,
-            roughness: 0.3,
-          }),
-        );
-        mesh.position.set(point.x, point.y, point.z);
-        mesh.castShadow = true;
-        this.scene.add(mesh);
-        this.pickupMeshes.push(mesh);
+        const health = point.kind === "health";
+        const material = new THREE.MeshStandardMaterial({
+          color: health ? 0x3fb950 : 0x39d0ff,
+          emissive: health ? 0x1d5c2a : 0x1a6a8a,
+          roughness: 0.3,
+        });
+
+        const object: THREE.Object3D = health
+          ? new THREE.Group()
+          : new THREE.Mesh(boostGeometry, material);
+        if (health) {
+          object.add(new THREE.Mesh(armLong, material));
+          object.add(new THREE.Mesh(armShort, material));
+        }
+
+        object.position.set(point.x, point.y, point.z);
+        this.enableShadows(object);
+        this.scene.add(object);
+        this.pickupMeshes.push(object);
       }
     }
 

@@ -1,5 +1,5 @@
 /**
- * Boost pickup a palyan (terv 4. lepcso 4. pont).
+ * Pickupok a palyan (terv 4. lepcso 4. pont).
  *
  * A pickupot a SZERVER birtokolja (terv 15.4): o dönti el, ki vette
  * fel es mikor bukkan fel ujra. E nelkul ket jatekos ugyanazt a
@@ -37,8 +37,52 @@ export const BOOST_REFILL_FRACTION = 0.5;
 /** Egy pickup ennyi ms boostot ad vissza. */
 export const BOOST_REFILL_MS = BOOST_CAPACITY_MS * BOOST_REFILL_FRACTION;
 
-/** Felvetel utan ennyi ido mulva (ms) bukkan fel ujra ugyanott. */
-export const PICKUP_RESPAWN_MS = 12000;
+/**
+ * Milyen fajta pickupok vannak.
+ *
+ * A fajta a KOZOS configban van, nem a halozaton: igy a kliens magatol
+ * tudja, mit rajzoljon, es a snapshotban tovabbra is eleg a puszta
+ * "felveheto-e" jelzes pickuponkent.
+ */
+export type PickupKind = "boost" | "health";
+
+export interface PickupPoint {
+  x: number;
+  y: number;
+  z: number;
+  kind: PickupKind;
+}
+
+/**
+ * Mennyi HP-t tolt vissza egy elet-pickup.
+ *
+ * 40 a 100-bol: SZANDEKOSAN nem teljes gyogyulas. Egy teli visszatoltes
+ * eltorolne az egesz addigi parbajt -- aki eppen nyerésre all, ujra
+ * kezdhetne. Igy viszont a 20 HP-val menekulo jatekos visszakerul a
+ * harcba (60-ra), de tovabbra is serulekeny marad.
+ *
+ * A KEREKEKET NEM javitja: a kerek-serules az agyu sajat hatasa (terv
+ * 4.6), es ha egy pickup eltuntetne, az elvenne a rakéta ertelmet. A
+ * pickup a karosszeriat foltozza, nem a futomuvet.
+ */
+export const HEALTH_RESTORE = 40;
+
+/** Boost-pickup: felvetel utan ennyi ido mulva bukkan fel ujra (ms). */
+export const BOOST_RESPAWN_MS = 12000;
+
+/**
+ * Elet-pickup: felvetel utan ennyi ido mulva bukkan fel ujra (ms).
+ *
+ * Jóval hosszabb a boostenal, es kevesebb helyen is van belole: az elet
+ * a szukosabb eroforras. Ha ugyanolyan surun allna rendelkezesre, a
+ * sebzesnek nem lenne tetje -- mindenki egyszeruen elmenne foltozni
+ * magat. A ket szam aranyat a check:pickups kulon ellenorzi.
+ */
+export const HEALTH_RESPAWN_MS = 32000;
+
+export function pickupRespawnMs(kind: PickupKind): number {
+  return kind === "health" ? HEALTH_RESPAWN_MS : BOOST_RESPAWN_MS;
+}
 
 /** Milyen magasan lebeg a talaj felett (m). */
 export const PICKUP_HEIGHT = 1.2;
@@ -50,18 +94,37 @@ export const PICKUP_HEIGHT = 1.2;
  * huznak, hogy erte menni kockazattal jarjon, es egyik se essen
  * akadalyba. (A check-pickups.ts ellenorzi, hogy tenyleg szabadok.)
  */
-export const PICKUP_POINTS: { x: number; y: number; z: number }[] = [
+export const PICKUP_POINTS: PickupPoint[] = [
   // FIGYELEM: egyik pont sem eshet spawn-pontra. A (0, 0) kezenfekvő
   // valasztas lenne (az arena kozepe), de az EPPEN a CHASSIS.spawn --
   // igy minden csatlakozo jatekos azonnal felszedte volna, meg mielott
   // a szerver a sajat spawn-pontjara allitja. A check-pickups.ts ezt
   // most kulon ellenorzi.
-  { x: 0, y: PICKUP_HEIGHT, z: 8 },
-  { x: 16, y: PICKUP_HEIGHT, z: 16 },
-  { x: -8, y: PICKUP_HEIGHT, z: 12 },
-  { x: 12, y: PICKUP_HEIGHT, z: -12 },
-  { x: -16, y: PICKUP_HEIGHT, z: -12 },
+  { x: 0, y: PICKUP_HEIGHT, z: 8, kind: "boost" },
+  { x: 16, y: PICKUP_HEIGHT, z: 16, kind: "boost" },
+  { x: -8, y: PICKUP_HEIGHT, z: 12, kind: "boost" },
+  { x: 12, y: PICKUP_HEIGHT, z: -12, kind: "boost" },
+  { x: -16, y: PICKUP_HEIGHT, z: -12, kind: "boost" },
+
+  // ELET: kevesebb es ritkabb, ezert NYITOTT, jol belathato helyen --
+  // erte menni dontes legyen, ne utkozben felszedheto apróság.
+  //
+  // Az arena kozepe korul, szimmetrikusan: mindenkinek nagyjabol
+  // ugyanannyit kell kockaztatnia erte. Az elso valasztasom (-4, -2) es
+  // (18, -2) volt, de azokat a check:pickups elutasitotta -- tul kozel
+  // estek a kezdo spawn-hoz, illetve a (22, 0) spawn-ponthoz.
+  { x: -8, y: PICKUP_HEIGHT, z: 0, kind: "health" },
+  { x: 8, y: PICKUP_HEIGHT, z: 0, kind: "health" },
 ];
+
+/** Egy fajta pickupjainak sorszamai -- a rajzolashoz es a meresekhez. */
+export function pickupIndicesOf(kind: PickupKind): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < PICKUP_POINTS.length; i++) {
+    if (PICKUP_POINTS[i].kind === kind) indices.push(i);
+  }
+  return indices;
+}
 
 /**
  * Felveheto-e a pickup ebbol a poziciobol?
