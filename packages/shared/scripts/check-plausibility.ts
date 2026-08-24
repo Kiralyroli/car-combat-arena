@@ -37,6 +37,7 @@ function state(
 
     aimYaw: 0,
     aimPitch: 0,
+    firing: false,
   };
 }
 
@@ -147,6 +148,7 @@ async function main(): Promise<void> {
 
       aimYaw: 0,
       aimPitch: 0,
+      firing: false,
     };
     const verdict = checkPlausibility(previous, sample, (stepsPerSample * 1) / 60);
     if (!verdict.ok) {

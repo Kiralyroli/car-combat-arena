@@ -95,6 +95,14 @@ export class WsServer {
       case "join":
         this.handleJoin(conn, message);
         return;
+      case "selectWeapon":
+        // Fegyvervaltas. A szerver dönti el, hogy SZABAD-e eppen (csak
+        // ujraszuleteskor vagy meccs elott) -- lasd Room.setWeapon.
+        if (conn.room && conn.playerId) {
+          conn.room.setWeapon(conn.playerId, message.weapon);
+        }
+        return;
+
       case "fire":
         // A kiloves iranyat es helyet a SZERVER szamolja a jatekos
         // allapotabol -- a kliens csak kerni tud (lasd FireMessage).
@@ -164,6 +172,7 @@ export class WsServer {
       playerId,
       (msg) => send(conn.socket, msg),
       message.name,
+      message.weapon,
     );
 
     conn.playerId = playerId;
@@ -196,6 +205,14 @@ export class WsServer {
     // WebRTC DataChannelre valthat -- ez a vedelme mar most a helyen van.
     if (message.seq <= player.lastSeq) return;
     player.lastSeq = message.seq;
+
+    // A visszajelzett snapshot-tick a MOZGASTOL FUGGETLENUL erdekes: a
+    // plauzibilitas-ellenorzes eldobhatja az allapotot, de attol a
+    // jatekos meg ugyanazt a (regi) vilagot latja, es a gepfegyver
+    // visszatekereseshez ez kell.
+    if (message.ackTick !== undefined) {
+      conn.room.noteAck(conn.playerId, message.ackTick);
+    }
 
     // Megsemmisult auto allapotat nem vesszuk at: a roncs maradjon ott,
     // ahol kidőlt. Az ujraszuletest a szerver kezdemenyezi (respawn).

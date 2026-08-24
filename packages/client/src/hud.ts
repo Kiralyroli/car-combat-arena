@@ -1,4 +1,4 @@
-import type { MatchSnapshot, Telemetry, WheelReadout } from "@cca/shared";
+import type { MatchSnapshot, Telemetry, WeaponId, WheelReadout } from "@cca/shared";
 
 /**
  * FEJLESZTOI panel: technikai szamlalok (fps, ping, fizikai lepesido,
@@ -149,6 +149,7 @@ export class PlayerHud {
   private readonly boostNum: HTMLElement;
   private readonly speedNum: HTMLElement;
   private readonly weapon: HTMLElement;
+  private readonly weaponName: HTMLElement;
   private readonly weaponState: HTMLElement;
   private readonly tyres: HTMLElement;
 
@@ -164,6 +165,7 @@ export class PlayerHud {
     this.boostNum = must("boost-num");
     this.speedNum = must("speed-num");
     this.weapon = must("weapon");
+    this.weaponName = must("weapon-name");
     this.weaponState = must("weapon-state");
     this.tyres = must("tyres");
     // A lobby alatt REJTVE marad: ures HP- es boost-savokat mutatna,
@@ -181,6 +183,10 @@ export class PlayerHud {
     boostFraction: number,
     /** Hatralevo rakéta-hutes (ms); 0 = kesz. */
     rocketCooldownMs: number,
+    /** Melyik fegyverrel jatszunk (a szerver szerint). */
+    weapon: WeaponId = "cannon",
+    /** A gepfegyver hoszintje (0..100). */
+    heat = 0,
   ): void {
     // HP. Halozat nelkul nincs ertelmes erteke (a szerver dönti el).
     const hpPercent = hp === null ? 0 : Math.max(0, Math.min(100, hp));
@@ -197,13 +203,35 @@ export class PlayerHud {
 
     this.speedNum.textContent = `${Math.abs(t.speedKmh).toFixed(0)}`;
 
-    // Fegyver. A hutes a SAJAT kilovesunktol indul (lokalis joslat),
-    // ezert azonnal visszajelez -- a szerver dontese ugyanezt a
-    // hutest ervenyesiti.
+    // --- Fegyver ---
+    //
+    // A ket fegyver MAST mutat, mert mas fogja vissza oket: az agyunal
+    // a hatralevo ujratoltes, a gepfegyvernel a hoszint. Egy kozos
+    // "keszultseg" szam mindkettot felreertheto modon abrazolna.
+    if (weapon === "machinegun") {
+      const percent = Math.max(0, Math.min(100, heat));
+      const overheated = percent >= 99;
+      // A hoszintet egesz szazalekra kerekitve kulcsoljuk: kulonben
+      // minden frame-ben a DOM-hoz nyulnank.
+      const key = `mg|${Math.round(percent)}`;
+      if (key !== this.lastWeaponKey) {
+        this.lastWeaponKey = key;
+        this.weaponName.textContent = "GEPFEGYVER";
+        this.weapon.classList.toggle("reloading", overheated);
+        this.weaponState.textContent = overheated
+          ? "TULMELEG"
+          : `${percent.toFixed(0)}%`;
+      }
+      return;
+    }
+
+    // Agyu. A hutes a SAJAT kilovesunktol indul (lokalis joslat), ezert
+    // azonnal visszajelez -- a szerver dontese ugyanezt ervenyesiti.
     const ready = rocketCooldownMs <= 0;
-    const weaponKey = ready ? "kesz" : `${Math.ceil(rocketCooldownMs / 100)}`;
+    const weaponKey = ready ? "agyu|kesz" : `agyu|${Math.ceil(rocketCooldownMs / 100)}`;
     if (weaponKey !== this.lastWeaponKey) {
       this.lastWeaponKey = weaponKey;
+      this.weaponName.textContent = "AGYU";
       this.weapon.classList.toggle("reloading", !ready);
       this.weaponState.textContent = ready
         ? "KESZ"

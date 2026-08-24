@@ -50,6 +50,8 @@ function player(t: number): PlayerSnapshot {
     hp: 100,
     boostGrants: 0,
     lives: 3,
+    weapon: "cannon",
+    heat: 0,
   };
 }
 

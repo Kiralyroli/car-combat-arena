@@ -16,11 +16,36 @@
  */
 
 import type { MatchPhase } from "../match";
+import type { WeaponId } from "../weapons";
 /** Halozati snapshot-rata (Hz). A fizika ettol fuggetlenul 60 Hz -- lasd 15.3. */
 export const SNAPSHOT_HZ = 20;
 
+/**
+ * Mennyivel a jelen mogott rendereli a kliens a TOBBI jatekost.
+ * 20 Hz-nel 2 snapshot-nyi tartalek.
+ *
+ * A KLIENS es a SZERVER is hasznalja, ezert van itt, a protokoll
+ * mellett -- ez a ketto kozott megosztott idozites resze:
+ *
+ *  - a kliensen a tavoli autok es a raketak ugyanebbol az egy
+ *    idovonalbol rajzolodnak (kulonben a lovedek a celpont elott
+ *    jarna a kepernyon),
+ *  - a szerveren pedig ennyivel (plusz a halozati uttal) kell
+ *    visszatekerni a celpontokat az azonnali talalatu fegyvernel,
+ *    kulonben a jatekos oda lo, ahol a masikot LATJA, a szerver meg
+ *    ott keresi, ahol AKKOR van.
+ */
+export const INTERP_DELAY_MS = 100;
+
 /** Protokoll-verzio: eltero verzioju kliens/szerver nem beszelget. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Protokoll-verzio.
+ *
+ * 2: fegyvervalasztas (agyu / gepfegyver), a hozza tartozo mezokkel --
+ * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
+ * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -104,6 +129,16 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * jelen -- nem szuletik ujra, es nem is sebezheto.
    */
   lives: number;
+  /** Melyik fegyverrel jatszik -- a HUD es az eredmenyjelzo mutatja. */
+  weapon: WeaponId;
+  /**
+   * A gepfegyver hoszintje (0..100), agyunal mindig 0.
+   *
+   * A SZERVER tartja nyilvan, mert a tuzeles kovetkezmenye szerver-
+   * oldali; a kliens csak kirajzolja. Minden snapshotban ott van, tehat
+   * egy elveszett csomag sem csusztatja el tartosan.
+   */
+  heat: number;
 }
 
 /**
@@ -125,6 +160,20 @@ export interface ClientState extends WheelPoseState, AimState {
   position: [number, number, number];
   rotation: [number, number, number, number];
   velocity: [number, number, number];
+  /**
+   * Nyomva tartja-e a jatekos a tuz gombot.
+   *
+   * A GEPFEGYVERHEZ kell: az azonnali talalatu fegyver a SZERVER
+   * tickjen tuzel, a mar amugy is atmeno celzasi szogek (aimYaw,
+   * aimPitch) iranyaba. Igy 11 loves/mp mellett sem kell lovesenkent
+   * kulon uzenet -- ez maradek nelkul elferne a meglevo allapot-
+   * folyamban.
+   *
+   * Az agyu tovabbra is kulon fire uzenettel sul el, mert az egyszeri
+   * esemeny, es a celpontot pontosan a kattintas pillanataban kell
+   * rogziteni.
+   */
+  firing: boolean;
 }
 
 // --- Kliens -> szerver ---
@@ -135,6 +184,21 @@ export interface JoinMessage {
   /** Szobakod; ha nincs megadva, a szerver nyit egy ujat. */
   roomCode?: string;
   name?: string;
+  /** Valasztott fegyver; hianyzo vagy ismeretlen ertek eseten agyu. */
+  weapon?: WeaponId;
+}
+
+/**
+ * Fegyvervaltas.
+ *
+ * A szerver CSAK akkor fogadja el, ha a jatekos eppen nem el (a
+ * megsemmisules es az ujraszuletes kozotti idoben), vagy a meccs meg el
+ * sem kezdodott. Igy a valasztasnak tetje van: menekules kozben nem
+ * lehet atvaltani arra, ami eppen jobban jonne.
+ */
+export interface SelectWeaponMessage {
+  type: "selectWeapon";
+  weapon: WeaponId;
 }
 
 export interface StateMessage {
@@ -142,6 +206,24 @@ export interface StateMessage {
   /** Novekvo sorszam -- a kesve/rossz sorrendben erkezo csomagok eldobasahoz. */
   seq: number;
   state: ClientState;
+  /**
+   * A legutobb FELDOLGOZOTT szerver-tick sorszama.
+   *
+   * Ebbol tudja meg a szerver, mennyire regi vilagot lat a jatekos, es
+   * ennyivel tekeri vissza a celpontokat az azonnali talalat
+   * kiertekelesekor (lasd a szerver oldalan a pozicio-elozmenyt).
+   *
+   * MIERT KELL: a kliens ket okbol is a multat latja -- a halozati ut
+   * miatt, es mert szandekosan INTERP_DELAY_MS-mal korabbi allapotot
+   * jelenit meg, hogy a mozgas sima legyen. 30 m/s-nal ez egyutt tobb
+   * mint negy meter, azaz tobb egy auto szelessegenel: visszatekeres
+   * nelkul a gepfegyver rendszeresen melle lone, HOLOTT a jatekos
+   * pontosan celzott.
+   *
+   * A szerver a SAJAT feljegyzesebol nezi meg, mikor kuldte ki ezt a
+   * ticket -- a kliens nem allithat magarol tetszoleges kesest.
+   */
+  ackTick?: number;
 }
 
 /**
@@ -190,6 +272,7 @@ export type ClientMessage =
   | JoinMessage
   | StateMessage
   | PingMessage
+  | SelectWeaponMessage
   | FireMessage;
 
 // --- Szerver -> kliens ---
@@ -224,6 +307,24 @@ export interface MatchSnapshot {
   winnerId: string | null;
   /** Mennyi van meg az uj meccsig (ms); 0, ha nem `ended` a fazis. */
   restartInMs: number;
+}
+
+/**
+ * Egy leadott gepfegyver-loves, a LATVANYERT.
+ *
+ * A talalat mar eldolt a szerveren (a sebzes a HP-ban jon vissza); ez a
+ * nyomjelzo csik kirajzolasahoz kell. A snapshotba csomagolva megy ki,
+ * nem kulon uzenetkent: 11 loves/mp mellett nyolc jatekosnal az
+ * uzenetenkenti kuldes masodpercenkent kozel szaz kulon csomag lenne.
+ */
+export interface TracerSnapshot {
+  ownerId: string;
+  /** Csotorkolat. */
+  from: [number, number, number];
+  /** Ahol vege lett: becsapodas vagy a hatotav vege. */
+  to: [number, number, number];
+  /** Talalt-e autot -- ebbol jon a becsapodas-jelzes. */
+  hit: boolean;
 }
 
 /** Egy repulo rakéta allapota a snapshotban. */
@@ -277,6 +378,13 @@ export interface SnapshotMessage {
    * ezert itt nincs sebesseg: a kliens ket snapshot kozott interpolal.
    */
   rockets: RocketSnapshot[];
+  /**
+   * A legutobbi snapshot ota leadott gepfegyver-lovesek (latvany).
+   *
+   * ESEMENY-lista, nem allapot: minden snapshotban csak az azota
+   * tortentek vannak benne, es a kliens kirajzolas utan elfelejti.
+   */
+  tracers: TracerSnapshot[];
   /**
    * A pickupok allapota, INDEX SZERINT a PICKUP_POINTS-hoz igazitva.
    * Csak azt kuldjuk, hogy eppen felveheto-e -- a pozicio allando, azt

@@ -43,6 +43,7 @@ function car(
 
     aimYaw: 0,
     aimPitch: 0,
+    firing: false,
   };
 }
 

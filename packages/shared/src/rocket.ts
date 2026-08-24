@@ -111,6 +111,24 @@ export function rocketHitsCar(
   carRotation: readonly number[],
   radius: number = ROCKET_RADIUS,
 ): boolean {
+  return segmentCarEntry(from, to, carPosition, carRotation, radius) !== null;
+}
+
+/**
+ * Ugyanaz, mint a rocketHitsCar, de a BELEPESI PONTOT is megadja: hol
+ * er a szakaszra (0..1), vagy null, ha nincs talalat.
+ *
+ * Az azonnali talalatu fegyvernek (gepfegyver) ez kell, ket okbol is:
+ * tobb celpont kozul a LEGKOZELEBBIT kell eltalalni, es a nyomjelzo
+ * csiknak is a becsapodasnal kell vegzodnie, nem a hatotav vegen.
+ */
+export function segmentCarEntry(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  carPosition: readonly number[],
+  carRotation: readonly number[],
+  radius: number = ROCKET_RADIUS,
+): number | null {
   // Az auto sajat koordinatarendszereben a doboz tengely-parhuzamos,
   // tehat a kozos slab-teszt hasznalhato.
   const start = toLocal(
@@ -122,7 +140,7 @@ export function rocketHitsCar(
     carRotation,
   );
 
-  return segmentHitsBox(start, end, [0, 0, 0], [
+  return segmentBoxEntry(start, end, [0, 0, 0], [
     CHASSIS.halfExtents.x + radius,
     CHASSIS.halfExtents.y + radius,
     CHASSIS.halfExtents.z + radius,
@@ -143,6 +161,25 @@ export function segmentHitsBox(
   center: readonly [number, number, number],
   half: readonly [number, number, number],
 ): boolean {
+  return segmentBoxEntry(from, to, center, half) !== null;
+}
+
+/**
+ * A slab-teszt, ami a BELEPESI pontot is visszaadja.
+ *
+ * A szamitas maga valtozatlan; korabban a `t0` erteket eldobtuk, pedig
+ * ott volt. Az azonnali talalatu fegyvernek szuksege van ra, hogy a
+ * legkozelebbi celpontot valassza ki.
+ *
+ * @returns 0..1 a szakaszon, vagy null, ha nincs metszes. A 0 azt
+ *   jelenti, hogy a szakasz mar a dobozon BELUL indult.
+ */
+export function segmentBoxEntry(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  center: readonly [number, number, number],
+  half: readonly [number, number, number],
+): number | null {
   let t0 = 0;
   let t1 = 1;
 
@@ -152,7 +189,7 @@ export function segmentHitsBox(
 
     if (Math.abs(d) < 1e-9) {
       // A szakasz parhuzamos ezzel a sikparral: ha kivul indul, sosem er be.
-      if (Math.abs(p) > half[axis]) return false;
+      if (Math.abs(p) > half[axis]) return null;
       continue;
     }
 
@@ -162,10 +199,10 @@ export function segmentHitsBox(
 
     if (near > t0) t0 = near;
     if (far < t1) t1 = far;
-    if (t0 > t1) return false;
+    if (t0 > t1) return null;
   }
 
-  return true;
+  return t0;
 }
 
 /**

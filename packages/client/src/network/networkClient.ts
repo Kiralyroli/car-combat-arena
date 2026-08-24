@@ -1,4 +1,5 @@
 import {
+  DEFAULT_WEAPON,
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   SNAPSHOT_HZ,
@@ -7,6 +8,8 @@ import {
   type WheelDamage,
   type MatchSnapshot,
   type RoomListing,
+  type TracerSnapshot,
+  type WeaponId,
   type ServerMessage,
   type Transport,
 } from "@cca/shared";
@@ -38,6 +41,13 @@ export interface NetworkEvents {
   onRespawn?: (position: [number, number, number]) => void;
   onExplosion?: (position: [number, number, number], ownerId: string) => void;
   onRoomList?: (rooms: RoomListing[]) => void;
+  /**
+   * Gepfegyver-lovesek a legutobbi snapshotbol.
+   *
+   * A snapshotba csomagolva erkeznek, nem kulon uzenetkent: 11 loves/mp
+   * mellett nyolc jatekosnal az kozel szaz csomag lenne masodpercenkent.
+   */
+  onTracers?: (tracers: TracerSnapshot[]) => void;
   onError?: (code: string, message: string) => void;
   onClose?: () => void;
 }
@@ -70,6 +80,27 @@ export class NetworkClient {
    * A tartaly ebbol tolt (lasd BoostTank.syncGrants).
    */
   boostGrants = 0;
+
+  /**
+   * A SAJAT fegyverunk a szerver szerint.
+   *
+   * Nem a beallitott erteket hasznaljuk: a szerver dönti el, elfogadja-e
+   * a valasztast (harc kozben nem lehet valtani), tehat a HUD azt
+   * mutassa, amivel tenylegesen jatszunk.
+   */
+  ownWeapon: WeaponId = DEFAULT_WEAPON;
+
+  /** A gepfegyver hoszintje (0..100) a szerver szerint. */
+  heat = 0;
+
+  /**
+   * A legutobb FELDOLGOZOTT szerver-tick.
+   *
+   * Ezt kuldjuk vissza minden allapottal: ebbol tudja a szerver,
+   * mennyire regi vilagot latunk, es ennyivel tekeri vissza a
+   * celpontokat az azonnali talalatu fegyvernel.
+   */
+  private lastTick = 0;
   /**
    * A repulo rakétak pufferelve -- UGYANAZON az idovonalon, mint a
    * tavoli autok (lasd remoteRockets.ts).
@@ -173,8 +204,26 @@ export class NetworkClient {
   }
 
   /** Belepes egy szobaba; kod nelkul a szerver ujat nyit. */
-  join(roomCode: string | undefined, name: string): void {
-    this.transport?.send({ type: "join", protocol: PROTOCOL_VERSION, roomCode, name });
+  join(roomCode: string | undefined, name: string, weapon?: WeaponId): void {
+    this.transport?.send({
+      type: "join",
+      protocol: PROTOCOL_VERSION,
+      roomCode,
+      name,
+      weapon,
+    });
+  }
+
+  /**
+   * Fegyvervaltas kerese.
+   *
+   * A szerver dönti el, hogy szabad-e eppen: csak ujraszuleteskor vagy
+   * meccs elott. Elutasitas eseten nem jon hibauzenet -- a kovetkezo
+   * snapshot egyszeruen a REGI fegyvert hozza vissza, es a HUD is azt
+   * mutatja. Igy nincs ket forras ugyanarra az adatra.
+   */
+  selectWeapon(weapon: WeaponId): void {
+    this.transport?.send({ type: "selectWeapon", weapon });
   }
 
   /**
@@ -215,7 +264,12 @@ export class NetworkClient {
 
     if (now - this.lastSendAt < SEND_INTERVAL_MS) return;
     this.lastSendAt = now;
-    this.transport.send({ type: "state", seq: ++this.seq, state });
+    this.transport.send({
+      type: "state",
+      seq: ++this.seq,
+      state,
+      ackTick: this.lastTick,
+    });
   }
 
   /**
@@ -267,7 +321,12 @@ export class NetworkClient {
         // szerver visszakuldott valtozata csak visszarantana. A frissen
         // kilepett jatekosokat is (lasd recentlyLeft).
         this.snapshotCount++;
+        this.lastTick = message.tick;
         const now = performance.now();
+
+        if (message.tracers.length > 0) {
+          this.events.onTracers?.(message.tracers);
+        }
 
         // A sajat HP-nkat a szerver mondja meg (o donti el a sebzest --
         // terv 15.4), ezert a snapshotbol vesszuk ki, mielott kiszurnenk
@@ -276,6 +335,8 @@ export class NetworkClient {
         if (own) {
           this.hp = own.hp;
           this.boostGrants = own.boostGrants;
+          this.ownWeapon = own.weapon;
+          this.heat = own.heat;
           this.lives = own.lives;
           this.ownName = own.name;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem

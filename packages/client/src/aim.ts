@@ -37,6 +37,16 @@ export class Aim {
 
   private fireHandler: (() => void) | null = null;
 
+  /**
+   * Nyomva van-e a tuz gomb.
+   *
+   * Az AGYU egyszeri kattintasra sul el (lasd onFire), a GEPFEGYVER
+   * viszont folyamatosan tuzel, amig a gombot tartjak -- a lovesek
+   * utemet a szerver adja (lasd ClientState.firing). Ezert kell a
+   * ket-allapotu jelzes a puszta esemeny mellett.
+   */
+  private held = false;
+
   constructor() {
     const element = document.getElementById("crosshair");
     if (!element) throw new Error("#crosshair nem talalhato");
@@ -46,6 +56,9 @@ export class Aim {
 
     window.addEventListener("mousemove", this.onMouseMove);
     window.addEventListener("mousedown", this.onMouseDown);
+    window.addEventListener("mouseup", this.onMouseUp);
+    // Ablakot valtva ne ragadjon be a tuz.
+    window.addEventListener("blur", this.onBlur);
     // Jobb gombbal ne jojjon fel a bongeszo menuje a palya felett.
     window.addEventListener("contextmenu", this.onContextMenu);
   }
@@ -55,9 +68,15 @@ export class Aim {
     this.fireHandler = handler;
   }
 
+  /** Tuzel-e eppen a jatekos (folyamatos fegyverhez). */
+  get isFiring(): boolean {
+    return this.active && this.held;
+  }
+
   /** A lobby vege (vagy offline modban a jatek indulasa) kapcsolja be. */
   setActive(active: boolean): void {
     this.active = active;
+    if (!active) this.held = false;
 
     // Bekapcsolaskor UJRA megnezzuk, mi van a kurzor alatt. Az utolso
     // egermozgas ugyanis meg a lobby folott tortent (oda kattintott a
@@ -92,7 +111,20 @@ export class Aim {
     if (e.button !== 0) return;
     // A lobby gombjai es a dev csuszkak ne suljanak el lovesnek.
     if (!this.active || !onGameSurface(e.target)) return;
+    this.held = true;
     this.fireHandler?.();
+  };
+
+  private onMouseUp = (e: MouseEvent): void => {
+    // A felengedest SZANDEKOSAN nem szurjuk a celpontra: ha a jatekos a
+    // palya folott nyomta le, de a HUD folott engedi el, a tuznek akkor
+    // is meg kell allnia.
+    if (e.button !== 0) return;
+    this.held = false;
+  };
+
+  private onBlur = (): void => {
+    this.held = false;
   };
 
   private onContextMenu = (e: MouseEvent): void => {
@@ -111,6 +143,8 @@ export class Aim {
   dispose(): void {
     window.removeEventListener("mousemove", this.onMouseMove);
     window.removeEventListener("mousedown", this.onMouseDown);
+    window.removeEventListener("mouseup", this.onMouseUp);
+    window.removeEventListener("blur", this.onBlur);
     window.removeEventListener("contextmenu", this.onContextMenu);
   }
 }

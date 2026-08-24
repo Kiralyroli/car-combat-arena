@@ -1,0 +1,332 @@
+/**
+ * Fegyverek: tuzgyorsasag, tulmelegedes, celzasi irany, szoras.
+ *
+ * Mind tiszta szamtan, motor es halozat nelkul -- ezek a szamok adjak a
+ * ket fegyver egyensulyat, tehat pontosan ezeket kell megvedeni.
+ *
+ * Futtatas: npm run check:weapons
+ */
+import { CHASSIS } from "../src/config";
+import {
+  MACHINEGUN,
+  MUZZLE_FORWARD,
+  muzzleWorldPosition,
+  aimDirection,
+  applySpread,
+  idleMachinegun,
+  isWeaponId,
+  stepMachinegun,
+  toWeaponId,
+} from "../src/weapons";
+
+let failures = 0;
+function check(label: string, ok: boolean, detail: string): void {
+  console.log(`  ${ok ? "OK  " : "HIBA"} ${label} -- ${detail}`);
+  if (!ok) failures++;
+}
+
+/** A kliens szog-konvencioja (main.ts currentAim) -- ezt kell megforditani. */
+function clientAim(dx: number, dy: number, dz: number): [number, number] {
+  const horizontal = Math.hypot(dx, dz);
+  return [Math.atan2(-dx, -dz), Math.atan2(dy, horizontal || 1e-4)];
+}
+
+/** Folyamatos tuzeles szimulalasa 60 Hz-es tickekkel. */
+function fireFor(seconds: number): {
+  shots: number;
+  overheatedAt: number | null;
+  heat: number;
+} {
+  let state = idleMachinegun();
+  let now = 0;
+  const dtMs = 1000 / 60;
+  let shots = 0;
+  let overheatedAt: number | null = null;
+
+  for (let i = 0; i < Math.round(seconds * 60); i++) {
+    now += dtMs;
+    const result = stepMachinegun(state, true, now, dtMs);
+    state = result.state;
+    shots += result.shots;
+    if (overheatedAt === null && state.overheated) overheatedAt = now / 1000;
+  }
+  return { shots, overheatedAt, heat: state.heat };
+}
+
+function main(): void {
+  console.log("=== Fegyverek ===\n");
+
+  // --- Fegyver-azonosito ---
+  check(
+    "ismeretlen fegyvernel agyura esunk vissza",
+    toWeaponId("plazmaagyu") === "cannon" &&
+      toWeaponId(undefined) === "cannon" &&
+      toWeaponId(42) === "cannon",
+    "a halozatrol barmi jöhet, hibat nem dobunk",
+  );
+  check(
+    "a ket ervenyes fegyver atmegy",
+    isWeaponId("cannon") && isWeaponId("machinegun"),
+    "cannon, machinegun",
+  );
+
+  // --- Tuzgyorsasag ---
+  {
+    const oneSecond = fireFor(1);
+    const expected = 1000 / MACHINEGUN.fireIntervalMs;
+    check(
+      "a tuzgyorsasag a beallitott utemet koveti",
+      Math.abs(oneSecond.shots - expected) <= 1,
+      `${oneSecond.shots} loves/mp (beallitva: ${expected.toFixed(1)})`,
+    );
+  }
+
+  // --- Tulmelegedes ---
+  {
+    const long = fireFor(10);
+    check(
+      "folyamatos tuz tulmelegedeshez vezet",
+      long.overheatedAt !== null,
+      long.overheatedAt === null
+        ? "sosem fullad le"
+        : `${long.overheatedAt.toFixed(1)} mp utan`,
+    );
+    // Ket iranybol kell szoritani: eleg hosszu sorozatot engedjen ahhoz,
+    // hogy a fegyver hasznalhato legyen, de ne annyit, hogy egyetlen
+    // gombnyomva tartas ket autot is kiloljon.
+    check(
+      "a tulmelegedes nem azonnal jon",
+      long.overheatedAt !== null && long.overheatedAt > 2,
+      `${long.overheatedAt?.toFixed(1)} mp -- eleg hosszu sorozatot enged`,
+    );
+    const burstDamage =
+      (long.overheatedAt ?? 0) * (1000 / MACHINEGUN.fireIntervalMs) * MACHINEGUN.damage;
+    check(
+      "egy sorozat nem lo ki ket teli autot",
+      burstDamage < 200,
+      `${burstDamage.toFixed(0)} sebzes egy sorozatban (egy auto: 100)`,
+    );
+
+    // A leallas erdemi buntetes legyen: 10 masodperc folyamatos
+    // nyomvatartas alatt jocskan kevesebb loves fer bele, mint amennyi
+    // korlatlan tuznel jönne.
+    const unlimited = (10 * 1000) / MACHINEGUN.fireIntervalMs;
+    check(
+      "a tulmelegedes erdemben visszafogja a tuzet",
+      long.shots < unlimited * 0.75,
+      `${long.shots} loves a korlatlan ${unlimited.toFixed(0)} helyett`,
+    );
+  }
+
+  // --- Kattintgatas nem gyorsabb a nyomva tartasnal ---
+  //
+  // A fegyver a nyomva tartasra keszult. Ha a le nem adott lovesek
+  // felhalmozodnanak, egy szunet utani gombnyomas azonnal kiadna egy
+  // egesz sorozatot -- merve NEGY lovest egyetlen tickben --, es a
+  // gyors kattintgatas jobb lenne a nyomva tartasnal. Pont a
+  // forditottja annak, amit a fegyver iger.
+  {
+    let state = idleMachinegun();
+    let now = 0;
+    const dtMs = 1000 / 60;
+    let tapShots = 0;
+    const taps = 10;
+
+    for (let tap = 0; tap < taps; tap++) {
+      // Egyetlen tick nyomva tartas...
+      now += dtMs;
+      const fired = stepMachinegun(state, true, now, dtMs);
+      state = fired.state;
+      tapShots += fired.shots;
+      // ...majd fel masodperc szunet.
+      for (let i = 0; i < 30; i++) {
+        now += dtMs;
+        state = stepMachinegun(state, false, now, dtMs).state;
+      }
+    }
+
+    check(
+      "kattintgatassal nem lehet tobb lovest kicsikarni",
+      tapShots <= taps,
+      `${tapShots} loves ${taps} kattintasbol`,
+    );
+  }
+  // --- Hules es ujraindulas ---
+  {
+    // Felfutunk tulmelegedesig, majd elengedjuk a gombot.
+    let state = idleMachinegun();
+    let now = 0;
+    const dtMs = 1000 / 60;
+    while (!state.overheated && now < 20000) {
+      now += dtMs;
+      state = stepMachinegun(state, true, now, dtMs).state;
+    }
+    const overheatHeat = state.heat;
+
+    let cooledAt: number | null = null;
+    const releasedAt = now;
+    while (cooledAt === null && now < releasedAt + 20000) {
+      now += dtMs;
+      state = stepMachinegun(state, false, now, dtMs).state;
+      if (!state.overheated) cooledAt = (now - releasedAt) / 1000;
+    }
+
+    check(
+      "tulmelegedeskor a hoszint a maximumon all",
+      overheatHeat >= MACHINEGUN.maxHeat - 0.01,
+      `${overheatHeat.toFixed(1)} / ${MACHINEGUN.maxHeat}`,
+    );
+    check(
+      "tulmelegedes utan ujra tuzelhet, de varni kell ra",
+      cooledAt !== null && cooledAt > 1 && cooledAt < 5,
+      cooledAt === null ? "sosem hult le" : `${cooledAt.toFixed(1)} mp mulva`,
+    );
+  }
+
+  // --- Tuz kozben nem indul ujra azonnal ---
+  {
+    let state = idleMachinegun();
+    let now = 0;
+    const dtMs = 1000 / 60;
+    while (!state.overheated && now < 20000) {
+      now += dtMs;
+      state = stepMachinegun(state, true, now, dtMs).state;
+    }
+    // Tovabb nyomva tartva NEM szabad lonie.
+    let shotsWhileOverheated = 0;
+    for (let i = 0; i < 30; i++) {
+      now += dtMs;
+      const r = stepMachinegun(state, true, now, dtMs);
+      state = r.state;
+      shotsWhileOverheated += r.shots;
+    }
+    check(
+      "tulmelegedve nem lo, akkor sem, ha nyomva tartjak",
+      shotsWhileOverheated === 0,
+      `${shotsWhileOverheated} loves fel masodperc alatt`,
+    );
+  }
+
+  // --- Celzasi irany: a kliens konvenciojanak MEGFORDITASA ---
+  {
+    const cases: [number, number, number][] = [
+      [0, 0, -10],
+      [10, 0, 0],
+      [-7, 3, 4],
+      [0, 5, -5],
+    ];
+    let worst = 0;
+    for (const [dx, dy, dz] of cases) {
+      const length = Math.hypot(dx, dy, dz);
+      const [yaw, pitch] = clientAim(dx, dy, dz);
+      const dir = aimDirection(yaw, pitch);
+      worst = Math.max(
+        worst,
+        Math.hypot(
+          dir[0] - dx / length,
+          dir[1] - dy / length,
+          dir[2] - dz / length,
+        ),
+      );
+    }
+    check(
+      "a celzasi irany visszafejtese pontos",
+      worst < 1e-9,
+      `legnagyobb elteres: ${worst.toExponential(1)}`,
+    );
+
+    // Kulon kimondva, mert egy elojel-hiba itt azt jelentene, hogy a
+    // gepfegyver a celkereszttel ELLENTETES iranyba lo.
+    const forward = aimDirection(0, 0);
+    check(
+      "nulla szognel elore (-Z) mutat",
+      Math.abs(forward[2] + 1) < 1e-9 && Math.abs(forward[0]) < 1e-9,
+      `[${forward.map((v) => v.toFixed(2)).join(", ")}]`,
+    );
+  }
+
+  // --- A loves a FEGYVERBOL indul, nem az autobol ---
+  //
+  // Ez jatek kozben azonnal lathato hiba volt: a nyomjelzo a
+  // lokharito magassagabol jott, nem a tetőn ülő csobol. A szam
+  // magaban keveset mond, ezert a KAROSSZERIA TETEJEHEZ merjuk.
+  {
+    const roofAboveCenter = CHASSIS.halfExtents.y;
+    const level: [number, number, number, number] = [0, 0, 0, 1];
+    const forward: [number, number, number] = [0, 0, -1];
+
+    const muzzle = muzzleWorldPosition([0, 0, 0], level, forward);
+    check(
+      "a csotorkolat a karosszeria TETEJE folott van",
+      muzzle[1] > roofAboveCenter,
+      muzzle[1].toFixed(2) + ' m a kozepponttol, a tetőszint ' + roofAboveCenter.toFixed(2) + ' m',
+    );
+    check(
+      "a torkolat elore all a fegyver forgaspontjatol",
+      Math.abs(muzzle[2] + MUZZLE_FORWARD) < 1e-9,
+      muzzle[2].toFixed(2) + ' m (-Z = elore)',
+    );
+
+    // Az auto elfordulasaval a fuggoleges eltolas is fordul: a fegyver
+    // a tetőre van rogzitve, nem a vilaghoz. Oldalara dolt autonal
+    // tehat OLDALT kell lennie, nem folotte.
+    const half = Math.SQRT1_2;
+    const rolled: [number, number, number, number] = [0, 0, half, half];
+    const tilted = muzzleWorldPosition([0, 0, 0], rolled, forward);
+    check(
+      "a fegyver az autoval egyutt dol",
+      Math.abs(tilted[1]) < 1e-6 && Math.abs(tilted[0]) > 0.5,
+      'oldalara dolve: x=' + tilted[0].toFixed(2) + ', y=' + tilted[1].toFixed(2),
+    );
+  }
+  // --- Szoras ---
+  {
+    const direction: [number, number, number] = [0, 0, -1];
+    let maxAngle = 0;
+    let sumX = 0;
+    let sumY = 0;
+    const samples = 4000;
+    for (let i = 0; i < samples; i++) {
+      const out = applySpread(
+        direction,
+        MACHINEGUN.spreadRad,
+        Math.random(),
+        Math.random(),
+      );
+      const dot = out[0] * direction[0] + out[1] * direction[1] + out[2] * direction[2];
+      maxAngle = Math.max(maxAngle, Math.acos(Math.min(1, dot)));
+      sumX += out[0];
+      sumY += out[1];
+    }
+    check(
+      "a szoras a beallitott kupon belul marad",
+      maxAngle <= MACHINEGUN.spreadRad + 1e-6,
+      `${(maxAngle * 1000).toFixed(2)} mrad (hatar: ${(MACHINEGUN.spreadRad * 1000).toFixed(2)})`,
+    );
+    // Ha a szoras elcsuszna egy iranyba, a fegyver rendszeresen melle
+    // hordana -- ez halkan rontana a celzast, hiba nelkul.
+    const biasX = Math.abs(sumX / samples);
+    const biasY = Math.abs(sumY / samples);
+    check(
+      "a szoras nem huz egy iranyba",
+      biasX < 0.001 && biasY < 0.001,
+      `atlagos elteres: x=${biasX.toExponential(1)}, y=${biasY.toExponential(1)}`,
+    );
+
+    const none = applySpread(direction, 0, 0.7, 0.3);
+    check(
+      "nulla szorasnal pontosan az eredeti irany marad",
+      none[0] === 0 && none[1] === 0 && none[2] === -1,
+      `[${none.join(", ")}]`,
+    );
+  }
+
+  console.log(
+    failures === 0
+      ? "\n=== Minden teszt OK ==="
+      : `\n=== ${failures} teszt ELBUKOTT ===`,
+  );
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main();

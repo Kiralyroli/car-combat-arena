@@ -8,6 +8,8 @@ import {
   ROCKET_RADIUS,
   ROCKET_SPAWN_OFFSET,
   ROCKET_SPEED,
+  muzzleWorldPosition,
+  weaponPivot,
   rocketHitsCar,
   segmentHitsBox,
   type ClientState,
@@ -76,11 +78,14 @@ export class RocketSimulation {
     target: [number, number, number],
     now: number,
   ): Rocket | null {
-    // Az IRANY a jatekos (szerver-oldali, hiteles) pozicioja es a
-    // celzott pont kozott all elo -- a kliens csak a celpontot adja.
-    let dx = target[0] - shooter.position[0];
-    let dy = target[1] - shooter.position[1];
-    let dz = target[2] - shooter.position[2];
+    // Az IRANY a FEGYVER forgaspontja es a celzott pont kozott all elo
+    // -- a kliens csak a celpontot adja. A forgaspont (nem az auto
+    // kozeppontja) azert kell, mert a lovedek is onnan indul: kulonben a
+    // ket egyenes parhuzamos lenne, es a raketa a celpont folott menne el.
+    const pivot = weaponPivot(shooter.position, shooter.rotation);
+    let dx = target[0] - pivot[0];
+    let dy = target[1] - pivot[1];
+    let dz = target[2] - pivot[2];
     const distance = Math.hypot(dx, dy, dz);
 
     // Ertelmetlen celzas (sajat magara, vagy hibas adat) eseten nem
@@ -91,12 +96,25 @@ export class RocketSimulation {
     dy /= distance;
     dz /= distance;
 
+    // A FEGYVER vonalabol indul, nem az auto kozeppontjabol: igy a
+    // raketa is a tetőn ülő vetőből jon ki, ugyanugy, mint a gepfegyver
+    // nyomjelzoje. Az elore-eltolas viszont nagyobb marad a
+    // csotorkolatnal (ROCKET_SPAWN_OFFSET): a raketanak sugara van es
+    // robban, tehat kozvetlenul az auto folott szuletve egy falhoz
+    // szorult jatekos sajat magat robbantana fel.
+    const spawn = muzzleWorldPosition(
+      shooter.position,
+      shooter.rotation,
+      [dx, dy, dz],
+      ROCKET_SPAWN_OFFSET,
+    );
+
     const rocket: Rocket = {
       id: this.nextId++,
       ownerId,
-      x: shooter.position[0] + dx * ROCKET_SPAWN_OFFSET,
-      y: shooter.position[1] + dy * ROCKET_SPAWN_OFFSET,
-      z: shooter.position[2] + dz * ROCKET_SPAWN_OFFSET,
+      x: spawn[0],
+      y: spawn[1],
+      z: spawn[2],
       // A kilovo auto sebessege HOZZAADODIK: kulonben a sajat rakétank
       // "leszakadna" rolunk, ha gyorsabban megyunk, mint a lovedek.
       vx: shooter.velocity[0] + dx * ROCKET_SPEED,

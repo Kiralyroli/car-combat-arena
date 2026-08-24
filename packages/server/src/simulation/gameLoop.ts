@@ -69,6 +69,10 @@ export class GameLoop {
         // A rakétak leptetese ITT tortenik, a fix lepeskozu tickben --
         // a lovedek palyaja igy fuggetlen a szerver terheltsegetol.
         room.stepRockets(FIXED_DT, now);
+        // A pozicio-elozmenyt a tuzeles ELOTT rogzitjuk: az azonnali
+        // talalatu fegyver ebbol tekeri vissza a celpontokat.
+        room.recordPoses(now);
+        room.stepWeapons(FIXED_DT, now, this.tick);
         room.respawnExpired(now);
         room.collectPickups(now);
         room.stepMatch(now);
@@ -96,6 +100,7 @@ export class GameLoop {
         time: now,
         players: room.buildSnapshot(),
         rockets: room.rockets.toSnapshot(),
+        tracers: room.drainTracers(),
         pickupsAvailable: room.pickupsAvailable(now),
         match: room.matchSnapshot(now),
       });

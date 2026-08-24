@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { PlayerSnapshot } from "@cca/shared";
+import { INTERP_DELAY_MS, type PlayerSnapshot } from "@cca/shared";
 
 /**
  * Tavoli jatekosok allapotanak pufferelese es interpolacioja.
@@ -18,16 +18,14 @@ import type { PlayerSnapshot } from "@cca/shared";
  */
 
 /**
- * Mennyivel a jelen mogott renderelunk. 20 Hz-nel 2 snapshot-nyi tartalek.
+ * Mennyivel a jelen mogott renderelunk.
  *
- * EXPORTALT, mert a rakétak ugyanezt a kesleltetest hasznaljak
- * (lasd remoteRockets.ts). A ketto NEM terhet el: ha a lovedek a
- * jelenbol, a celpont pedig 100 ms-mal korabbrol rajzolodna, akkor a
- * rakéta a kepernyon 100 ms-szal a celpont ELOTT jarna -- 55 m/s-nal
- * 5.5 m --, es a jatekos olyan talalatot latna, ami nem tortent meg
- * (vagy forditva). Egy timeline legyen, egy konstanssal.
+ * A SZERVERREL KOZOS konstans (lasd @cca/shared protocol.ts): a
+ * raketak ugyanebbol az idovonalbol rajzolodnak, es a szerver is ezzel
+ * szamol, amikor az azonnali talalatu fegyverhez visszatekeri a
+ * celpontokat. Egy timeline legyen, egy konstanssal.
  */
-export const INTERP_DELAY_MS = 100;
+export { INTERP_DELAY_MS };
 
 /** Ennel regebbi mintakra mar nincs szukseg. */
 const BUFFER_KEEP_MS = 1000;

@@ -332,6 +332,14 @@
         border-radius: 4px;
         background: rgba(1, 4, 9, 0.6);
       }
+      /*
+         A fegyver-cimke NEM a rogzitett 52 px-es szelesseget hasznalja:
+         abba a "GEPFEGYVER" nem fer bele, es rafolyt a mellette allo
+         ertekre. A meroknel (HP, BOOST, GUMIK) a fix szelesseg az
+         igazitas miatt kell -- itt nem.
+      */
+      #player-hud .weapon .cap { width: auto; }
+      #player-hud .weapon { min-width: 168px; justify-content: space-between; }
       #player-hud .weapon .state { font-size: 14px; color: #3fb950; }
       #player-hud .weapon.reloading .state { color: #d29922; }
 
@@ -418,6 +426,58 @@
         margin-top: 2px;
       }
       #lobby .joinrow { display: flex; gap: 8px; }
+
+      #respawn-pick {
+        position: fixed;
+        left: 50%;
+        top: 58%;
+        transform: translateX(-50%);
+        font-family: ui-monospace, monospace;
+        z-index: 40;
+      }
+      #respawn-pick .box {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 14px 16px;
+        background: rgba(13, 17, 23, 0.92);
+        border: 1px solid #4d5866;
+        border-radius: 9px;
+        min-width: 340px;
+      }
+      #respawn-pick .hdr {
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        color: #e6edf3;
+      }
+      #respawn-pick .hdr span { color: #e3b341; }
+      #respawn-pick .sub { font-size: 11px; color: #7d8590; }
+
+      /* Fegyvervalaszto: a lobbyban es a halal-kepernyon ugyanaz. */
+      .weapons { display: flex; gap: 8px; }
+      .weapons .weapon {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 9px 10px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 7px;
+        color: #9aa7b5;
+        font-family: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .weapons .weapon:hover { border-color: #4d5866; }
+      .weapons .weapon[aria-pressed="true"] {
+        border-color: #e3b341;
+        background: #1c1a12;
+        color: #e6edf3;
+      }
+      .weapons .wname { font-size: 13px; letter-spacing: 0.04em; }
+      .weapons .wdesc { font-size: 10px; line-height: 1.35; color: #7d8590; }
+      .weapons .weapon[aria-pressed="true"] .wname { color: #e3b341; }
       #room-list {
         display: flex;
         flex-direction: column;
@@ -580,6 +640,18 @@
         <label class="lbl" for="name-input">Neved</label>
         <input id="name-input" type="text" autocomplete="off" spellcheck="false" />
 
+        <label class="lbl">Fegyver</label>
+        <div id="weapon-pick" class="weapons">
+          <button type="button" class="weapon" data-weapon="cannon">
+            <span class="wname">Ágyú</span>
+            <span class="wdesc">Robbanás, kereket tör, lök. Lassú.</span>
+          </button>
+          <button type="button" class="weapon" data-weapon="machinegun">
+            <span class="wname">Gépfegyver</span>
+            <span class="wdesc">Azonnali találat, sűrű tűz. Túlmelegszik.</span>
+          </button>
+        </div>
+
         <div class="sep"></div>
 
         <button id="lobby-create" type="button" class="primary">Uj szoba</button>
@@ -611,6 +683,27 @@
     </div>
     </div>
 
+    <!--
+      Halal-kepernyo: az ujraszuletesre varva LEHET fegyvert valtani.
+      Menekules kozben nem -- ezert van itt, es nem a HUD-on.
+    -->
+    <div id="respawn-pick" hidden>
+      <div class="box">
+        <div class="hdr">ÚJJÁSZÜLETÉS <span id="respawn-in"></span></div>
+        <div class="sub">Most válthatsz fegyvert</div>
+        <div id="respawn-weapons" class="weapons">
+          <button type="button" class="weapon" data-weapon="cannon">
+            <span class="wname">Ágyú</span>
+            <span class="wdesc">Robbanás, kereket tör, lök</span>
+          </button>
+          <button type="button" class="weapon" data-weapon="machinegun">
+            <span class="wname">Gépfegyver</span>
+            <span class="wdesc">Azonnali találat, túlmelegszik</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div id="match-banner" hidden></div>
     <div id="match-result" hidden></div>
 
@@ -639,7 +732,7 @@
 
       <div class="stack right">
         <div class="weapon" id="weapon">
-          <span class="cap">RAKETA</span>
+          <span class="cap" id="weapon-name">AGYU</span>
           <span class="state" id="weapon-state">KESZ</span>
         </div>
         <div class="tyre-block">

@@ -1,0 +1,42 @@
+import type { WeaponId } from "@cca/shared";
+import { WeaponPicker } from "./weaponPicker";
+
+/**
+ * Fegyvervalasztas a halal-kepernyon.
+ *
+ * A valasztas a lobbyban dol el, de minden megsemmisules utan --
+ * amig az ujraszuletesre varunk -- meg lehet valtoztatni. Igy lehet
+ * alkalmazkodni ahhoz, ami a meccsen tortenik, de menekules kozben nem.
+ *
+ * A szerver ugyanezt a szabalyt ervenyesiti (lasd Room.setWeapon): ez a
+ * panel csak a KERES helye, nem a dontese. Ha a szerver elutasitja, a
+ * kovetkezo snapshot visszahozza a regi fegyvert, es a valaszto is arra
+ * all vissza -- nincs ket forras ugyanarra az adatra.
+ */
+export class RespawnWeaponPick {
+  private readonly root: HTMLElement;
+  private readonly picker: WeaponPicker;
+  private visible = false;
+
+  constructor(onSelect: (weapon: WeaponId) => void) {
+    const root = document.getElementById("respawn-pick");
+    if (!root) throw new Error("#respawn-pick nem talalhato");
+    this.root = root;
+    this.picker = new WeaponPicker("respawn-weapons", "cannon", onSelect);
+    this.root.hidden = true;
+  }
+
+  /**
+   * @param dead    Varunk-e eppen ujraszuletesre.
+   * @param weapon  A fegyver a SZERVER szerint.
+   */
+  update(dead: boolean, weapon: WeaponId): void {
+    if (dead !== this.visible) {
+      this.visible = dead;
+      this.root.hidden = !dead;
+    }
+    if (!dead) return;
+    // A szerver a mervado: ha elutasitotta a valtast, ide all vissza.
+    if (this.picker.value !== weapon) this.picker.set(weapon);
+  }
+}

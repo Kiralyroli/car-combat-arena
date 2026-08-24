@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
+  WEAPON_MOUNT,
   ARENA,
   CAMERA,
   CHASSIS,
@@ -30,12 +31,13 @@ const HP_BAR_HEIGHT = CHASSIS.halfExtents.y + 1.4;
 const NAME_TAG_HEIGHT = HP_BAR_HEIGHT + 0.7;
 
 /**
- * A rakétaveto magassaga a chassis KOZEPPONTJAHOZ kepest (m).
+ * A fegyver meretei a KOZOS forrasbol jonnek (WEAPON_MOUNT).
  *
- * A modell tetőteje kb. 1.45 m-re van a talajtol, a chassis kozeppontja
- * pedig halfExtents.y magasan -- a kettő kulonbsege adja a tetőszintet.
+ * Korabban itt sajat szamok alltak, a loves kiindulopontja pedig
+ * mashonnan szamolodott -- ezert jott a loves a lokharito magassagabol
+ * a tetőn ülő cso helyett. Egy forras, ket felhasznalo.
  */
-const LAUNCHER_HEIGHT = 1.45 - CHASSIS.halfExtents.y;
+const LAUNCHER_HEIGHT = WEAPON_MOUNT.height;
 
 /**
  * Egy tavoli (halozati) jatekos autoja.
@@ -257,7 +259,7 @@ export class SceneView {
     if (!this.launcherParts) {
       this.launcherParts = {
         base: new THREE.BoxGeometry(0.5, 0.16, 0.5),
-        tube: new THREE.CylinderGeometry(0.11, 0.13, 0.95, 10),
+        tube: new THREE.CylinderGeometry(0.11, 0.13, WEAPON_MOUNT.tubeLength, 10),
         material: new THREE.MeshStandardMaterial({
           color: 0x3a4048,
           roughness: 0.6,
@@ -277,7 +279,7 @@ export class SceneView {
 
     // A cső kicsit fentebb es elorebb ul az alapon.
     const tube = new THREE.Mesh(parts.tube, parts.material);
-    tube.position.set(0, 0.16, -0.2);
+    tube.position.set(0, WEAPON_MOUNT.tubeRise, -WEAPON_MOUNT.tubeForward);
     tube.castShadow = true;
     root.add(tube);
 
@@ -583,6 +585,78 @@ export class SceneView {
    * jatek 60+ fps-en -- kepkockankenti lepessel a kettő teljesen mas
    * hosszu robbanast adna.
    */
+  /**
+   * Nyomjelzo csik elettartama (ms).
+   *
+   * SZANDEKOSAN nagyon rovid: 11 loves/mp mellett igy egyszerre kb. egy
+   * csik latszik lovonkent, ami surun villano vonalsorozatnak olvasodik.
+   * Hosszabb elettartamnal folytonos, vastag gerenda lenne belole.
+   */
+  private static readonly TRACER_MS = 70;
+
+  private readonly tracers: {
+    line: THREE.Line;
+    material: THREE.LineBasicMaterial;
+    startedAt: number;
+  }[] = [];
+
+  private tracerTotal = 0;
+
+  /** Osszesen hany nyomjelzo indult -- MONOTON, a tesztek ebbol merik. */
+  get tracersSpawned(): number {
+    return this.tracerTotal;
+  }
+
+  /**
+   * Gepfegyver-loves kirajzolasa.
+   *
+   * A ket vegpontot a SZERVER adja: a csotorkolatot es azt a pontot,
+   * ahol a loves veget ert (auto, fal vagy a hatotav vege). Igy a csik
+   * pontosan addig tart, ameddig a talalat is szamitott -- nem a kliens
+   * talalgat.
+   */
+  spawnTracer(
+    from: [number, number, number],
+    to: [number, number, number],
+    hit: boolean,
+    now: number,
+  ): void {
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...from),
+      new THREE.Vector3(...to),
+    ]);
+    const material = new THREE.LineBasicMaterial({
+      // Talalatnal melegebb szin: a visszajelzes fontosabb, mint a
+      // realizmus -- lovoldozes kozben ebbol latni, hogy fog-e a celzas.
+      color: hit ? 0xffd070 : 0x9fd0ff,
+      transparent: true,
+      opacity: hit ? 1 : 0.7,
+      depthWrite: false,
+    });
+
+    const line = new THREE.Line(geometry, material);
+    this.scene.add(line);
+    this.tracers.push({ line, material, startedAt: now });
+    this.tracerTotal++;
+  }
+
+  /** A nyomjelzok halvanyitasa es eltakaritasa. */
+  updateTracers(now: number): void {
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const tracer = this.tracers[i];
+      const t = (now - tracer.startedAt) / SceneView.TRACER_MS;
+
+      if (t >= 1) {
+        this.scene.remove(tracer.line);
+        tracer.line.geometry.dispose();
+        tracer.material.dispose();
+        this.tracers.splice(i, 1);
+        continue;
+      }
+      tracer.material.opacity = (1 - t) * (tracer.material.color.r > 0.9 ? 1 : 0.7);
+    }
+  }
+
   updateExplosions(now: number): void {
     for (let i = this.explosions.length - 1; i >= 0; i--) {
       const fx = this.explosions[i];

@@ -1,4 +1,5 @@
 import { RocketSimulation, explosionDamageFor } from "../simulation/rockets";
+import { resolveHitscan } from "../simulation/machinegun";
 import {
   carsOverlap,
   IMPACT_COOLDOWN_MS,
@@ -23,6 +24,18 @@ import {
   survivorsOf,
   winnerOf,
   sanitizePlayerName,
+  aimDirection,
+  applySpread,
+  idleMachinegun,
+  stepMachinegun,
+  toWeaponId,
+  FIXED_DT,
+  INTERP_DELAY_MS,
+  MACHINEGUN,
+  muzzleWorldPosition,
+  type MachinegunState,
+  type TracerSnapshot,
+  type WeaponId,
   type ClientState,
   type PlayerSnapshot,
   type MatchPhase,
@@ -93,7 +106,47 @@ export interface ServerPlayer {
    * jelen. A megsemmisules ebbol von le egyet.
    */
   lives: number;
+  /**
+   * A valasztott fegyver.
+   *
+   * A lobbyban all be, es CSAK ujraszuleteskor valtoztathato (lasd
+   * setWeapon) -- menekules kozben nem lehet atvaltani arra, ami eppen
+   * jobban jonne.
+   */
+  weapon: WeaponId;
+  /** A gepfegyver hoszintje es tuzeles-utemezese. */
+  mg: MachinegunState;
+  /**
+   * A legutobb feldolgozott szerver-tick, amit a kliens visszajelzett;
+   * null, amig nem jelzett vissza semmit.
+   *
+   * Ebbol szamoljuk, mennyire regi vilagot lat -- lasd rewindMs.
+   */
+  ackTick: number | null;
+  /** Pozicio-elozmeny a visszatekereshez (legregibb elol). */
+  history: PoseSample[];
 }
+
+/** Egy korabbi allapot a visszatekereshez. */
+interface PoseSample {
+  t: number;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+}
+
+/**
+ * Ennel tovabb NEM tekerunk vissza (ms).
+ *
+ * Ket okbol kell felso hatar. Egyreszt egy nagyon rossz kapcsolatu
+ * jatekos kulonben masodperces regi allapotokra lohetne, ami a
+ * celpontnak eselytelen ("a sarkon mar rég befordultam, megis
+ * eltalalt"). Masreszt ez korlatozza, mennyit nyerhet valaki azzal, ha
+ * szandekosan keslelteti a visszajelzeset.
+ */
+const MAX_REWIND_MS = 400;
+
+/** Ennyi ideig tartjuk a pozicio-elozmenyt (ms). */
+const HISTORY_MS = 600;
 
 /** Rendezett parkulcs, hogy (a,b) es (b,a) ugyanaz legyen. */
 function pairKey(a: string, b: string): string {
@@ -108,6 +161,7 @@ const ORIGIN_STATE: ClientState = {
   susp: [0, 0, 0, 0],
   aimYaw: 0,
   aimPitch: 0,
+  firing: false,
 };
 
 export class Room {
@@ -138,6 +192,7 @@ export class Room {
     id: string,
     send: (message: ServerMessage) => void,
     name?: string,
+    weapon?: WeaponId,
   ): ServerPlayer {
     const spawn = this.allocateSpawn();
     const player: ServerPlayer = {
@@ -157,6 +212,11 @@ export class Room {
       deadSince: null,
       boostGrants: 0,
       lives: LIVES_PER_PLAYER,
+      // A fegyvert is a SZERVER ellenorzi: ismeretlen ertek eseten agyu.
+      weapon: toWeaponId(weapon),
+      mg: idleMachinegun(),
+      ackTick: null,
+      history: [],
     };
     this.players.set(id, player);
     return player;
@@ -435,6 +495,11 @@ export class Room {
     // Uj auto, uj esely: a kerekek is javulnak.
     player.wheels = healthyWheels();
     player.deadSince = null;
+    // Uj auto, hideg cso: a halal elotti melegedes ne kovesse at.
+    player.mg = idleMachinegun();
+    // A regi helyekre mar ne lehessen visszatekerve talalni: az
+    // ujraszuletes nagy ugras, es a kozbeeso "utvonal" nem letezett.
+    player.history = [];
     // Az ujraszuletes nagy ugras: ne szamitson teleportnak a kovetkezo
     // ellenorzesnel sem, es a hutes se hozza magaval a regi parokat.
     player.consecutiveRejects = 0;
@@ -555,6 +620,211 @@ export class Room {
     }
   }
 
+  // --- Gepfegyver (azonnali talalat) ---
+
+  /** A legutobbi snapshot ota leadott lovesek -- latvanyhoz. */
+  private tracers: TracerSnapshot[] = [];
+
+  /** A nyomjelzok atadasa a snapshotnak; utana torlodnek. */
+  drainTracers(): TracerSnapshot[] {
+    if (this.tracers.length === 0) return [];
+    const out = this.tracers;
+    this.tracers = [];
+    return out;
+  }
+
+  /**
+   * Fegyvervaltas.
+   *
+   * CSAK akkor engedjuk, ha a jatekos eppen nem el, vagy a meccs meg el
+   * sem kezdodott. Igy a valasztasnak tetje van: harc kozben nem lehet
+   * atvaltani arra, ami eppen jobban jonne.
+   *
+   * @returns sikerult-e
+   */
+  setWeapon(id: string, weapon: WeaponId): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    const allowed = player.deadSince !== null || this.phase !== "playing";
+    if (!allowed) return false;
+
+    player.weapon = toWeaponId(weapon);
+    player.mg = idleMachinegun();
+    return true;
+  }
+
+  /**
+   * A kliens visszajelzese arrol, melyik snapshotot dolgozta fel.
+   *
+   * Ebbol tudjuk, mennyire regi vilagot lat -- lasd stepWeapons.
+   */
+  noteAck(id: string, tick: number): void {
+    const player = this.players.get(id);
+    if (!player || !Number.isFinite(tick)) return;
+    // Csak elorefele: egy kesve erkezo csomag ne huzza vissza.
+    if (player.ackTick === null || tick > player.ackTick) {
+      player.ackTick = tick;
+    }
+  }
+
+  /**
+   * Pozicio-elozmeny rogzitese -- minden tickben, minden jatekosra.
+   *
+   * Ez az alapja a visszatekeresnek: ide jegyezzuk fel, mit HITT a
+   * szerver a jatekosok helyerol az egyes idopontokban. Pontosan ezt
+   * latta a tobbi kliens is, hiszen a snapshotok ebbol epultek.
+   */
+  recordPoses(now: number): void {
+    for (const player of this.players.values()) {
+      player.history.push({
+        t: now,
+        position: player.state.position,
+        rotation: player.state.rotation,
+      });
+      while (
+        player.history.length > 1 &&
+        now - player.history[0].t > HISTORY_MS
+      ) {
+        player.history.shift();
+      }
+    }
+  }
+
+  /**
+   * Hol volt a jatekos a megadott idopontban?
+   *
+   * A ket szomszedos minta kozott LINEARISAN interpolalunk. A
+   * legkozelebbi minta onmagaban nem lenne eleg: 60 Hz-es mintavetel
+   * mellett 30 m/s-nal ez fel meter hibat jelentene, ami egy 2.2 m
+   * szeles autonal mar szamit.
+   *
+   * A forgast a kesobbi mintabol vesszuk: 16 ms alatt a kocsi
+   * legfeljebb kb. 2.5 fokot fordul, ami a talalat szempontjabol nem
+   * merheto -- egy quaternion-interpolacio itt felesleges bonyolitas.
+   */
+  private poseAt(
+    player: ServerPlayer,
+    time: number,
+  ): { position: readonly number[]; rotation: readonly number[] } {
+    const history = player.history;
+    if (history.length === 0) {
+      return { position: player.state.position, rotation: player.state.rotation };
+    }
+    if (time >= history[history.length - 1].t) {
+      const last = history[history.length - 1];
+      return { position: last.position, rotation: last.rotation };
+    }
+    if (time <= history[0].t) {
+      return { position: history[0].position, rotation: history[0].rotation };
+    }
+
+    for (let i = history.length - 1; i > 0; i--) {
+      const later = history[i];
+      const earlier = history[i - 1];
+      if (earlier.t <= time && time <= later.t) {
+        const span = later.t - earlier.t;
+        const k = span > 0 ? (time - earlier.t) / span : 0;
+        return {
+          position: [
+            earlier.position[0] + (later.position[0] - earlier.position[0]) * k,
+            earlier.position[1] + (later.position[1] - earlier.position[1]) * k,
+            earlier.position[2] + (later.position[2] - earlier.position[2]) * k,
+          ],
+          rotation: later.rotation,
+        };
+      }
+    }
+    return { position: history[0].position, rotation: history[0].rotation };
+  }
+
+  /**
+   * Mennyivel latja a jatekos a multat (ms)?
+   *
+   * Ket resze van: a halozati ut (ezt a visszajelzett tick korabol
+   * tudjuk -- a szerver SAJAT feljegyzese alapjan, nem a kliens
+   * allitasa szerint), es az interpolacios kesleltetes, amivel a kliens
+   * szandekosan a jelen mogott rendereli a tobbieket.
+   */
+  private rewindMsFor(player: ServerPlayer, tick: number): number {
+    const staleTicks =
+      player.ackTick === null ? 0 : Math.max(0, tick - player.ackTick);
+    const networkMs = staleTicks * FIXED_DT * 1000;
+    return Math.min(MAX_REWIND_MS, networkMs + INTERP_DELAY_MS);
+  }
+
+  /**
+   * Gepfegyver-tuzeles: hoszint, tuzgyorsasag, talalat, sebzes.
+   *
+   * A raketaval ellentetben itt NINCS kulon kiloves-uzenet: a kliens az
+   * amugy is atmeno allapotaban jelzi, hogy nyomva tartja a gombot
+   * (ClientState.firing), a lovesek utemet pedig a szerver adja. Igy 11
+   * loves/mp mellett sem keletkezik uzenet-aradat, es a tuzgyorsasagot
+   * sem a kliens szabja meg.
+   */
+  stepWeapons(dt: number, now: number, tick: number): void {
+    const dtMs = dt * 1000;
+    const alive = [...this.players.values()].filter(
+      (p) => p.deadSince === null,
+    );
+
+    for (const player of this.players.values()) {
+      if (player.weapon !== "machinegun") {
+        // Agyunal nincs hoszint. Ha valaki visszavalt gepfegyverre, ne
+        // orokolje a korabbi melegedest.
+        if (player.mg.heat !== 0) player.mg = idleMachinegun();
+        continue;
+      }
+
+      const wantsToFire = player.deadSince === null && player.state.firing;
+      const result = stepMachinegun(player.mg, wantsToFire, now, dtMs);
+      player.mg = result.state;
+      if (result.shots === 0) continue;
+
+      // A jatekos oda lo, ahol a tobbieket LATJA -- tehat a multban.
+      const viewTime = now - this.rewindMsFor(player, tick);
+      const targets = alive
+        .filter((p) => p.id !== player.id)
+        .map((p) => ({ id: p.id, ...this.poseAt(p, viewTime) }));
+
+      const direction = aimDirection(
+        player.state.aimYaw,
+        player.state.aimPitch,
+      );
+      // A loves a CSOBOL indul, nem az auto kozeppontjabol. Korabban
+      // az utobbi volt, es a nyomjelzo lathatoan a lokharito magassagabol
+      // jott -- nem a tetőn ülő fegyverbol.
+      const origin = muzzleWorldPosition(
+        player.state.position,
+        player.state.rotation,
+        direction,
+      );
+
+      for (let i = 0; i < result.shots; i++) {
+        const spread = applySpread(
+          direction,
+          MACHINEGUN.spreadRad,
+          Math.random(),
+          Math.random(),
+        );
+        const shot = resolveHitscan(origin, spread, targets, player.id);
+
+        this.tracers.push({
+          ownerId: player.id,
+          from: shot.from,
+          to: shot.to,
+          hit: shot.hitId !== null,
+        });
+
+        if (shot.hitId === null) continue;
+        const victim = this.players.get(shot.hitId);
+        if (!victim || victim.deadSince !== null) continue;
+
+        victim.hp = Math.max(0, victim.hp - MACHINEGUN.damage);
+        this.markDeadIfDestroyed(victim, now);
+      }
+    }
+  }
+
   /**
    * A snapshot MINDEN jatekost tartalmaz, a cimzettet is -- a kliens
    * sajat magat szuri ki. Igy egyetlen kozos uzenet mehet mindenkinek,
@@ -578,6 +848,8 @@ export class Room {
         hp: player.hp,
         boostGrants: player.boostGrants,
         lives: player.lives,
+        weapon: player.weapon,
+        heat: player.mg.heat,
       });
     }
     return snapshot;

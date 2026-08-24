@@ -9,6 +9,11 @@ import {
   RapierBackend,
   type VehicleBackend,
   type WheelDamage,
+  DEFAULT_WEAPON,
+  toWeaponId,
+  weaponPivot,
+  type TracerSnapshot,
+  type WeaponId,
 } from "@cca/shared";
 import { Aim } from "./aim";
 import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
@@ -18,6 +23,8 @@ import { Lobby, RoomBadge } from "./lobby";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
 import { ExplosionQueue } from "./network/explosionQueue";
+import { DelayedQueue } from "./network/delayedQueue";
+import { RespawnWeaponPick } from "./respawnPick";
 import { BoostTank } from "./boostTank";
 import { SceneView } from "./scene";
 
@@ -75,6 +82,11 @@ async function main(): Promise<void> {
   let lastFireAt = -Infinity;
 
   function fireAtCrosshair(): void {
+    // CSAK az agyu sul el kattintasra. A gepfegyver a nyomva tartast
+    // jelzi az allapotaban (ClientState.firing), es a lovesek utemet a
+    // szerver adja -- lasd Room.stepWeapons. Ha itt is lonenk, minden
+    // kattintas egy EXTRA lovest adna a sorozathoz.
+    if (net.ownWeapon !== "cannon") return;
     const [ndcX, ndcY] = aim.ndc();
     net.fire(view.aimPointAt(ndcX, ndcY));
     lastFireAt = performance.now();
@@ -87,15 +99,22 @@ async function main(): Promise<void> {
    * Ebbol all be a tetőn levő rakétaveto, es ez megy at a halozaton is,
    * hogy a tobbiek lassak, merre celzunk.
    */
-  function currentAim(chassis: { position: [number, number, number] }): {
+  function currentAim(chassis: {
+    position: [number, number, number];
+    quaternion: [number, number, number, number];
+  }): {
     yaw: number;
     pitch: number;
   } {
     const [ndcX, ndcY] = aim.ndc();
     const target = view.aimPointAt(ndcX, ndcY);
-    const dx = target[0] - chassis.position[0];
-    const dy = target[1] - chassis.position[1];
-    const dz = target[2] - chassis.position[2];
+    // A FEGYVER forgaspontjabol, nem az auto kozeppontjabol: a loves is
+    // onnan indul (lasd weaponPivot). Ha a ketto elter, a loves
+    // parhuzamosan elmegy a celpont mellett.
+    const origin = weaponPivot(chassis.position, chassis.quaternion);
+    const dx = target[0] - origin[0];
+    const dy = target[1] - origin[1];
+    const dz = target[2] - origin[2];
     const horizontal = Math.hypot(dx, dz);
     return {
       // A szog KONVENCIOJA: az az Y-forgatas, amivel egy -Z fele nezo
@@ -177,10 +196,11 @@ async function main(): Promise<void> {
   function joinAndWait(
     roomCode: string | undefined,
     name: string,
+    weapon?: WeaponId,
   ): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       pendingJoin = resolve;
-      net.join(roomCode, name);
+      net.join(roomCode, name, weapon);
     });
   }
 
@@ -190,6 +210,21 @@ async function main(): Promise<void> {
    * idoben tortenik. Lasd ExplosionQueue.
    */
   const explosionQueue = new ExplosionQueue();
+
+  /**
+   * Gepfegyver-nyomjelzok, UGYANARRA a kesleltetett idovonalra igazitva,
+   * mint a robbanasok es az autok.
+   *
+   * A szerver a sajat idejeben szamolja a lovest, a kliens viszont a
+   * tobbieket 100 ms-mal korabbrol rajzolja. Kesleltetes nelkul a csik
+   * OTT jelenne meg, ahol a celpont MOST van -- a kepernyon viszont
+   * meg korabbi helyen all --, tehat a talalatok rendszeresen melle
+   * mutatnanak.
+   */
+  const tracerQueue = new DelayedQueue<TracerSnapshot>();
+
+  /** Fegyvervalaszto a halal-kepernyon (ujraszuletesig hasznalhato). */
+  const respawnPick = new RespawnWeaponPick((weapon) => net.selectWeapon(weapon));
 
   /** A boost-tartaly: a Shift ebbol fogy, a pickup ezt tolti. */
   const boostTank = new BoostTank();
@@ -240,6 +275,10 @@ async function main(): Promise<void> {
       // ellokne, mielott barmit latna belole. Egyben tartjuk az okot es
       // az okozatot.
       explosionQueue.push(position, performance.now());
+    },
+    onTracers: (tracers) => {
+      const now = performance.now();
+      for (const tracer of tracers) tracerQueue.push(tracer, now);
     },
     onRespawn: (position) => {
       // A szerver altal kiosztott helyre allunk, teli HP-val. A serult
@@ -302,6 +341,15 @@ async function main(): Promise<void> {
    * kenyelmes.
    */
   const directName = params.get("name");
+  /**
+   * Fegyver az URL-bol, a lobby MEGKERULESEVEL.
+   *
+   * Ugyanaz a minta, mint a "?name=" -- a kozvetlen meghivo-linkkel
+   * erkezoknek kenyelmes, es enelkul az automatizalt teszt sem tudna
+   * gepfegyverrel indulni: a meccs kozbeni valtast a szerver
+   * (helyesen) elutasitja.
+   */
+  const directWeapon = toWeaponId(params.get("weapon") ?? DEFAULT_WEAPON);
 
   try {
     await net.open(SERVER_URL, lagMs, jitterMs);
@@ -314,13 +362,17 @@ async function main(): Promise<void> {
 
   if (net.connected) {
     if (directName !== null) {
-      await joinAndWait(roomFromUrl || undefined, directName);
+      await joinAndWait(roomFromUrl || undefined, directName, directWeapon);
     } else {
       // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
       let message: string | undefined;
       for (;;) {
         const choice = await lobby.open(message);
-        const failure = await joinAndWait(choice.roomCode, choice.name);
+        const failure = await joinAndWait(
+          choice.roomCode,
+          choice.name,
+          choice.weapon,
+        );
         if (failure === null) break;
         message = failure;
       }
@@ -348,6 +400,9 @@ async function main(): Promise<void> {
   // Debug-hook: konzolbol es automatizalt ellenorzesbol is elerheto.
   (window as unknown as Record<string, unknown>).__spike = {
     backend,
+    // A celzas is elerheto: enelkul nem lehet megmerni, hogy a
+    // nyomva tartott gomb eljut-e a halozati allapotig.
+    aim,
     boostTank,
     view,
     net,
@@ -478,6 +533,10 @@ async function main(): Promise<void> {
         velocity: backend.getVelocity(),
         aimYaw: ownAim.yaw,
         aimPitch: ownAim.pitch,
+        // CSAK a gepfegyvernel van ertelme: az agyu kulon uzenettel sul
+        // el. Igy egy agyus jatekos nyomva tartott gombja nem terheli a
+        // szerver fegyver-agat.
+        firing: net.ownWeapon === "machinegun" && aim.isFiring,
         // Latvany-allapot a tavoli kerekekhez: a kormanyszog a
         // kormanyzott (elso) kerekrol, a rugohosszak mind a negyrol.
         steer: currWheels[0].steering,
@@ -591,6 +650,11 @@ async function main(): Promise<void> {
     }
     view.updateExplosions(renderNow);
 
+    for (const tracer of tracerQueue.due(renderNow)) {
+      view.spawnTracer(tracer.from, tracer.to, tracer.hit, renderNow);
+    }
+    view.updateTracers(renderNow);
+
     view.render();
 
     playerHud.update(
@@ -599,6 +663,16 @@ async function main(): Promise<void> {
       net.hp,
       boostTank.fraction,
       Math.max(0, ROCKET_COOLDOWN_MS - (renderNow - lastFireAt)),
+      net.ownWeapon,
+      net.heat,
+    );
+
+    // A halal-kepernyo fegyvervalasztoja: csak amig varunk az
+    // ujraszuletesre. Kiesett jatekosnak (nincs tobb elete) mar nincs
+    // ertelme, ezert ott sem latszik.
+    respawnPick.update(
+      net.hp !== null && net.hp <= 0 && (net.lives ?? 0) > 0,
+      net.ownWeapon,
     );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
     scoreboard.update(

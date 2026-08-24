@@ -1,8 +1,12 @@
 import {
+  DEFAULT_WEAPON,
   MAX_NAME_LENGTH,
   sanitizePlayerName,
+  toWeaponId,
   type RoomListing,
+  type WeaponId,
 } from "@cca/shared";
+import { WeaponPicker } from "./weaponPicker";
 
 /**
  * Lobby: nev megadasa es szoba-valasztas (terv 5. lepcso 1. pont).
@@ -19,6 +23,7 @@ import {
  */
 
 const STORAGE_KEY = "cca.playerName";
+const WEAPON_STORAGE_KEY = "cca.weapon";
 
 /** Milyen surun kerjuk ujra a szoba-listat, amig a lobby nyitva van. */
 const REFRESH_MS = 2000;
@@ -27,6 +32,7 @@ export interface LobbyChoice {
   name: string;
   /** Undefined = uj szobat nyitunk. */
   roomCode?: string;
+  weapon: WeaponId;
 }
 
 export class Lobby {
@@ -37,6 +43,7 @@ export class Lobby {
   private readonly joinBtn: HTMLButtonElement;
   private readonly list: HTMLElement;
   private readonly error: HTMLElement;
+  private readonly weapons: WeaponPicker;
 
   private resolve: ((choice: LobbyChoice) => void) | null = null;
   private refreshTimer: number | null = null;
@@ -50,6 +57,11 @@ export class Lobby {
     this.joinBtn = must("lobby-join") as HTMLButtonElement;
     this.list = must("room-list");
     this.error = must("lobby-error");
+    // A valasztas megmarad a kovetkezo meccsre is: aki egyszer eldontotte,
+    // ne kelljen minden belepesnel ujra rakattintania.
+    this.weapons = new WeaponPicker("weapon-pick", readStoredWeapon(), (weapon) =>
+      storeWeapon(weapon),
+    );
 
     // Ugyanaz a korlat, mint a szerveren -- igy a jatekos nem gepel be
     // olyan nevet, amit a szerver utana csendben levag.
@@ -72,8 +84,14 @@ export class Lobby {
    *
    * @param message Hibauzenet az elozo probalkozasrol, ha volt.
    */
+  /** A jelenleg valasztott fegyver -- a halal-kepernyo is ezt mutatja. */
+  get weapon(): WeaponId {
+    return this.weapons.value;
+  }
+
   open(message?: string): Promise<LobbyChoice> {
     this.nameInput.value = readStoredName();
+    this.weapons.set(readStoredWeapon());
     this.error.hidden = message === undefined;
     this.error.textContent = message ?? "";
     this.root.hidden = false;
@@ -146,7 +164,7 @@ export class Lobby {
     const name = sanitizePlayerName(this.nameInput.value, "HELYI");
     storeName(name);
     this.close();
-    this.resolve?.({ name, roomCode });
+    this.resolve?.({ name, roomCode, weapon: this.weapons.value });
     this.resolve = null;
   }
 
@@ -194,6 +212,23 @@ export class RoomBadge {
   show(roomCode: string): void {
     this.code.textContent = roomCode;
     this.root.hidden = false;
+  }
+}
+
+function readStoredWeapon(): WeaponId {
+  try {
+    return toWeaponId(localStorage.getItem(WEAPON_STORAGE_KEY) ?? DEFAULT_WEAPON);
+  } catch {
+    return DEFAULT_WEAPON;
+  }
+}
+
+function storeWeapon(weapon: WeaponId): void {
+  try {
+    localStorage.setItem(WEAPON_STORAGE_KEY, weapon);
+  } catch {
+    // Privat mod vagy letiltott tarolas: a valasztas csak erre a
+    // menetre ervenyes. Nem hiba, nem allitjuk meg.
   }
 }
 
