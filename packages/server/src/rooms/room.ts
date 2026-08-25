@@ -8,6 +8,8 @@ import {
   splitCollisionDamage,
   brokenMaskOf,
   damageWheel,
+  regenerateWheel,
+  WHEEL_REGEN_DELAY_MS,
   gripsOf,
   healthyWheels,
   wheelExplosionDamage,
@@ -81,6 +83,15 @@ export interface ServerPlayer {
    * lotavolsagon belul van egymastol (lasd spawn.ts).
    */
   protectedUntil: number;
+  /**
+   * Mikor sebzodott utoljara (performance.now); 0 = meg soha.
+   *
+   * A KEREK-REGENERALODAS orajat inditja ujra (lasd stepWheelRepair):
+   * gyogyulni csak harcon kivul lehet. MINDEN sebzes-utvonalnak
+   * frissitenie kell -- ha egy kimaradna, ott a jatekos tuz alatt is
+   * javulna.
+   */
+  lastDamagedAt: number;
   /**
    * A kivalasztott ujraszuletesi hely, amig halott -- vagy null.
    *
@@ -264,6 +275,7 @@ export class Room {
         [...this.players.values()].map((p) => p.color),
       ),
       protectedUntil: 0,
+      lastDamagedAt: 0,
       pendingSpawnIndex: null,
       deathPosition: null,
       spawnChosenManually: false,
@@ -356,6 +368,8 @@ export class Room {
 
         a.hp = Math.max(0, a.hp - damage.a);
         b.hp = Math.max(0, b.hp - damage.b);
+        if (damage.a > 0) a.lastDamagedAt = now;
+        if (damage.b > 0) b.lastDamagedAt = now;
         this.lastImpactAt.set(key, now);
 
         console.log(
@@ -548,6 +562,26 @@ export class Room {
   }
 
   /**
+   * Kerek-regeneralodas HARCON KIVUL.
+   *
+   * A serules igy nem vegleges egy eleten belul: aki kiszall es kibirja
+   * sebzes nelkul, visszakapja a kerekeit. A szabalyt (utem, kuszob) a
+   * shared regenerateWheel tartalmazza -- itt csak az dol el, KINEK jar.
+   *
+   * A megsemmisult jatekos kimarad: neki ugyis uj autoja lesz.
+   */
+  stepWheelRepair(dt: number, now: number): void {
+    for (const player of this.players.values()) {
+      if (player.deadSince !== null) continue;
+      if (now - player.lastDamagedAt < WHEEL_REGEN_DELAY_MS) continue;
+
+      for (let i = 0; i < player.wheels.length; i++) {
+        player.wheels[i] = regenerateWheel(player.wheels[i], dt * 1000);
+      }
+    }
+  }
+
+  /**
    * Lejart varakozasu jatekosok ujraszuletese.
    *
    * A szerver nem tudja "athelyezni" a kliens autojat -- a hibrid
@@ -598,6 +632,7 @@ export class Room {
     player.planKey = "";
     // Uj auto, uj esely: a kerekek is javulnak.
     player.wheels = healthyWheels();
+    player.lastDamagedAt = 0;
     player.deadSince = null;
     // Uj auto, hideg cso: a halal elotti melegedes ne kovesse at.
     player.mg = idleMachinegun();
@@ -627,6 +662,7 @@ export class Room {
   private damageWheelsFrom(
     position: readonly number[],
     player: ServerPlayer,
+    now: number,
   ): void {
     for (let i = 0; i < player.wheels.length; i++) {
       if (player.wheels[i].broken) continue;
@@ -647,6 +683,10 @@ export class Room {
 
       const before = player.wheels[i];
       player.wheels[i] = damageWheel(before, amount);
+      // A KEREK-sebzes is sebzes: enelkul egy olyan robbanas, ami csak a
+      // kerekeket erte (a karosszeriat mar nem), nem inditana ujra a
+      // regeneralodas orajat -- a jatekos tuz alatt gyogyulna.
+      player.lastDamagedAt = now;
       if (!before.broken && player.wheels[i].broken) {
         console.log(
           `[room ${this.code}] ${player.id.slice(0, 8)} ${i}. kereke letort`,
@@ -707,12 +747,13 @@ export class Room {
         // (terv 4.6). Ezt a body-sebzes ELOTT vegezzuk el, hogy a
         // megsemmisulessel egy tickben letort kerek is bekeruljon az
         // utolso snapshotba -- kulonben a roncs ep kerekekkel allna meg.
-        this.damageWheelsFrom(explosion.position, player);
+        this.damageWheelsFrom(explosion.position, player, now);
 
         const damage = explosionDamageFor(explosion, player.id, player.state);
         if (damage <= 0) continue;
 
         player.hp = Math.max(0, player.hp - damage);
+        player.lastDamagedAt = now;
         console.log(
           `[room ${this.code}] robbanas: ${player.id.slice(0, 8)} -${damage} HP (${player.hp})`,
         );
@@ -933,6 +974,7 @@ export class Room {
         if (this.isProtected(victim, now)) continue;
 
         victim.hp = Math.max(0, victim.hp - MACHINEGUN.damage);
+        victim.lastDamagedAt = now;
         this.markDeadIfDestroyed(victim, now);
       }
     }

@@ -346,12 +346,22 @@
       #player-hud .tyre-block { display: flex; align-items: center; gap: 10px; }
       #player-hud .tyres { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
       #player-hud .tyre {
+        /* Kicsit magasabb, mint eredetileg (12px): a szazalek-szam
+           kulonben nem fer el olvashatoan. */
         width: 34px;
-        height: 12px;
+        height: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         border: 1px solid #30363d;
         border-radius: 2px;
         background: #1f2429;
+        font-size: 9px;
+        line-height: 1;
+        color: #8b949e;
       }
+      #player-hud .tyre.hurt { color: #e6c07b; }
+      #player-hud .tyre.broken { color: #ffb4b0; }
       #player-hud .tyre.hurt { background: #6b4a1f; border-color: #9e6a03; }
       #player-hud .tyre.broken { background: #8b2f2a; border-color: #da3633; }
 

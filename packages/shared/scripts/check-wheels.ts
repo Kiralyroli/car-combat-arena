@@ -20,8 +20,12 @@ import {
   wheelExplosionDamage,
   wheelsFromNetwork,
   wheelWorldPosition,
+  regenerateWheel,
   WHEEL_MAX_HP,
+  WHEEL_REGEN_DELAY_MS,
+  WHEEL_REMOUNT_HP,
 } from "../src/wheelDamage";
+import { HEALTHY_WHEEL, type WheelDamage } from "../src/types";
 import { EXPLOSION_RADIUS } from "../src/rocket";
 import { WHEEL_LAYOUT } from "../src/config";
 
@@ -147,6 +151,76 @@ function main(): void {
     "mind a negy kerek egyezik",
   );
 
+  // --- REGENERALODAS harcon kivul ---
+  //
+  // A serules korabban visszafordithatatlan volt egy eleten belul: a
+  // kerekek csak ujraszuleteskor gyogyultak. Ez a jatekost arra
+  // osztonozte, hogy szandekosan meghaljon.
+  {
+    const step = (w: WheelDamage, seconds: number): WheelDamage =>
+      regenerateWheel(w, seconds * 1000);
+
+    // Ep kerek nem valtozik -- felesleges munkat sem vegzunk.
+    const healthy = { ...HEALTHY_WHEEL };
+    check(
+      "az ep kerek valtozatlan marad",
+      step(healthy, 1) === healthy,
+      "ugyanaz a peldany ter vissza",
+    );
+
+    // Serult (de nem tort) kerek gyogyul, es a tapadasa is no.
+    const hurt: WheelDamage = { hp: 50, broken: false, gripMultiplier: 0.5 };
+    const healed = step(hurt, 2);
+    check(
+      "a serult kerek gyogyul, a tapadasaval egyutt",
+      healed.hp > hurt.hp && healed.gripMultiplier > hurt.gripMultiplier,
+      `${hurt.hp} -> ${healed.hp.toFixed(0)} HP, tapadas ${healed.gripMultiplier.toFixed(2)}`,
+    );
+
+    // A LETORT kerek nem attol mukodik ujra, hogy elkezdett gyogyulni:
+    // a kuszob alatt a tapadasa NULLA marad. Enelkul a rakéta hatasa
+    // egy pillanat alatt semmive valna.
+    let broken: WheelDamage = { hp: 0, broken: true, gripMultiplier: 0 };
+    const early = step(broken, 1);
+    check(
+      "a letort kerek nem all vissza azonnal",
+      early.broken && early.gripMultiplier === 0,
+      `${early.hp.toFixed(0)} HP-nal meg tort (kuszob: ${WHEEL_REMOUNT_HP})`,
+    );
+
+    // ...de vegul visszaall.
+    let seconds = 0;
+    while (broken.broken && seconds < 30) {
+      broken = step(broken, 0.5);
+      seconds += 0.5;
+    }
+    check(
+      "a letort kerek vegul visszaall",
+      !broken.broken && seconds < 10,
+      `${seconds.toFixed(1)} mp alatt`,
+    );
+
+    // A teljes helyreallas erezhetoen tovabb tart -- kulonben a
+    // kiszallas kockazata nem allna aranyban a nyereseggel.
+    let full: WheelDamage = { hp: 0, broken: true, gripMultiplier: 0 };
+    let total = 0;
+    while (full.hp < WHEEL_MAX_HP && total < 60) {
+      full = step(full, 0.5);
+      total += 0.5;
+    }
+    check(
+      "a teljes helyreallas erdemi idot vesz igenybe",
+      total >= 8 && total <= 20,
+      `${total.toFixed(1)} mp nullarol, plusz ${WHEEL_REGEN_DELAY_MS / 1000} mp varakozas`,
+    );
+
+    // A gyogyulas nem lephet a maximum fole.
+    check(
+      "a gyogyulas nem lepi tul a maximumot",
+      full.hp === WHEEL_MAX_HP && full.gripMultiplier === 1,
+      `${full.hp} HP, tapadas ${full.gripMultiplier}`,
+    );
+  }
   console.log(
     failures === 0 ? "\n=== Minden teszt OK ===" : `\n=== ${failures} teszt ELBUKOTT ===`,
   );

@@ -82,6 +82,73 @@ export function damageWheel(current: WheelDamage, amount: number): WheelDamage {
   return { hp, broken: false, gripMultiplier: hp / WHEEL_MAX_HP };
 }
 
+/**
+ * Kerek-regeneralodas HARCON KIVUL.
+ *
+ * A PROBLEMA, amit megold: a kerek-serules korabban visszafordithatatlan
+ * volt egy eleten belul -- a kerekek CSAK ujraszuleteskor gyogyultak.
+ * Merve: ket letort kerekkel a vegsebesseg 108-rol 78 km/h-ra esik, a
+ * gyorsulas 62%-ra. Egy igy megsérult jatekos se menekulni, se uldozni
+ * nem tud, es semmi utja nincs vissza -- a legjobb lepese az, hogy
+ * SZANDEKOSAN meghal (friss auto, ep kerekek, vedelem), egyetlen elet
+ * araban. A jatek igy a feladast jutalmazta.
+ *
+ * A gyogyulasnak ARA van, ket ertelemben is:
+ *  - csak sebzes NELKUL indul (WHEEL_REGEN_DELAY_MS), tehat ki kell
+ *    szallni a harcbol -- kozben nem lősz es nem szerzel elonyt,
+ *  - a letort kerek nem all vissza azonnal hasznalhato allapotba:
+ *    WHEEL_REMOUNT_HP-ig NULLA a tapadasa. A rakéta hatasa igy
+ *    erezheto marad, csak nem vegleges.
+ */
+
+/**
+ * Sebzes utan ennyi ideig NEM regeneralodik (ms).
+ *
+ * Eleg hosszu ahhoz, hogy harc kozben ne induljon el: hat masodperc
+ * serules nelkul mar valodi kiszallas, nem egy szerencses masodperc.
+ */
+export const WHEEL_REGEN_DELAY_MS = 6000;
+
+/** Ennyi kerek-eletero ter vissza masodpercenkent. */
+export const WHEEL_REGEN_PER_SECOND = 10;
+
+/**
+ * A letort kerek ennyi eletero folott all vissza.
+ *
+ * Addig a tapadasa NULLA marad -- vagyis a leszakadt kerek nem attol
+ * mukodik ujra, hogy elkezdett gyogyulni. Nullarol ez ~4 masodperc, a
+ * teljes helyreallas ~10.
+ */
+export const WHEEL_REMOUNT_HP = 40;
+
+/**
+ * Egy kerek regeneralodasa `dtMs` ido alatt.
+ *
+ * SZANDEKOSAN tiszta fuggveny: a gyogyulas uteme a jatek egyensulyanak
+ * resze, tehat szerver es halozat nelkul is merhetonek kell lennie
+ * (lasd scripts/check-wheels.ts).
+ */
+export function regenerateWheel(
+  current: WheelDamage,
+  dtMs: number,
+): WheelDamage {
+  if (current.hp >= WHEEL_MAX_HP && !current.broken) return current;
+
+  const hp = Math.min(
+    WHEEL_MAX_HP,
+    current.hp + (WHEEL_REGEN_PER_SECOND * dtMs) / 1000,
+  );
+  const broken = current.broken && hp < WHEEL_REMOUNT_HP;
+
+  return {
+    hp,
+    broken,
+    // A meg vissza nem allt kerek nem tart: a gyogyulas onmagaban
+    // nem adja vissza a tapadast.
+    gripMultiplier: broken ? 0 : hp / WHEEL_MAX_HP,
+  };
+}
+
 /** Negy ep kerek -- uj jatekosnak es ujraszuleteskor. */
 export function healthyWheels(): WheelDamage[] {
   return WHEEL_LAYOUT.map(() => ({ ...HEALTHY_WHEEL }));

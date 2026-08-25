@@ -312,9 +312,25 @@ export class PlayerHud {
         : `${(rocketCooldownMs / 1000).toFixed(1)} s`;
     }
 
-    // Kerekek: csak allapotvaltaskor nyulunk a DOM-hoz.
+    // Kerekek: allapot ES szazalek.
+    //
+    // A szazalek a HASZNALHATO tapadast mutatja, nem a javitas
+    // elorehaladasat: a letort kerek 0%, amig vissza nem all (akkor is,
+    // ha kozben mar gyogyul). A jatekost az erdekli, hogy MOST mennyit
+    // er a kerek -- es arra ez a helyes valasz.
+    //
+    // A kulcs a szazalekot is tartalmazza, kulonben a lassu
+    // regeneralodas nem latszana: a harom durva allapot ("tort",
+    // "serult", "ep") vegig ugyanaz maradna.
+    const percents = wheels.map((w) =>
+      w.damage.broken ? 0 : Math.round(w.damage.gripMultiplier * 100),
+    );
     const key = wheels
-      .map((w) => (w.damage.broken ? "b" : w.damage.gripMultiplier < 0.99 ? "h" : "o"))
+      .map(
+        (w, i) =>
+          (w.damage.broken ? "b" : w.damage.gripMultiplier < 0.99 ? "h" : "o") +
+          percents[i],
+      )
       .join("");
     if (key === this.lastTyreKey) return;
     this.lastTyreKey = key;
@@ -329,9 +345,14 @@ export class PlayerHud {
       });
     }
     for (let i = 0; i < wheels.length; i++) {
-      this.tyreCells[i].className = `tyre ${
-        key[i] === "b" ? "broken" : key[i] === "h" ? "hurt" : ""
-      }`.trim();
+      const damage = wheels[i].damage;
+      const state = damage.broken
+        ? "broken"
+        : damage.gripMultiplier < 0.99
+          ? "hurt"
+          : "";
+      this.tyreCells[i].className = `tyre ${state}`.trim();
+      this.tyreCells[i].textContent = `${percents[i]}%`;
     }
   }
 }

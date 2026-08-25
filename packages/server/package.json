@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "check:pickup-effects": "tsx scripts/check-pickup-effects.ts",
     "check:spawn-protection": "tsx scripts/check-spawn-protection.ts",
+    "check:wheel-repair": "tsx scripts/check-wheel-repair.ts",
     "check:cache": "tsx scripts/check-cache.ts",
     "check:capacity": "tsx scripts/check-capacity.ts",
     "check:rewind": "tsx scripts/check-rewind.ts",
