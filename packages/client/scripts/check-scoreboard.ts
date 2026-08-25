@@ -20,7 +20,13 @@ function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
 }
 
-const row = (name: string, lives: number): ScoreRow => ({ id: name, name, lives });
+const row = (name: string, lives: number): ScoreRow => ({
+  id: name,
+  name,
+  lives,
+  // A szin a sorrendet nem befolyasolja -- ez a teszt a rendezest meri.
+  color: "blue",
+});
 const order = (rows: ScoreRow[]): string =>
   sortScoreRows(rows)
     .map((r) => `${r.name}(${r.lives})`)

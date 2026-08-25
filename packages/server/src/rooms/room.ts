@@ -35,6 +35,9 @@ import {
   idleMachinegun,
   stepMachinegun,
   toWeaponId,
+  assignCarColor,
+  toCarColorId,
+  type CarColorId,
   FIXED_DT,
   INTERP_DELAY_MS,
   MACHINEGUN,
@@ -99,6 +102,14 @@ export interface ServerPlayer {
    * Ilyenkor a szerver NEM irja felul az ajanlataval, meg akkor sem, ha
    * kozben veszelyesebbe valik: a sajat dontest nem vesszuk el tole.
    */
+  /**
+   * Az auto szine.
+   *
+   * A jatekos KERI a belepeskor, a szoba dönti el (lasd assignCarColor):
+   * ket jatekos nem kaphat ugyanolyat, kulonben pont a
+   * megkulonboztethetoseg veszne el, amiert az egesz keszult.
+   */
+  color: CarColorId;
   spawnChosenManually: boolean;
   /**
    * A legutobb ELKULDOTT terv lenyomata.
@@ -236,6 +247,7 @@ export class Room {
     send: (message: ServerMessage) => void,
     name?: string,
     weapon?: WeaponId,
+    color?: CarColorId,
   ): ServerPlayer {
     const spawn = this.allocateSpawn(null);
     const player: ServerPlayer = {
@@ -245,6 +257,12 @@ export class Room {
       send,
       state: spawn.state,
       spawnIndex: spawn.index,
+      // A szint a SZOBA osztja: a kliens keresebol csak akkor lesz
+      // valosag, ha meg szabad.
+      color: assignCarColor(
+        toCarColorId(color),
+        [...this.players.values()].map((p) => p.color),
+      ),
       protectedUntil: 0,
       pendingSpawnIndex: null,
       deathPosition: null,
@@ -946,6 +964,7 @@ export class Room {
         weapon: player.weapon,
         heat: player.mg.heat,
         protected: this.isProtected(player, now),
+        color: player.color,
       });
     }
     return snapshot;

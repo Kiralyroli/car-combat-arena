@@ -52,6 +52,7 @@ function player(t: number): PlayerSnapshot {
     lives: 3,
     weapon: "cannon",
     protected: false,
+    color: "blue",
     heat: 0,
   };
 }

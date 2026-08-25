@@ -182,6 +182,7 @@ export class WsServer {
       (msg) => send(conn.socket, msg),
       message.name,
       message.weapon,
+      message.color,
     );
 
     conn.playerId = playerId;
@@ -194,7 +195,10 @@ export class WsServer {
       players: room.playerIds().filter((id) => id !== playerId),
       spawn: player.state.position,
     });
-    room.broadcast({ type: "playerJoined", playerId }, playerId);
+    room.broadcast(
+      { type: "playerJoined", playerId, color: player.color },
+      playerId,
+    );
 
     console.log(
       `[room ${room.code}] csatlakozott ${playerId.slice(0, 8)} (${room.playerCount} jatekos)`,

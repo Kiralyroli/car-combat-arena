@@ -12,6 +12,10 @@ import {
   DEFAULT_WEAPON,
   RESPAWN_DELAY_MS,
   toWeaponId,
+  carColorHex,
+  toCarColorId,
+  DEFAULT_CAR_COLOR,
+  type CarColorId,
   weaponPivot,
   type TracerSnapshot,
   type WeaponId,
@@ -217,10 +221,11 @@ async function main(): Promise<void> {
     roomCode: string | undefined,
     name: string,
     weapon?: WeaponId,
+    color?: CarColorId,
   ): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       pendingJoin = resolve;
-      net.join(roomCode, name, weapon);
+      net.join(roomCode, name, weapon, color);
     });
   }
 
@@ -276,8 +281,8 @@ async function main(): Promise<void> {
       pendingJoin?.(null);
       pendingJoin = null;
     },
-    onPlayerJoined: (id) => {
-      view.addRemoteCar(id);
+    onPlayerJoined: (id, color) => {
+      view.addRemoteCar(id, carColorHex(color));
       // Fizikai test is kell hozza, kulonben athajtanank rajta.
       backend.addRemoteBody(id);
       hud.setNetworkStatus(`szoba ${net.roomCode}`, view.remoteCarCount);
@@ -373,6 +378,8 @@ async function main(): Promise<void> {
    * (helyesen) elutasitja.
    */
   const directWeapon = toWeaponId(params.get("weapon") ?? DEFAULT_WEAPON);
+  /** Autoszin az URL-bol -- ugyanaz a minta, mint a "?weapon=". */
+  const directColor = toCarColorId(params.get("color") ?? DEFAULT_CAR_COLOR);
 
   try {
     await net.open(SERVER_URL, lagMs, jitterMs);
@@ -385,7 +392,7 @@ async function main(): Promise<void> {
 
   if (net.connected) {
     if (directName !== null) {
-      await joinAndWait(roomFromUrl || undefined, directName, directWeapon);
+      await joinAndWait(roomFromUrl || undefined, directName, directWeapon, directColor);
     } else {
       // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
       let message: string | undefined;
@@ -395,6 +402,7 @@ async function main(): Promise<void> {
           choice.roomCode,
           choice.name,
           choice.weapon,
+          choice.color,
         );
         if (failure === null) break;
         message = failure;
@@ -464,6 +472,12 @@ async function main(): Promise<void> {
       // Megsemmisult autonak nincs teste -- lasd lentebb.
       if (net.remotes.hpOf(id) === 0) continue;
       view.setRemoteProtected(id, net.remotes.isProtected(id));
+
+      // A szin a SZERVERE: minden kepkockaban ellenorizzuk, hogy a
+      // kirajzolt auto egyezik-e vele. Igy barmelyik uton is erkezett
+      // (playerJoined vagy snapshot), a vege ugyanaz -- es minden
+      // kliens ugyanazt a jatekost ugyanolyannak latja.
+      view.setRemoteColor(id, carColorHex(net.remotes.colorOf(id)));
 
       const state = net.remotes.sample(id, now);
       if (!state) continue;
@@ -565,6 +579,7 @@ async function main(): Promise<void> {
     // A celzas iranya: a sajat vetőnk beallitasahoz ES a halozathoz.
     const ownAim = currentAim(currChassis);
     view.setOwnAim(ownAim.yaw, ownAim.pitch);
+    view.setOwnColor(carColorHex(net.ownColor));
 
     net.sendState(
       {
@@ -598,7 +613,7 @@ async function main(): Promise<void> {
       // Uj jatekos is felbukkanhat pusztan a snapshotbol (pl. ha a
       // playerJoined ertesites elveszne) -- ilyenkor itt potoljuk.
       if (!view.hasRemoteCar(id)) {
-        view.addRemoteCar(id);
+        view.addRemoteCar(id, carColorHex(net.remotes.colorOf(id)));
         backend.addRemoteBody(id);
       }
 
@@ -730,12 +745,20 @@ async function main(): Promise<void> {
         // A SAJAT sorunk a halozati rtegbol jon (a szerver tisztitott
         // neve es a szerver szerinti eletszam).
         ...(net.playerId && net.ownName
-          ? [{ id: net.playerId, name: net.ownName, lives: net.lives ?? 0 }]
+          ? [
+              {
+                id: net.playerId,
+                name: net.ownName,
+                lives: net.lives ?? 0,
+                color: net.ownColor,
+              },
+            ]
           : []),
         ...net.remotes.ids().map((id) => ({
           id,
           name: net.remotes.nameOf(id),
           lives: net.remotes.livesOf(id),
+          color: net.remotes.colorOf(id),
         })),
       ],
       net.playerId,

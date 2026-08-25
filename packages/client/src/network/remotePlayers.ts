@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { INTERP_DELAY_MS, type PlayerSnapshot } from "@cca/shared";
+import {
+  DEFAULT_CAR_COLOR,
+  INTERP_DELAY_MS,
+  type CarColorId,
+  type PlayerSnapshot,
+} from "@cca/shared";
 
 /**
  * Tavoli jatekosok allapotanak pufferelese es interpolacioja.
@@ -111,6 +116,16 @@ export class RemotePlayers {
    */
   private readonly protectedIds = new Set<string>();
 
+  /**
+   * Ki milyen szinu.
+   *
+   * A SZERVERTOL jon, minden snapshotban: igy minden kliens ugyanazt a
+   * jatekost ugyanolyannak latja. Korabban a fogado kliens osztotta ki
+   * a sajat sorrendje szerint, es ugyanaz a jatekos mas szinu volt
+   * minden kepernyon.
+   */
+  private readonly colors = new Map<string, CarColorId>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
@@ -127,6 +142,10 @@ export class RemotePlayers {
     return this.protectedIds.has(id);
   }
 
+  colorOf(id: string): CarColorId {
+    return this.colors.get(id) ?? DEFAULT_CAR_COLOR;
+  }
+
   ids(): string[] {
     return [...this.buffers.keys()];
   }
@@ -141,6 +160,7 @@ export class RemotePlayers {
     this.names.delete(id);
     this.lives.delete(id);
     this.protectedIds.delete(id);
+    this.colors.delete(id);
   }
 
   clear(): void {
@@ -149,6 +169,7 @@ export class RemotePlayers {
     this.names.clear();
     this.lives.clear();
     this.protectedIds.clear();
+    this.colors.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
@@ -157,6 +178,7 @@ export class RemotePlayers {
       this.hp.set(player.id, player.hp);
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
+      this.colors.set(player.id, player.color);
       if (player.protected) this.protectedIds.add(player.id);
       else this.protectedIds.delete(player.id);
 

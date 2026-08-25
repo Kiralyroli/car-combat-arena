@@ -16,6 +16,7 @@
  */
 
 import type { MatchPhase } from "../match";
+import type { CarColorId } from "../carColors";
 import type { WeaponId } from "../weapons";
 /** Halozati snapshot-rata (Hz). A fizika ettol fuggetlenul 60 Hz -- lasd 15.3. */
 export const SNAPSHOT_HZ = 20;
@@ -45,7 +46,7 @@ export const INTERP_DELAY_MS = 100;
  * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
  * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -148,6 +149,14 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * a HP-ja" elmenyt adna.
    */
   protected: boolean;
+  /**
+   * Az auto szine -- a SZERVER dontese szerint.
+   *
+   * Azert utazik a snapshotban, hogy MINDEN kliens ugyanazt lassa.
+   * Korabban a fogado kliens osztotta ki a sajat listaja szerint, es
+   * ugyanaz a jatekos mas szinu volt minden kepernyon.
+   */
+  color: CarColorId;
 }
 
 /**
@@ -195,6 +204,14 @@ export interface JoinMessage {
   name?: string;
   /** Valasztott fegyver; hianyzo vagy ismeretlen ertek eseten agyu. */
   weapon?: WeaponId;
+  /**
+   * Valasztott autoszin; hianyzo vagy ismeretlen ertek eseten sarga.
+   *
+   * KERES, nem dontes: ha a szobaban mar hasznalja valaki, a szerver
+   * mast ad (lasd assignCarColor). A vegleges szin a snapshotbol derul
+   * ki -- igy nincs ket forras ugyanarra az adatra.
+   */
+  color?: CarColorId;
 }
 
 /**
@@ -408,6 +425,14 @@ export interface SnapshotMessage {
 export interface PlayerJoinedMessage {
   type: "playerJoined";
   playerId: string;
+  /**
+   * Az uj jatekos szine.
+   *
+   * Azert megy MAR ITT, hogy az auto rogton a vegleges szinevel
+   * epuljon fel. A snapshotbol is kiderulne, de akkor egy pillanatra
+   * rossz szinnel villanna fel.
+   */
+  color: CarColorId;
 }
 
 export interface PlayerLeftMessage {

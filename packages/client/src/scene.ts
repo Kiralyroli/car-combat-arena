@@ -64,6 +64,13 @@ export interface RemoteVisualState {
 interface RemoteCar {
   /** A fizikai chassis-transzformot ez kapja. */
   wrapper: THREE.Object3D;
+  /**
+   * A karosszeria jelenlegi szine.
+   *
+   * Azert taroljuk, hogy a kepkockankenti igazitas (setRemoteColor)
+   * felesleges anyag-klonozas nelkul tudjon nemleges valaszt adni.
+   */
+  colorHex: number;
   /** Kerek-node-ok FL, FR, RL, RR sorrendben (= WHEEL_LAYOUT). */
   wheels: THREE.Object3D[];
   /** Kerekenkent a szinezendo mesh -- sajat anyag-peldannyal. */
@@ -790,10 +797,6 @@ export class SceneView {
    * Szinek a tavoli autokhoz, hogy megkulonboztethetok legyenek a
    * sajatunktol (ami a modell eredeti sarga szinet tartja meg).
    */
-  private static readonly REMOTE_COLORS = [
-    0x3b82f6, 0xef4444, 0x22c55e, 0xa855f7, 0xf97316, 0x14b8a6, 0xec4899,
-  ];
-
   /**
    * HP-sav egy tavoli auto fole.
    *
@@ -1007,6 +1010,72 @@ export class SceneView {
     for (const wheel of this.wheelGroups) wheel.visible = visible;
   }
 
+  /**
+   * A karosszeria atszinezese.
+   *
+   * Az anyag SAJAT PELDANYT kap: a betoltott modell anyagain minden
+   * auto osztozik (a clone(true) csak az objektum-grafot masolja), tehat
+   * a helyben valo atszinezes az OSSZES tobbi autora atterjedne.
+   *
+   * Csak a "Body" nevu anyagokat erinti -- a lampak, uveg es gumik
+   * maradnak eredetiben.
+   */
+  private tintBody(root: THREE.Object3D, hex: number): void {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const material = mesh.material;
+      if (Array.isArray(material)) return; // lampak: hagyjuk eredetiben
+      if (!(material as THREE.MeshStandardMaterial).name.startsWith("Body")) return;
+      const tinted = (material as THREE.MeshStandardMaterial).clone();
+      tinted.color.setHex(hex);
+      // A karosszeria-textura (SedanYellow) elnyomna a szinezest.
+      tinted.map = null;
+      mesh.material = tinted;
+    });
+  }
+
+  /**
+   * Egy tavoli auto szinenek igazitasa a szerverhez.
+   *
+   * Kepkockankent hivhato: ha nem valtozott, azonnal visszater. AZERT
+   * fut folyamatosan, mert a szin tobb uton is megerkezhet (playerJoined
+   * uzenet vagy snapshot), es a "joined" uzenet a mar bent levokrol meg
+   * nem hozza -- igy barmelyik ut is marad el, a szin helyreall.
+   */
+  setRemoteColor(id: string, hex: number): void {
+    const car = this.remoteCars.get(id);
+    if (!car || car.colorHex === hex) return;
+    car.colorHex = hex;
+    this.tintBody(car.wrapper, hex);
+  }
+
+  /**
+   * Ahogy EZ a kliens latja egy tavoli auto szinet -- vagy null.
+   *
+   * A tesztek ebbol ellenorzik, hogy ket kulon kliens ugyanazt latja-e;
+   * a jatek maga nem hasznalja.
+   */
+  remoteCarColor(id: string): number | null {
+    return this.remoteCars.get(id)?.colorHex ?? null;
+  }
+
+  private ownColorHex: number | null = null;
+
+  /**
+   * A SAJAT autonk szine.
+   *
+   * A szerver dönti el (lasd assignCarColor), tehat csak a belepes utan
+   * derul ki -- az auto viszont mar a betolteskor felepul. Ezert kesobb
+   * szinezzuk at, es csak akkor, ha tenylegesen valtozott: minden hivas
+   * uj anyag-peldanyt keszitene.
+   */
+  setOwnColor(hex: number): void {
+    if (hex === this.ownColorHex) return;
+    this.ownColorHex = hex;
+    this.tintBody(this.chassisMesh, hex);
+  }
+
   /** Latszik-e a sajat autonk -- a tesztek ezt olvassak. */
   get ownCarVisible(): boolean {
     return this.chassisMesh.visible;
@@ -1022,28 +1091,13 @@ export class SceneView {
    * teljes klon egy wrapperbe kerul, -halfExtents.y eltolassal
    * (ugyanaz a korrekcio, mint a sajat autonknal).
    */
-  addRemoteCar(id: string): void {
+  addRemoteCar(id: string, colorHex: number): void {
     if (this.remoteCars.has(id)) return;
 
     const car = this.remoteTemplate.clone(true);
     car.position.y -= CHASSIS.halfExtents.y;
 
-    // A karosszeria-anyag sajat peldanya kell, kulonben az atszinezes
-    // az osszes tobbi autora (es a sajatunkra) is atterjedne.
-    const colorIndex = this.remoteCars.size % SceneView.REMOTE_COLORS.length;
-    const color = SceneView.REMOTE_COLORS[colorIndex];
-    car.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const material = mesh.material;
-      if (Array.isArray(material)) return; // lampak: hagyjuk eredetiben
-      if (!(material as THREE.MeshStandardMaterial).name.startsWith("Body")) return;
-      const tinted = (material as THREE.MeshStandardMaterial).clone();
-      tinted.color.setHex(color);
-      // A karosszeria-textura (SedanYellow) elnyomna a szinezest.
-      tinted.map = null;
-      mesh.material = tinted;
-    });
+    this.tintBody(car, colorHex);
 
     const wrapper = new THREE.Group();
     wrapper.add(car);
@@ -1091,6 +1145,7 @@ export class SceneView {
 
     this.remoteCars.set(id, {
       wrapper,
+      colorHex,
       wheels,
       wheelMeshes,
       wheelRestY,

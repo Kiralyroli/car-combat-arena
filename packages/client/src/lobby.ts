@@ -1,12 +1,16 @@
 import {
+  DEFAULT_CAR_COLOR,
   DEFAULT_WEAPON,
   MAX_NAME_LENGTH,
   sanitizePlayerName,
   toWeaponId,
   type RoomListing,
+  toCarColorId,
+  type CarColorId,
   type WeaponId,
 } from "@cca/shared";
 import { WeaponPicker } from "./weaponPicker";
+import { ColorPicker } from "./colorPicker";
 
 /**
  * Lobby: nev megadasa es szoba-valasztas (terv 5. lepcso 1. pont).
@@ -24,6 +28,7 @@ import { WeaponPicker } from "./weaponPicker";
 
 const STORAGE_KEY = "cca.playerName";
 const WEAPON_STORAGE_KEY = "cca.weapon";
+const COLOR_STORAGE_KEY = "cca.color";
 
 /** Milyen surun kerjuk ujra a szoba-listat, amig a lobby nyitva van. */
 const REFRESH_MS = 2000;
@@ -33,6 +38,7 @@ export interface LobbyChoice {
   /** Undefined = uj szobat nyitunk. */
   roomCode?: string;
   weapon: WeaponId;
+  color: CarColorId;
 }
 
 export class Lobby {
@@ -44,6 +50,7 @@ export class Lobby {
   private readonly list: HTMLElement;
   private readonly error: HTMLElement;
   private readonly weapons: WeaponPicker;
+  private readonly colors: ColorPicker;
 
   private resolve: ((choice: LobbyChoice) => void) | null = null;
   private refreshTimer: number | null = null;
@@ -61,6 +68,9 @@ export class Lobby {
     // ne kelljen minden belepesnel ujra rakattintania.
     this.weapons = new WeaponPicker("weapon-pick", readStoredWeapon(), (weapon) =>
       storeWeapon(weapon),
+    );
+    this.colors = new ColorPicker("color-pick", readStoredColor(), (color) =>
+      storeColor(color),
     );
 
     // Ugyanaz a korlat, mint a szerveren -- igy a jatekos nem gepel be
@@ -92,6 +102,7 @@ export class Lobby {
   open(message?: string): Promise<LobbyChoice> {
     this.nameInput.value = readStoredName();
     this.weapons.set(readStoredWeapon());
+    this.colors.set(readStoredColor());
     this.error.hidden = message === undefined;
     this.error.textContent = message ?? "";
     this.root.hidden = false;
@@ -164,7 +175,12 @@ export class Lobby {
     const name = sanitizePlayerName(this.nameInput.value, "HELYI");
     storeName(name);
     this.close();
-    this.resolve?.({ name, roomCode, weapon: this.weapons.value });
+    this.resolve?.({
+      name,
+      roomCode,
+      weapon: this.weapons.value,
+      color: this.colors.value,
+    });
     this.resolve = null;
   }
 
@@ -212,6 +228,23 @@ export class RoomBadge {
   show(roomCode: string): void {
     this.code.textContent = roomCode;
     this.root.hidden = false;
+  }
+}
+
+function readStoredColor(): CarColorId {
+  try {
+    return toCarColorId(localStorage.getItem(COLOR_STORAGE_KEY) ?? DEFAULT_CAR_COLOR);
+  } catch {
+    return DEFAULT_CAR_COLOR;
+  }
+}
+
+function storeColor(color: CarColorId): void {
+  try {
+    localStorage.setItem(COLOR_STORAGE_KEY, color);
+  } catch {
+    // Privat mod vagy letiltott tarolas: a valasztas csak erre a
+    // menetre ervenyes. Nem hiba, nem allitjuk meg.
   }
 }
 

@@ -387,8 +387,18 @@
       }
       #scoreboard .row {
         display: flex;
-        justify-content: space-between;
-        gap: 14px;
+        /* A szinpotty a nev MELLETT maradjon, ne szakadjon el tole: a
+           nev veszi fel a maradek helyet, igy az eletszam megy jobbra. */
+        align-items: center;
+        gap: 8px;
+      }
+      #scoreboard .nm { flex: 1; }
+      #scoreboard .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+        /* A szint a JS allitja, a kozos CAR_COLORS listabol. */
       }
       #scoreboard .row.self .nm { color: #f0a020; font-weight: bold; }
       #scoreboard .row.out .nm,
@@ -461,6 +471,29 @@
       #respawn-pick .sub { font-size: 11px; color: #7d8590; }
 
       /* Fegyvervalaszto: a lobbyban es a halal-kepernyon ugyanaz. */
+      /* Autoszin-valaszto: szines korok, kivalasztva keretezve. */
+      .colors { display: flex; gap: 7px; flex-wrap: wrap; }
+      /*
+         Az azonosito-alapu "#lobby button" szabaly (border-radius: 5px)
+         erosebb, mint egy puszta osztaly -- ezert kell ide is az id,
+         kulonben a korok lekerekitett negyzetnek latszanak.
+      */
+      #lobby .colors button {
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border-radius: 50%;
+        border: 2px solid #30363d;
+        cursor: pointer;
+        /* A szint a JS allitja a kozos CAR_COLORS listabol -- itt csak
+           a keret es a meret dol el. */
+      }
+      #lobby .colors button:hover { border-color: #7d8590; }
+      #lobby .colors button[aria-pressed="true"] {
+        border-color: #e6edf3;
+        box-shadow: 0 0 0 2px #0d1117, 0 0 0 4px #e3b341;
+      }
+
       .weapons { display: flex; gap: 8px; }
       .weapons .weapon {
         flex: 1;
@@ -646,6 +679,9 @@
 
         <label class="lbl" for="name-input">Neved</label>
         <input id="name-input" type="text" autocomplete="off" spellcheck="false" />
+
+        <label class="lbl">Autó színe</label>
+        <div id="color-pick" class="colors"></div>
 
         <label class="lbl">Fegyver</label>
         <div id="weapon-pick" class="weapons">

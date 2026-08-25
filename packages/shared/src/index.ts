@@ -24,6 +24,7 @@ export * from "./combat";
 export * from "./rocket";
 export * from "./weapons";
 export * from "./spawn";
+export * from "./carColors";
 export * from "./physics/arcade";
 export * from "./physics/rapier";
 export * from "./net/protocol";

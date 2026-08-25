@@ -1,4 +1,11 @@
-import type { MatchSnapshot, Telemetry, WeaponId, WheelReadout } from "@cca/shared";
+import {
+  carColorHex,
+  type CarColorId,
+  type MatchSnapshot,
+  type Telemetry,
+  type WeaponId,
+  type WheelReadout,
+} from "@cca/shared";
 
 /**
  * FEJLESZTOI panel: technikai szamlalok (fps, ping, fizikai lepesido,
@@ -351,6 +358,8 @@ export interface ScoreRow {
   id: string;
   name: string;
   lives: number;
+  /** Az auto szine -- ez koti a nevsort a palyan latott kocsihoz. */
+  color: CarColorId;
 }
 
 /**
@@ -389,7 +398,7 @@ export class Scoreboard {
   update(rows: ScoreRow[], ownId: string | null): void {
     const sorted = sortScoreRows(rows);
 
-    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}`).join("|");
+    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.color}`).join("|");
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -408,6 +417,13 @@ export class Scoreboard {
       if (row.id === ownId) line.classList.add("self");
       if (row.lives <= 0) line.classList.add("out");
 
+      // Szinpotty a nev elott: EZ koti ossze a listat a palyan latott
+      // autoval. E nelkul a nevsor csak nevek listaja -- a jatekos nem
+      // tudja, melyik kocsi kicsoda.
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = `#${carColorHex(row.color).toString(16).padStart(6, "0")}`;
+
       const name = document.createElement("span");
       name.className = "nm";
       // SZOVEGKENT tesszuk be, nem innerHTML-lel: a nev egy MASIK
@@ -418,7 +434,7 @@ export class Scoreboard {
       lives.className = "lv";
       lives.textContent = row.lives > 0 ? "●".repeat(row.lives) : "KIESETT";
 
-      line.append(name, lives);
+      line.append(dot, name, lives);
       this.el.appendChild(line);
     }
   }
