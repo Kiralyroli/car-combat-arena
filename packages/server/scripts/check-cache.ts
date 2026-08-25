@@ -23,8 +23,18 @@ function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
 }
 
+/**
+ * Minden keres LEZARJA a kapcsolatot.
+ *
+ * A "Connection: close" nelkul a fetch eletben tartja a kapcsolatot, es
+ * a process.exit() nyitott kezelokkel fut le -- Windowson ez libuv
+ * assertion-nel osszeomlott (a teszt maga hibatlanul lefutott, de a
+ * kilepes buktatta a check:all-t).
+ */
+const CLOSE = { headers: { connection: "close" } } as const;
+
 async function headerOf(path: string, name: string): Promise<string | null> {
-  const res = await fetch(`${URL}${path}`);
+  const res = await fetch(`${URL}${path}`, CLOSE);
   if (!res.ok) return null;
   // A torzset elolvassuk, kulonben a kapcsolat nyitva maradhat.
   await res.arrayBuffer();
@@ -46,7 +56,7 @@ async function main(): Promise<void> {
   //
   // A nevet az index.html-bol olvassuk ki, nem beegetve: minden build
   // mas hasitast ad.
-  const page = await (await fetch(`${URL}/`)).text();
+  const page = await (await fetch(`${URL}/`, CLOSE)).text();
   const asset = page.match(/\/assets\/[A-Za-z0-9._-]+\.js/)?.[0] ?? null;
   check(
     "az oldal hasitott nevu csomagra hivatkozik",
@@ -68,10 +78,14 @@ async function main(): Promise<void> {
       ? "\n=== Minden teszt OK ==="
       : `\n=== ${failures} teszt ELBUKOTT ===`,
   );
-  process.exit(failures === 0 ? 0 : 1);
+  // SZANDEKOSAN nem process.exit(): a fetch mogotti kapcsolat-kezelo
+  // meg nyitva lehet, es a kenyszeritett kilepes Windowson libuv
+  // assertionnel osszeomlik -- a teszt maga hibatlanul lefut, de a
+  // check:all elbukik rajta. Igy a folyamat magatol fejezodik be.
+  process.exitCode = failures === 0 ? 0 : 1;
 }
 
 main().catch((err: unknown) => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = 1;
 });

@@ -64,7 +64,7 @@ const ARENA_LIMIT =
  * kepernyojen a REGI helyen ragadna -- lathatoan elromlott jatek egy
  * teljesen szabalyos muvelet utan.
  */
-const SPAWN_SNAP_RADIUS = 4;
+export const SPAWN_SNAP_RADIUS = 4;
 
 /** Minden ervenyes ujraszuletesi pont (szerver-kiosztott + alapertelmezett). */
 const RESPAWN_POINTS = [...SPAWN_POINTS, CHASSIS.spawn];

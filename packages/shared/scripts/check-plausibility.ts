@@ -11,8 +11,12 @@
  *
  * Futtatas: npm run check:plausibility
  */
-import { CHASSIS, SPAWN_POINTS } from "../src/config";
-import { checkPlausibility, MAX_PLAUSIBLE_SPEED } from "../src/net/plausibility";
+import { ARENA_HALF, CHASSIS, SPAWN_POINTS } from "../src/config";
+import {
+  checkPlausibility,
+  MAX_PLAUSIBLE_SPEED,
+  SPAWN_SNAP_RADIUS,
+} from "../src/net/plausibility";
 import type { ClientState } from "../src/net/protocol";
 import { RapierBackend } from "../src/physics/rapier";
 import { FIXED_DT } from "../src/config";
@@ -39,6 +43,20 @@ function state(
     aimPitch: 0,
     firing: false,
   };
+}
+
+/**
+ * Olyan x koordinata, ami a palyan belul van, de MINDEN spawn-ponttol
+ * tavol -- igy a teleport-ellenorzest nem zavarja meg a spawn-kivetel.
+ */
+function farFromSpawns(): number {
+  for (let x = 21; x < ARENA_HALF - 5; x += 1) {
+    const clear = SPAWN_POINTS.every(
+      (s) => Math.hypot(x - s.x, 0 - s.z) > SPAWN_SNAP_RADIUS + 10,
+    );
+    if (clear) return x;
+  }
+  throw new Error("nincs spawn-pontoktol tavoli hely a mereshez");
 }
 
 async function main(): Promise<void> {
@@ -77,11 +95,19 @@ async function main(): Promise<void> {
     `${MAX_PLAUSIBLE_SPEED * 3} m/s`,
   );
 
-  const teleport = state([35, 1, 35]);
+  // A celpontot SZAMOLJUK, nem beegetjuk.
+  //
+  // A plauzibilitas SZANDEKOSAN elfogadja a spawn-pont koruli ugrast (az
+  // ujraszuletes igy mukodik). A korabbi, beegetett (35, 35) a 80 m-es
+  // palyan meg ures terulet volt, a 120 m-esen viszont egy spawn-pont
+  // (33, 33) melle esett -- a teszt igy azt "merte", hogy a szerver
+  // elfogadja a szabalyos ujraszuletest, es elbukott.
+  const jumpX = farFromSpawns();
+  const teleport = state([jumpX, 1, 0]);
   check(
     "teleport elutasitva",
     !checkPlausibility(origin, teleport, 0.05).ok,
-    "~49 m egyetlen snapshot alatt",
+    `~${jumpX} m egyetlen snapshot alatt, spawn-pontoktol tavol`,
   );
 
   const badRotation: ClientState = { ...state([0, 1, 0]), rotation: [5, 5, 5, 5] };

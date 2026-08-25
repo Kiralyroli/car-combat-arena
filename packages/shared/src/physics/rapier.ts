@@ -2,6 +2,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import {
   ARCADE,
   ARENA,
+  type ArenaBox,
   CHASSIS,
   GRAVITY,
   RECOVERY,
@@ -231,19 +232,24 @@ export class RapierBackend implements VehicleBackend {
   private stepMsAvg = 0;
   private stepsLastFrame = 0;
 
-  async init(): Promise<void> {
+  /**
+   * @param options.arena Melyik palyat epitse fel. Alapertelmezetten a
+   *   teljes ARENA; a vezetes-meresek a BARE_ARENA-t adjak at, mert azok
+   *   a fizikat merik, nem a palya elrendezeset.
+   */
+  async init(options?: { arena?: readonly ArenaBox[] }): Promise<void> {
     await RAPIER.init();
 
     this.world = new RAPIER.World(GRAVITY);
     // Fix lepeskoz -- lasd projekt-terv 15.3.
     this.world.timestep = 1 / 60;
 
-    this.buildArena();
+    this.buildArena(options?.arena ?? ARENA);
     this.buildVehicle();
   }
 
-  private buildArena(): void {
-    for (const box of ARENA) {
+  private buildArena(boxes: readonly ArenaBox[]): void {
+    for (const box of boxes) {
       const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(
         box.position.x,
         box.position.y,

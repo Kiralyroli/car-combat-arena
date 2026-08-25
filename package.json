@@ -25,6 +25,7 @@
     "check:arcade": "npm run check:arcade --workspace @cca/shared",
     "check:weapons": "npm run check:weapons --workspace @cca/shared",
     "check:spawn": "npm run check:spawn --workspace @cca/shared",
+    "check:arena": "npm run check:arena --workspace @cca/shared",
     "check:colors": "npm run check:colors --workspace @cca/shared",
     "check:wheels": "npm run check:wheels --workspace @cca/shared",
     "check:pickups": "npm run check:pickups --workspace @cca/shared",

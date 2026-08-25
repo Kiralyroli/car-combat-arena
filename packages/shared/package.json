@@ -22,6 +22,7 @@
     "check:wheels": "tsx scripts/check-wheels.ts",
     "check:arcade": "tsx scripts/check-arcade.ts",
     "check:colors": "tsx scripts/check-colors.ts",
+    "check:arena": "tsx scripts/check-arena.ts",
     "check:spawn": "tsx scripts/check-spawn.ts",
     "check:weapons": "tsx scripts/check-weapons.ts",
     "check:pickups": "tsx scripts/check-pickups.ts",

@@ -9,23 +9,26 @@ import { aimDirection } from "./weapons";
  * jatekosnal ez kiszamithatoan oszcillalt (2 -> 0 -> 2 -> 0), tehat par
  * halal utan az ellenfel megtanulta, hol fogsz megjelenni.
  *
- * FONTOS geometriai korlat: az arena 80x80 m, a spawn-pontok egy ~22-30
- * m sugaru gyurun ulnek, es a ket legtavolabbi kozott is csak 62 m van
- * -- a gepfegyver hatotava viszont 70 m. Vagyis MINDEN spawn-pont
- * lotavolsagon belul van minden masikbol: pusztan "tavolabb szuletni"
- * NEM megoldas ezen a palyan. Ezert szamit itt annyira az, hogy
- * merre NEZ az ellenfel (lasd lentebb), es ezert kell a rovid
- * serthetetlenseg is (SPAWN_PROTECTION_MS).
+ * GEOMETRIA. Amikor ez a modul keszult, az arena 80x80 m volt, es a ket
+ * legtavolabbi spawn-pont kozott is csak 62 m -- a gepfegyver hatotava
+ * viszont 70. Vagyis MINDEN spawn lotavolsagon belul volt minden
+ * masikbol, es a "szulessen tavolabb" strategia egyszeruen nem
+ * mukodott.
+ *
+ * A palya azota 120x120 m: a legtavolabbi par mar a hatotavon KIVUL
+ * van, a legkozelebbi (33 m) viszont bőven belul. A tavolsag tehat
+ * ismet valodi tenyezo -- de a kozeli parok miatt a celzas iranya
+ * (lasd lentebb) es a serthetetlenseg (SPAWN_PROTECTION_MS) tovabbra is
+ * kell. A pontos szamokat a check:spawn tartja naprakeszen.
  */
 
 /**
  * Meddig serthetetlen az ujraszuletett jatekos (ms).
  *
  * Ot masodperc -- ugyanannyi, mint maga a varakozas (RESPAWN_DELAY_MS).
- * Bo ido: az auto 1.4 mp alatt gyorsul 100 km/h-ra, es 30 m/s-nal az
- * egesz arenat at lehet szelni alatta. SZANDEKOSAN ilyen hosszu: itt
- * minden halal egy ELETBE kerul, es a palya geometriaja miatt nincs
- * biztonsagos spawn-pont (mind lotavon belul van egymastol).
+ * Bo ido: az auto 1.4 mp alatt gyorsul 100 km/h-ra. SZANDEKOSAN ilyen
+ * hosszu: itt minden halal egy ELETBE kerul, es a kozeli spawn-parok
+ * (33 m) bőven a gepfegyver hatotavan belul vannak.
  *
  * A vedelem TUZELESRE megszunik (lasd Room.stepWeapons es tryFire): aki
  * lo, az mar nem menekul, hanem harcol. Ez a fek tartja egyensulyban a

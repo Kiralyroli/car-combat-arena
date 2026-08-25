@@ -4,6 +4,7 @@ import {
   WEAPON_MOUNT,
   SPAWN_POINTS,
   ARENA_HALF,
+  type ArenaBox,
   ARENA,
   CAMERA,
   CHASSIS,
@@ -1405,9 +1406,80 @@ export class SceneView {
     }
 
     // Racs a talajon, hogy a sebesseg es a csuszas lathato legyen.
-    const grid = new THREE.GridHelper(80, 40, 0x4a5568, 0x323a45);
+    //
+    // A MERET A PALYABOL szarmazik, nem beegetve. Korabban egy nyers
+    // 80 allt itt: amikor a palya 120 m-re nott, a racs a regi
+    // meretben maradt, es a kulso savok csupasz felulettel latszottak.
+    const CELL = 2;
+    const size = ARENA_HALF * 2;
+    const grid = new THREE.GridHelper(size, size / CELL, 0x4a5568, 0x323a45);
     grid.position.y = 0.02;
     this.scene.add(grid);
+
+    // Ugyanez a racs a FALAKON is.
+    //
+    // Nem diszites: a fal enelkul egyszinu felulet, amin a szem nem
+    // talal fogodzot -- kozeledve nem lehet megiteni a tavolsagot vagy
+    // a sajat sebesseget. A padlon pont ezert van racs.
+    for (const box of ARENA) {
+      if (!box.name.startsWith("wall_")) continue;
+      this.addWallGrid(box, CELL);
+    }
+  }
+
+  /**
+   * Racs egy fal BELSO oldalara.
+   *
+   * A GridHelper vizszintes es negyzetes, ezert nem hasznalhato: a fal
+   * 120 x 4 m. Ez a valtozat a fal sajat mereteibol epiti a vonalakat.
+   */
+  private addWallGrid(box: ArenaBox, cell: number): void {
+    // A fal a vekonyabb tengelye menten "lapos": az adja a normalist.
+    const alongX = box.halfExtents.x > box.halfExtents.z;
+    const halfWidth = alongX ? box.halfExtents.x : box.halfExtents.z;
+    const halfHeight = box.halfExtents.y;
+    const thickness = alongX ? box.halfExtents.z : box.halfExtents.x;
+
+    const points: number[] = [];
+    // Fuggoleges vonalak.
+    for (let w = -halfWidth; w <= halfWidth + 1e-6; w += cell) {
+      points.push(w, -halfHeight, 0, w, halfHeight, 0);
+    }
+    // Vizszintesek.
+    for (let h = -halfHeight; h <= halfHeight + 1e-6; h += cell) {
+      points.push(-halfWidth, h, 0, halfWidth, h, 0);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(points, 3),
+    );
+    const lines = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({ color: 0x4a5568 }),
+    );
+
+    // A palya FELE nezo oldalra, egy hajszallal a felulet ele -- igy a
+    // vonalak nem tunnek el a falban (z-fighting).
+    const inward = 0.02;
+    if (alongX) {
+      const side = box.position.z < 0 ? 1 : -1;
+      lines.position.set(
+        box.position.x,
+        box.position.y,
+        box.position.z + side * (thickness + inward),
+      );
+    } else {
+      const side = box.position.x < 0 ? 1 : -1;
+      lines.rotation.y = Math.PI / 2;
+      lines.position.set(
+        box.position.x + side * (thickness + inward),
+        box.position.y,
+        box.position.z,
+      );
+    }
+    this.scene.add(lines);
   }
 
   /** Poziciot lerp-el, forgast slerp-el, es az eredmenyt egy Object3D-re alkalmazza. */

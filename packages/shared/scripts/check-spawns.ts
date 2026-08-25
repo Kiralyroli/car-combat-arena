@@ -11,7 +11,7 @@
  *
  * Futtatas: npm run check:spawns
  */
-import { ARENA, CHASSIS, SPAWN_POINTS } from "../src/config";
+import { ARENA, ARENA_HALF, CHASSIS, SPAWN_POINTS } from "../src/config";
 
 /**
  * Az auto vizszintes befoglalo sugara. A hosszabb tengellyel szamolunk
@@ -57,8 +57,13 @@ for (let i = 0; i < SPAWN_POINTS.length; i++) {
   }
 }
 
-// 2. Palyan belul (a falak a +/-40 hataron vannak)
-const ARENA_LIMIT = 40 - CAR_RADIUS - CLEARANCE;
+// 2. Palyan belul
+//
+// A hatar a CONFIGBOL szarmazik, nem beegetve. Korabban itt egy nyers
+// 40 allt: amikor a palya 80-rol 120 m-re nott, a teszt tovabbra is a
+// regi hatart kerte szamon, es harom ervenyes spawn-pontot "kilogonak"
+// jelolt.
+const ARENA_LIMIT = ARENA_HALF - CAR_RADIUS - CLEARANCE;
 for (let i = 0; i < SPAWN_POINTS.length; i++) {
   const s = SPAWN_POINTS[i];
   if (Math.abs(s.x) > ARENA_LIMIT || Math.abs(s.z) > ARENA_LIMIT) {

@@ -23,7 +23,14 @@ import {
   withinPickupRange,
 } from "../src/pickups";
 import { MAX_HP } from "../src/combat";
-import { ARCADE, ARENA, CHASSIS, FIXED_DT, SPAWN_POINTS } from "../src/config";
+import {
+  ARCADE,
+  ARENA,
+  BARE_ARENA,
+  CHASSIS,
+  FIXED_DT,
+  SPAWN_POINTS,
+} from "../src/config";
 import { NEUTRAL_INPUT } from "../src/types";
 import { RapierBackend } from "../src/physics/rapier";
 
@@ -252,7 +259,7 @@ const LANE_LENGTH = 62;
 
 async function accelerate(boost: boolean): Promise<Run> {
   const backend = new RapierBackend();
-  await backend.init();
+  await backend.init({ arena: BARE_ARENA });
   backend.reset({ x: 25, y: 2.5, z: LANE_START_Z });
   // Leeres es megnyugvas, mielott gazt adnank.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, NEUTRAL_INPUT);

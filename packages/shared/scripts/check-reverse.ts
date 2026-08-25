@@ -18,7 +18,7 @@
  * Futtatas: npm run check:reverse
  */
 import { RapierBackend } from "../src/physics/rapier";
-import { ARCADE, FIXED_DT } from "../src/config";
+import { ARCADE, BARE_ARENA, FIXED_DT } from "../src/config";
 import { NEUTRAL_INPUT, type DriveInput } from "../src/types";
 
 /** Szabad terulet: tolatasnal +Z fele halad, itt 60 m-nyi hely van. */
@@ -43,7 +43,7 @@ interface Result {
 
 async function drive(input: Partial<DriveInput>, seconds: number): Promise<Result> {
   const backend = new RapierBackend();
-  await backend.init();
+  await backend.init({ arena: BARE_ARENA });
   backend.reset(SPAWN);
   // Leerés/megallapodas.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, { ...NEUTRAL_INPUT });

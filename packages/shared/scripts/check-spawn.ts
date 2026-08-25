@@ -50,26 +50,37 @@ function main(): void {
 
   // --- A palya-geometria, ami az egesz tervezest meghatarozza ---
   //
-  // Ezt kulon kimondjuk: ha valaki kesobb atmeretezi az arenat vagy a
-  // spawn-gyurut, itt derul ki, hogy a "szulessen tavolabb" strategia
-  // mikor kezd egyaltalan mukodni.
+  // EZ A SZAM MEGFORDULT. A 80 m-es arenaban a legtavolabbi ket
+  // spawn-pont kozott is csak 62 m volt, a gepfegyver hatotava viszont
+  // 70 -- vagyis MINDEN spawn lotavolsagon belul volt minden masikbol,
+  // es a "szulessen tavolabb" strategia egyszeruen nem mukodott.
+  //
+  // A 120 m-es palyan a legtavolabbi par mar a hatotavon kivul van,
+  // a legkozelebbi viszont bőven belul: a tavolsag ismet valodi
+  // tenyezo. A vedelem tovabbra is kell (a kozeli parok miatt), de mar
+  // nem az EGYETLEN eszkoz.
   {
     let max = 0;
+    let min = Number.POSITIVE_INFINITY;
     for (let i = 0; i < SPAWN_POINTS.length; i++) {
       for (let j = i + 1; j < SPAWN_POINTS.length; j++) {
-        max = Math.max(
-          max,
-          Math.hypot(
-            SPAWN_POINTS[i].x - SPAWN_POINTS[j].x,
-            SPAWN_POINTS[i].z - SPAWN_POINTS[j].z,
-          ),
+        const d = Math.hypot(
+          SPAWN_POINTS[i].x - SPAWN_POINTS[j].x,
+          SPAWN_POINTS[i].z - SPAWN_POINTS[j].z,
         );
+        max = Math.max(max, d);
+        min = Math.min(min, d);
       }
     }
     check(
-      "minden spawn-pont lotavolsagon belul van (ezert kell a vedelem)",
-      max < MACHINEGUN.range,
-      `legtavolabbi ket pont: ${max.toFixed(1)} m, gepfegyver: ${MACHINEGUN.range} m`,
+      "a palya nagyobb a fegyver hatotavanal",
+      max > MACHINEGUN.range,
+      `legtavolabbi par: ${max.toFixed(1)} m, gepfegyver: ${MACHINEGUN.range} m`,
+    );
+    check(
+      "de a kozeli parok miatt a vedelem tovabbra is kell",
+      min < MACHINEGUN.range,
+      `legkozelebbi par: ${min.toFixed(1)} m`,
     );
   }
 

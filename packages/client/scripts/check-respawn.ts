@@ -14,6 +14,7 @@
  * Futtatas: npm run check:respawn
  */
 import { chromium, type Browser, type Page } from "playwright";
+import { ARENA_HALF } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
@@ -275,8 +276,11 @@ async function main(): Promise<void> {
     const fromCentre = Math.hypot(camera[0], camera[2]);
     check(
       "a kamera az egesz palyat mutatja",
-      camera[1] > 55 && fromCentre < 70,
-      `${camera[1].toFixed(0)} m magasan, ${fromCentre.toFixed(0)} m-re a kozepponttol`,
+      // A hatarok a PALYA MERETEBOL szarmaznak, nem beegetve: a kamera
+      // is ARENA_HALF szerint all be (lasd SceneView.previewArena), tehat
+      // egy atmeretezes kulonben hamis bukast adna.
+      camera[1] > ARENA_HALF && fromCentre < ARENA_HALF * 2,
+      `${camera[1].toFixed(0)} m magasan, ${fromCentre.toFixed(0)} m-re a kozepponttol (palya fele: ${ARENA_HALF} m)`,
     );
 
     // --- Ujraszuletes: a VALASZTOTT helyre, pajzzsal ---

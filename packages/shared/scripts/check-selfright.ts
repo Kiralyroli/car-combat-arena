@@ -14,7 +14,7 @@
  *      jatekmenetbe.
  */
 import { RapierBackend } from "../src/physics/rapier";
-import { FIXED_DT } from "../src/config";
+import { BARE_ARENA, FIXED_DT } from "../src/config";
 import { NEUTRAL_INPUT, type DriveInput } from "../src/types";
 
 function quatFromAxisAngle(x: number, y: number, z: number, angle: number) {
@@ -51,7 +51,7 @@ async function testRecovery(
   maxSeconds: number,
 ): Promise<void> {
   const backend = new RapierBackend();
-  await backend.init();
+  await backend.init({ arena: BARE_ARENA });
   const chassis = (backend as unknown as { chassis: any }).chassis;
   chassis.setTranslation({ x: 0, y: 3, z: 0 }, true);
   chassis.setRotation(quat, true);
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
 
   console.log("\n-- 2. Normal vezetes nem eri el a kuszobot (60 fok) --");
   const b1 = new RapierBackend();
-  await b1.init();
+  await b1.init({ arena: BARE_ARENA });
   b1.reset();
   for (let i = 0; i < 90; i++) b1.step(FIXED_DT, NEUTRAL_INPUT);
   const gas: DriveInput = { ...NEUTRAL_INPUT, throttle: 1 };
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   b1.dispose();
 
   const b2 = new RapierBackend();
-  await b2.init();
+  await b2.init({ arena: BARE_ARENA });
   b2.reset();
   for (let i = 0; i < 90; i++) b2.step(FIXED_DT, NEUTRAL_INPUT);
   b2.setWheelDamage(2, { hp: 0, broken: true, gripMultiplier: 0 });

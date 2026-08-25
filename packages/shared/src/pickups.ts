@@ -100,11 +100,11 @@ export const PICKUP_POINTS: PickupPoint[] = [
   // igy minden csatlakozo jatekos azonnal felszedte volna, meg mielott
   // a szerver a sajat spawn-pontjara allitja. A check-pickups.ts ezt
   // most kulon ellenorzi.
-  { x: 0, y: PICKUP_HEIGHT, z: 8, kind: "boost" },
-  { x: 16, y: PICKUP_HEIGHT, z: 16, kind: "boost" },
-  { x: -8, y: PICKUP_HEIGHT, z: 12, kind: "boost" },
-  { x: 12, y: PICKUP_HEIGHT, z: -12, kind: "boost" },
-  { x: -16, y: PICKUP_HEIGHT, z: -12, kind: "boost" },
+  { x: 0, y: PICKUP_HEIGHT, z: 12, kind: "boost" },
+  { x: 24, y: PICKUP_HEIGHT, z: 24, kind: "boost" },
+  { x: -12, y: PICKUP_HEIGHT, z: 18, kind: "boost" },
+  { x: 18, y: PICKUP_HEIGHT, z: -18, kind: "boost" },
+  { x: -24, y: PICKUP_HEIGHT, z: -18, kind: "boost" },
 
   // ELET: kevesebb es ritkabb, ezert NYITOTT, jol belathato helyen --
   // erte menni dontes legyen, ne utkozben felszedheto apróság.
@@ -113,8 +113,8 @@ export const PICKUP_POINTS: PickupPoint[] = [
   // ugyanannyit kell kockaztatnia erte. Az elso valasztasom (-4, -2) es
   // (18, -2) volt, de azokat a check:pickups elutasitotta -- tul kozel
   // estek a kezdo spawn-hoz, illetve a (22, 0) spawn-ponthoz.
-  { x: -8, y: PICKUP_HEIGHT, z: 0, kind: "health" },
-  { x: 8, y: PICKUP_HEIGHT, z: 0, kind: "health" },
+  { x: -12, y: PICKUP_HEIGHT, z: 0, kind: "health" },
+  { x: 12, y: PICKUP_HEIGHT, z: 0, kind: "health" },
 ];
 
 /** Egy fajta pickupjainak sorszamai -- a rajzolashoz es a meresekhez. */

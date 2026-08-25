@@ -8,7 +8,7 @@
  * A spawn (25, 2.5, 25) tudatosan valasztott, akadalymentes sarok.
  */
 import { RapierBackend } from "../src/physics/rapier";
-import { FIXED_DT } from "../src/config";
+import { BARE_ARENA, FIXED_DT } from "../src/config";
 import { NEUTRAL_INPUT, type DriveInput } from "../src/types";
 
 const SAFE_SPAWN = { x: 25, y: 2.5, z: 25 };
@@ -24,7 +24,7 @@ async function quickTurnTest(
   turnSteps: number,
 ): Promise<number> {
   const backend = new RapierBackend();
-  await backend.init();
+  await backend.init({ arena: BARE_ARENA });
   backend.reset(SAFE_SPAWN);
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, NEUTRAL_INPUT);
   const gas: DriveInput = { ...NEUTRAL_INPUT, throttle: 1 };

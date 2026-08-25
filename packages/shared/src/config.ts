@@ -291,7 +291,7 @@ export interface ArenaBox {
   color: number;
 }
 
-export const ARENA_HALF = 40;
+export const ARENA_HALF = 60;
 const WALL_H = 2;
 
 export const ARENA: ArenaBox[] = [
@@ -329,7 +329,7 @@ export const ARENA: ArenaBox[] = [
   {
     name: "ramp_main",
     halfExtents: { x: 4, y: 0.3, z: 6 },
-    position: { x: 0, y: 1.1, z: -16 },
+    position: { x: 0, y: 1.1, z: -24 },
     rotation: { x: -0.22, y: 0, z: 0 },
     color: 0x8b5a2b,
   },
@@ -337,15 +337,79 @@ export const ARENA: ArenaBox[] = [
   {
     name: "bank_left",
     halfExtents: { x: 6, y: 0.3, z: 4 },
-    position: { x: -18, y: 1.3, z: 8 },
+    position: { x: -27, y: 1.3, z: 12 },
     rotation: { x: 0, y: 0, z: 0.28 },
     color: 0x8b5a2b,
   },
   // Akadalyok
-  { name: "crate_a", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 10, y: 1, z: 6 }, color: 0x6e7681 },
-  { name: "crate_b", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 13, y: 1, z: 6 }, color: 0x6e7681 },
-  { name: "crate_c", halfExtents: { x: 1, y: 2, z: 1 }, position: { x: 11.5, y: 2, z: 10 }, color: 0x6e7681 },
-  { name: "pillar", halfExtents: { x: 1.5, y: 3, z: 1.5 }, position: { x: -12, y: 3, z: -8 }, color: 0x6e7681 },
+  { name: "crate_a", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 15, y: 1, z: 9 }, color: 0x6e7681 },
+  { name: "crate_b", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 19.5, y: 1, z: 9 }, color: 0x6e7681 },
+  { name: "crate_c", halfExtents: { x: 1, y: 2, z: 1 }, position: { x: 17.3, y: 2, z: 15 }, color: 0x6e7681 },
+  { name: "pillar", halfExtents: { x: 1.5, y: 3, z: 1.5 }, position: { x: -18, y: 3, z: -12 }, color: 0x6e7681 },
+
+  // --- Industrial Arena: fedezek (terv 9. fejezet) ---
+  //
+  // A palya korabban tizenegy elembol allt, abbol ot a padlo es a
+  // negy fal. MERVE: a hosszu ratekintesek mindossze 14%-a volt
+  // takarva, es a nyolc spawn-pont kozotti vonalaknak szinten 14%-a
+  // -- 80 m-es arenaban, 70 m-es fegyverrel. Vagyis barhonnan
+  // barhova el lehetett latni es lőni.
+  //
+  // Az itteni elemek SZANDEKOSAN nincsenek elforgatva: a fedezek- es
+  // talalat-szamitas tengely-parhuzamos dobozokkal dolgozik
+  // (segmentBoxEntry), tehat egy elforgatott doboz maskepp takarna a
+  // kepen, mint a szamitasban. Az iranyt a felezo-meretek
+  // felcserelese adja.
+
+  // Konténerek: a fo fedezek. 6 x 2.6 x 2.4 m, a talajon allva.
+  { name: "container_w1", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 1.2, z: -7.5 }, color: 0x9a5b3d },
+  { name: "container_w2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 1.2, z: 3 }, color: 0x9a5b3d },
+  { name: "container_e1", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 22.5, y: 1.2, z: -9 }, color: 0x9a5b3d },
+  { name: "container_e2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 22.5, y: 1.2, z: 1.5 }, color: 0x9a5b3d },
+  { name: "container_n", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 0, y: 1.2, z: 25.5 }, color: 0x9a5b3d },
+  { name: "container_s", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -9, y: 1.2, z: -36 }, color: 0x9a5b3d },
+  // Egymasra rakott konténer: magassag-valtozatossag.
+  { name: "container_stack", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 3.6, z: -7.5 }, color: 0x9a5b3d },
+
+  // Csovek: hosszu, keskeny takaras -- a nyilt szakaszokat tordelik.
+  { name: "pipe_ne", halfExtents: { x: 5, y: 0.9, z: 0.9 }, position: { x: 33, y: 0.9, z: 18 }, color: 0x5c6672 },
+  { name: "pipe_sw", halfExtents: { x: 0.9, y: 0.9, z: 5 }, position: { x: -45, y: 0.9, z: -18 }, color: 0x5c6672 },
+
+  // Gumihalmok: alacsonyabb, szorvanyos fedezek.
+  { name: "tyres_a", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 10.5, y: 0.9, z: -25.5 }, color: 0x2b2f36 },
+  { name: "tyres_b", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -30, y: 0.9, z: 24 }, color: 0x2b2f36 },
+  { name: "tyres_c", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 30, y: 0.9, z: -27 }, color: 0x2b2f36 },
+
+  // --- Kulso gyuru (a 120 m-es palyahoz) ---
+  //
+  // A palya 80-rol 120 m-re nott, es ugyanaz a fedezek 2.25-szoros
+  // teruleten hígult fel: a takaras 55%-rol 28%-ra esett. Ezek az
+  // elemek a kulso savokat toltik meg, ahol a spawn-gyuru (33-45 m)
+  // es a falak kozott korabban semmi nem volt.
+
+  { name: "container_ne1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 18, y: 1.2, z: 30 }, color: 0x9a5b3d },
+  { name: "container_ne2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 40, y: 1.2, z: 18 }, color: 0x9a5b3d },
+  { name: "container_nw1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -20, y: 1.2, z: 26 }, color: 0x9a5b3d },
+  { name: "container_nw2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -42, y: 1.2, z: 14 }, color: 0x9a5b3d },
+  { name: "container_se1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 24, y: 1.2, z: -25 }, color: 0x9a5b3d },
+  { name: "container_se2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 42, y: 1.2, z: -14 }, color: 0x9a5b3d },
+  { name: "container_sw1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -22, y: 1.2, z: -12 }, color: 0x9a5b3d },
+  { name: "container_sw2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -44, y: 1.2, z: -22 }, color: 0x9a5b3d },
+  { name: "container_far_n", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 14, y: 1.2, z: 48 }, color: 0x9a5b3d },
+  { name: "container_far_s", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -14, y: 1.2, z: -50 }, color: 0x9a5b3d },
+
+  { name: "pipe_n", halfExtents: { x: 6, y: 0.9, z: 0.9 }, position: { x: -34, y: 0.9, z: 44 }, color: 0x5c6672 },
+  { name: "pipe_s", halfExtents: { x: 6, y: 0.9, z: 0.9 }, position: { x: 30, y: 0.9, z: -46 }, color: 0x5c6672 },
+  { name: "pipe_e", halfExtents: { x: 0.9, y: 0.9, z: 6 }, position: { x: 48, y: 0.9, z: 36 }, color: 0x5c6672 },
+
+  { name: "crate_d", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: -8, y: 1.4, z: 34 }, color: 0x6e7681 },
+  { name: "crate_e", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: 6, y: 1.4, z: -34 }, color: 0x6e7681 },
+  { name: "crate_f", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: -30, y: 1.4, z: 6 }, color: 0x6e7681 },
+
+  { name: "tyres_d", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 36, y: 0.9, z: 8 }, color: 0x2b2f36 },
+  { name: "tyres_e", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -36, y: 0.9, z: -6 }, color: 0x2b2f36 },
+  { name: "tyres_f", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 2, y: 0.9, z: 26 }, color: 0x2b2f36 },
+  { name: "tyres_g", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -4, y: 0.9, z: -26 }, color: 0x2b2f36 },
 ];
 
 /**
@@ -362,15 +426,31 @@ export const ARENA: ArenaBox[] = [
  * A lista helyesseget a `npm run check:spawns` ellenorzi.
  */
 export const SPAWN_POINTS: { x: number; y: number; z: number }[] = [
-  { x: 22, y: 2.5, z: 0 },
-  { x: 22, y: 2.5, z: 22 },
-  { x: 0, y: 2.5, z: 26 },
-  { x: -22, y: 2.5, z: 22 },
-  { x: -26, y: 2.5, z: 0 },
-  { x: -22, y: 2.5, z: -22 },
-  { x: 0, y: 2.5, z: -30 },
-  { x: 22, y: 2.5, z: -22 },
+  { x: 33, y: 2.5, z: 0 },
+  { x: 33, y: 2.5, z: 33 },
+  { x: 0, y: 2.5, z: 39 },
+  { x: -33, y: 2.5, z: 33 },
+  { x: -39, y: 2.5, z: 0 },
+  { x: -33, y: 2.5, z: -33 },
+  { x: 0, y: 2.5, z: -45 },
+  { x: 33, y: 2.5, z: -33 },
 ];
+
+/**
+ * CSUPASZ arena: csak a padlo es a negy fal, akadalyok nelkul.
+ *
+ * A VEZETES-MERESEKHEZ kell (vegsebesseg, 0-100, kanyarsugar, fekut).
+ * Azok a fizikat merik, NEM a palyat -- ha a valodi arenaban futnanak,
+ * minden uj akadaly elmozdithatna oket, es a "romlott a fizika" meg a
+ * "beepitettunk egy konténert" megkulonboztethetetlen lenne.
+ *
+ * Korabban ezek a meresek kezzel kivalasztott szabad savokban futottak
+ * (x = 25..30, z = 35..-40), ami 75 m hosszan MEGKOTOTTE a palya
+ * tervezeset -- ez a lista oldja fel.
+ */
+export const BARE_ARENA: ArenaBox[] = ARENA.filter(
+  (box) => box.name === "ground" || box.name.startsWith("wall_"),
+);
 
 export const CAMERA = {
   /**
