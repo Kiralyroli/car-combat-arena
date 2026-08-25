@@ -67,14 +67,10 @@ export class Hud {
     if (now - this.lastRender < 100) return;
     this.lastRender = now;
 
-    // A ping es az fps szinezese: zold = jo, sarga = erezheto, piros =
-    // zavaro. A hatarok arcade akciojatekhoz igazodnak -- 100 ms felett
-    // a tobbi auto mozgasa mar lathatoan "kesik", 60 fps alatt pedig a
-    // sajat vezetes kezd akadozni.
+    // A kuszoboket lasd pingQuality / fpsQuality.
     const pingText = pingMs === null ? "--" : `${pingMs.toFixed(0)} ms`;
-    const pingClass =
-      pingMs === null ? "" : pingMs < 60 ? "good" : pingMs < 120 ? "warn" : "bad";
-    const fpsClass = fps >= 55 ? "good" : fps >= 30 ? "warn" : "bad";
+    const pingClass = pingQuality(pingMs);
+    const fpsClass = fpsQuality(fps);
 
     // A boost-sav MINDIG latszik, nem csak boostolas kozben: a boost
     // korlatos eroforras, tehat a jatekosnak MIELOTT ranyomna kell
@@ -148,6 +144,74 @@ export class Hud {
  * teljes innerHTML-t; egy 60 Hz-en frissulo savnal ez folosleges
  * ujraparszolas.
  */
+/**
+ * A ping es az fps szinezese: zold = jo, sarga = erezheto, piros =
+ * zavaro. A hatarok arcade akciojatekhoz igazodnak -- 100 ms felett a
+ * tobbi auto mozgasa mar lathatoan "kesik", 60 fps alatt pedig a sajat
+ * vezetes kezd akadozni.
+ *
+ * KOZOS fuggveny, mert KET helyen jelenik meg ugyanaz a szam: a
+ * fejlesztoi panelon es a mindig lathato kijelzon. Kulon kuszobokkel a
+ * ketto eszrevetlenul elcsuszna, es ugyanaz a ping az egyik helyen
+ * zold, a masikon sarga lenne.
+ */
+export function pingQuality(pingMs: number | null): "" | "good" | "warn" | "bad" {
+  if (pingMs === null) return "";
+  return pingMs < 60 ? "good" : pingMs < 120 ? "warn" : "bad";
+}
+
+export function fpsQuality(fps: number): "good" | "warn" | "bad" {
+  return fps >= 55 ? "good" : fps >= 30 ? "warn" : "bad";
+}
+
+/**
+ * MINDIG lathato halozati kijelzo: fps es ping.
+ *
+ * A tobbi fejlesztoi szamlalotol elteroen ez a KETTO a jatekosnak is
+ * szol: ebbol tudja, hogy a szaggatas a sajat gepe vagy a kapcsolata
+ * miatt van-e. Enelkul csak annyit tapasztal, hogy "rossz a jatek".
+ *
+ * Dev modban REJTVE marad (tiszta CSS: body.dev #netstat), mert ott a
+ * fejlesztoi panel ugyanezt reszletesebben mutatja -- ket helyen
+ * ugyanaz a szam csak zavarna.
+ */
+export class NetStat {
+  private readonly root: HTMLElement;
+  private readonly fpsEl: HTMLElement;
+  private readonly pingEl: HTMLElement;
+  private lastRender = 0;
+  private lastKey = "";
+
+  constructor() {
+    this.root = must("netstat");
+    this.fpsEl = must("netstat-fps");
+    this.pingEl = must("netstat-ping");
+  }
+
+  show(): void {
+    this.root.hidden = false;
+  }
+
+  update(fps: number, pingMs: number | null): void {
+    if (this.root.hidden) return;
+
+    // 10 Hz eleg: a szamok gyorsabban valtozva olvashatatlanok, es a
+    // fo ciklust sem terheljuk feleslegesen a DOM-mal.
+    const now = performance.now();
+    if (now - this.lastRender < 100) return;
+    this.lastRender = now;
+
+    const pingText = pingMs === null ? "--" : `${pingMs.toFixed(0)} ms`;
+    const key = `${fps.toFixed(0)}|${pingText}`;
+    if (key === this.lastKey) return;
+    this.lastKey = key;
+
+    this.fpsEl.textContent = `${fps.toFixed(0)} fps`;
+    this.fpsEl.className = `val ${fpsQuality(fps)}`;
+    this.pingEl.textContent = pingText;
+    this.pingEl.className = `val ${pingQuality(pingMs)}`;
+  }
+}
 export class PlayerHud {
   private readonly root: HTMLElement;
   private readonly hpFill: HTMLElement;

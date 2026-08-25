@@ -578,6 +578,34 @@
       }
 
       /* --- Szobakod jatek kozben --- */
+      /*
+         MINDIG lathato fps es ping -- nem csak dev modban.
+         Ez a ket szam a JATEKOSNAK is szol: ebbol tudja, hogy a
+         szaggatas a gepe vagy a kapcsolata miatt van-e.
+
+         Dev modban elrejtjuk: ott a fejlesztoi panel ugyanezt
+         reszletesebben mutatja, es ket helyen ugyanaz a szam zavarna.
+      */
+      #netstat {
+        position: fixed;
+        top: 58px;
+        left: 14px;
+        display: flex;
+        gap: 10px;
+        padding: 4px 10px;
+        background: rgba(1, 4, 9, 0.6);
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        font: 11px ui-monospace, monospace;
+        color: #7d8590;
+        pointer-events: none;
+        z-index: 20;
+      }
+      #netstat .val.good { color: #3fb950; }
+      #netstat .val.warn { color: #d29922; }
+      #netstat .val.bad { color: #f85149; }
+      body.dev #netstat { display: none; }
+
       #room-badge {
         position: fixed;
         top: 14px;
@@ -745,6 +773,12 @@
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Mindig lathato fps es ping -- lasd NetStat a hud.ts-ben. -->
+    <div id="netstat" hidden>
+      <span class="val" id="netstat-fps">-- fps</span>
+      <span class="val" id="netstat-ping">--</span>
     </div>
 
     <div id="match-banner" hidden></div>

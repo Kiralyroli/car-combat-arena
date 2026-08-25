@@ -33,6 +33,8 @@ interface Visible {
   tech: boolean;
   help: boolean;
   player: boolean;
+  /** Az fps/ping kijelzo -- ez dev modon KIVUL is kell, hogy latszodjon. */
+  netstat: boolean;
 }
 
 const visible = (page: Page): Promise<Visible> =>
@@ -41,6 +43,11 @@ const visible = (page: Page): Promise<Visible> =>
     tech: !(document.getElementById("hud") as HTMLElement).hidden,
     help: !(document.getElementById("help") as HTMLElement).hidden,
     player: !(document.getElementById("player-hud") as HTMLElement).hidden,
+    // Nem eleg a "hidden" jelzot nezni: dev modban CSS rejti el
+    // (body.dev #netstat), tehat a tenyleges megjelenest kell kerdezni.
+    netstat:
+      getComputedStyle(document.getElementById("netstat") as HTMLElement)
+        .display !== "none",
   }));
 
 async function load(page: Page, url: string): Promise<void> {
@@ -78,6 +85,14 @@ async function main(): Promise<void> {
     "a jatekos-HUD viszont latszik",
     initial.player,
     `${initial.player}`,
+  );
+  // Az fps es a ping a JATEKOSNAK is szol: ebbol tudja, hogy a
+  // szaggatas a gepe vagy a kapcsolata miatt van-e. Ezert dev modon
+  // KIVUL is latszania kell -- a tobbi technikai szamlalotol elteroen.
+  check(
+    "az fps/ping dev mod NELKUL is latszik",
+    initial.netstat,
+    `netstat: ${initial.netstat}`,
   );
 
   // Ctrl+Shift+D

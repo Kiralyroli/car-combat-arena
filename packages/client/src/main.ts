@@ -23,7 +23,15 @@ import {
 import { Aim } from "./aim";
 import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
 import { DevMode } from "./devMode";
-import { hideLoading, Hud, MatchHud, PlayerHud, Scoreboard, showError } from "./hud";
+import {
+  hideLoading,
+  Hud,
+  MatchHud,
+  NetStat,
+  PlayerHud,
+  Scoreboard,
+  showError,
+} from "./hud";
 import { Lobby, RoomBadge } from "./lobby";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
@@ -153,6 +161,7 @@ async function main(): Promise<void> {
   const matchHud = new MatchHud();
   const playerHud = new PlayerHud();
   const scoreboard = new Scoreboard();
+  const netStat = new NetStat();
   initDebugPanel();
 
   // Dev mod: a fizika-csuszkak es a technikai panel CSAK itt latszik.
@@ -434,6 +443,7 @@ async function main(): Promise<void> {
   // A jatekos-HUD es a celkereszt csak a lobby utan jelenik meg. Offline
   // modban is ide jutunk, csak lobby nelkul -- ott is jar a celzas.
   playerHud.show();
+  netStat.show();
   aim.setActive(true);
 
   let last = performance.now();
@@ -760,6 +770,7 @@ async function main(): Promise<void> {
       diedAt === null ? 0 : Math.max(0, RESPAWN_DELAY_MS - (renderNow - diedAt)),
     );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
+    netStat.update(fps, net.ping);
     scoreboard.update(
       [
         // A SAJAT sorunk a halozati rtegbol jon (a szerver tisztitott
