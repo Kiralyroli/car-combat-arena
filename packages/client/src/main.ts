@@ -267,6 +267,10 @@ async function main(): Promise<void> {
   const lastDrawnHp = new Map<string, number>();
   net.on({
     onJoined: (_playerId, roomCode, spawn) => {
+      // Sikeres belepes: a verzio rendben van. Toroljuk az
+      // ujratoltes-jelzot, hogy egy KESOBBI deploy is tudjon
+      // automatikusan frissiteni (lasd onError / bad_protocol).
+      sessionStorage.removeItem("cca.reloadedForVersion");
       location.hash = roomCode;
       // A szerver altal kiosztott helyre allunk, kulonben minden
       // jatekos a kozos config-spawnra (egymasba) szuletne.
@@ -322,6 +326,22 @@ async function main(): Promise<void> {
     },
     onError: (code, message) => {
       console.warn(`Halozati hiba (${code}): ${message}`);
+
+      // ELAVULT KLIENS: a betoltott csomag regebbi, mint a szerver.
+      //
+      // Ez minden visszatero jatekost erint egy deploy utan, es kezzel
+      // nem nyilvanvalo, mit kellene tenni -- ezert magunk toltunk
+      // ujra. CSAK EGYSZER: ha az ujratoltes utan is elavult marad (pl.
+      // a bongeszo makacsul a regi oldalt adja), a vegtelen ujratoltes
+      // rosszabb lenne a hibauzenetnel.
+      if (code === "bad_protocol") {
+        const KEY = "cca.reloadedForVersion";
+        if (sessionStorage.getItem(KEY) === null) {
+          sessionStorage.setItem(KEY, "1");
+          location.reload();
+          return;
+        }
+      }
       hud.setNetworkStatus(`hiba: ${code}`, 0);
       if (code === "room_not_found") location.hash = "";
       // Ha eppen belepni probaltunk, a LOBBY kapja meg a hibat --

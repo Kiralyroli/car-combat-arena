@@ -33,6 +33,31 @@ const MIME: Record<string, string> = {
 };
 
 /**
+ * Gyorsitotar-fejlec egy kiszolgalt fajlhoz.
+ *
+ * KET, ELLENTETES igenyt kell kiszolgalni:
+ *
+ *  - Az /assets/ alatti fajlok neveben TARTALOM-HASH van (a Vite igy
+ *    epiti: index-U6xQ5-n7.js). Uj tartalom = UJ NEV, tehat a regit
+ *    OROKRE el lehet tenni. E nelkul a 3.4 MB-os csomag MINDEN
+ *    betolteskor ujra letoltodik -- lassu indulas, felesleges forgalom.
+ *
+ *  - Az index.html neve viszont allando, es EZ hivatkozik a hasitott
+ *    nevekre. Ha a bongeszo eltenne, egy deploy utan a REGI oldalt
+ *    tartana meg, ami a REGI csomagra mutat -- a jatekos pedig
+ *    protokoll-eltereskent talalkozna vele. Ezert mindig ellenorizni
+ *    kell.
+ *
+ * A no-cache NEM azt jelenti, hogy ne tarold: azt, hogy hasznalat
+ * elott kerdezz ra. Valtozatlan fajlnal igy is 304 johet, tehat nem
+ * dragabb -- csak nem lehet elavult.
+ */
+function cacheControlFor(requested: string): string {
+  return requested.startsWith("/assets/")
+    ? "public, max-age=31536000, immutable"
+    : "no-cache";
+}
+/**
  * HTTP-szerver, ami a `rootDir` tartalmat adja ki.
  *
  * A WebSocket ugyanerre a szerverre csatlakozik (lasd WsServer), tehat
@@ -98,6 +123,7 @@ async function serveFile(
 
   res.writeHead(200, {
     "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
+    "cache-control": cacheControlFor(requested),
   });
   createReadStream(file).pipe(res);
 }

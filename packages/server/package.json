@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "check:pickup-effects": "tsx scripts/check-pickup-effects.ts",
     "check:spawn-protection": "tsx scripts/check-spawn-protection.ts",
+    "check:cache": "tsx scripts/check-cache.ts",
+    "check:capacity": "tsx scripts/check-capacity.ts",
     "check:rewind": "tsx scripts/check-rewind.ts",
     "check:net": "tsx scripts/smoke-two-clients.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --external:ws --external:@dimforge/rapier3d-compat --outfile=dist/server.js"

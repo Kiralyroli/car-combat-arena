@@ -145,7 +145,12 @@ export class WsServer {
       send(conn.socket, {
         type: "error",
         code: "bad_protocol",
-        message: `Protokoll-verzio eltero (szerver: ${PROTOCOL_VERSION}, kliens: ${message.protocol})`,
+        // A jatekos nem tud mit kezdeni a verziószamokkal -- azt kell
+        // megmondani, MIT TEGYEN. A szamok a vegen maradnak, mert a
+        // hibajelentesben hasznosak.
+        message:
+          "Uj verzio erkezett -- toltsd ujra az oldalt. " +
+          `(szerver: ${PROTOCOL_VERSION}, kliens: ${message.protocol})`,
       });
       conn.socket.close();
       return;
