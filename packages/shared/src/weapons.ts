@@ -28,24 +28,35 @@ import { clamp, rotateVec } from "./math";
  */
 export const WEAPON_MOUNT = {
   /**
-   * A forgo alap magassaga (m).
+   * A torony talpanak magassaga (m).
    *
    * A modell tetőteje kb. 1.45 m-re van a talajtol, a chassis
    * kozeppontja pedig halfExtents.y magasan -- a kettő kulonbsege adja
    * a tetőszintet.
    */
   height: 1.45 - CHASSIS.halfExtents.y,
-  /** A cso fuggoleges eltolasa az alaphoz kepest. */
-  tubeRise: 0.16,
-  /** A cso kozeppontjanak elore-eltolasa az alaphoz kepest. */
-  tubeForward: 0.2,
-  /** A cso hossza. */
-  tubeLength: 0.95,
+
+  /**
+   * A BOLINTAS tengelye, a talp folott (m).
+   *
+   * A torony-modellbol MERVE (turret.glb): a Turret_Gun csomopont
+   * eltolasa a Turret_Base-hez kepest. Nem talalgatott ertek -- ha a
+   * modell cserelodik, ujra kell merni, kulonben a loves nem a csobol
+   * indul (lasd weapon-origin ellenorzes a check:weapons-ban).
+   */
+  pitchPivot: 0.534,
+
+  /**
+   * A csotorkolat tavolsaga a bolintas tengelyetol, elore (m).
+   *
+   * Szinten MERVE: a cso pontosan vizszintes a tengely magassagaban,
+   * tehat a bolintas a torkolatot ekkora sugaron forgatja.
+   */
+  muzzleForward: 1.421,
 };
 
 /** A csotorkolat tavolsaga a fegyver forgaspontjatol, elore. */
-export const MUZZLE_FORWARD =
-  WEAPON_MOUNT.tubeForward + WEAPON_MOUNT.tubeLength / 2;
+export const MUZZLE_FORWARD = WEAPON_MOUNT.muzzleForward;
 
 /**
  * A csotorkolat vilagbeli helye.
@@ -97,7 +108,7 @@ export function weaponPivot(
       z: carRotation[2],
       w: carRotation[3],
     },
-    { x: 0, y: WEAPON_MOUNT.height + WEAPON_MOUNT.tubeRise, z: 0 },
+    { x: 0, y: WEAPON_MOUNT.height + WEAPON_MOUNT.pitchPivot, z: 0 },
   );
   return [
     carPosition[0] + rise.x,

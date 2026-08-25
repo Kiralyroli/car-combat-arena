@@ -72,32 +72,93 @@ async function seenPosition(
 }
 
 /**
- * A celkeresztet a megadott vilagbeli pont kepernyobeli helyere visszuk.
+ * Milyen kozel megy el a felezoegyenes a ponthoz (m).
  *
- * A celzas iranya a celkereszt alatti pontbol all elo (lasd
- * aimPointAt), tehat pontosan ide kell vinni az egeret -- ugyanaz a
- * dolga a jatekosnak is.
+ * A sugar iranyat a ket atadott pont adja meg; a merofuggveny a
+ * merőleges tavolsagot adja vissza.
+ */
+function distanceToRay(
+  point: readonly number[],
+  from: readonly number[],
+  through: readonly number[],
+): number {
+  const dx = through[0] - from[0];
+  const dy = through[1] - from[1];
+  const dz = through[2] - from[2];
+  const len2 = dx * dx + dy * dy + dz * dz;
+  if (len2 < 1e-9) return Infinity;
+  const t =
+    ((point[0] - from[0]) * dx +
+      (point[1] - from[1]) * dy +
+      (point[2] - from[2]) * dz) /
+    len2;
+  return Math.hypot(
+    from[0] + dx * t - point[0],
+    from[1] + dy * t - point[1],
+    from[2] + dz * t - point[2],
+  );
+}
+
+/**
+ * A celkeresztet a megadott vilagbeli pontra visszuk -- ES MEG IS
+ * NEZZUK, hogy tenyleg oda mutat.
+ *
+ * A vetites onmagaban NEM eleg. A kamera a teleportalas utan meg
+ * lerpel: mire az egerkurzor a kiszamolt kepernyopontra er, a kamera
+ * mar odebb van, es ugyanaz a pixel egy MASIK vilagbeli iranyt jelent.
+ * Igy a teszt "sikeresen celzott", kozben minden loves a celpont ele,
+ * a talajba ment -- 0 talalat 19 lovesbol, latszolag ok nelkul.
+ *
+ * Ezert korbe-visszacsatolunk: a kliens sajat aimPointAt-jevel
+ * megkerdezzuk, hova mutat MOST a celkereszt, es addig igazitunk, amig
+ * tenyleg a celpontnal nincs. Ugyanezt teszi a jatekos is -- nem egy
+ * kepernyopontot jegyez meg, hanem a celponton tartja a keresztet.
  */
 async function aimAt(
   page: Page,
   target: [number, number, number],
 ): Promise<boolean> {
-  const screen = (await page.evaluate((t: number[]) => {
-    const camera = (window as any).__spike.view.camera;
-    if (!camera) return null;
-    // Vector3-at a kamerabol kolcsonzunk: a THREE nincs kulon kiteve.
-    const point = camera.position.clone();
-    point.set(t[0], t[1], t[2]);
-    point.project(camera);
-    return [
-      (point.x * 0.5 + 0.5) * window.innerWidth,
-      (-point.y * 0.5 + 0.5) * window.innerHeight,
-    ];
-  }, target)) as [number, number] | null;
+  // A celzas akkor jo, ha a sugar ennyin belul megy el a celpont
+  // kozeppontja mellett. Egy auto kb. 2 m szeles, tehat 0.8 m biztos
+  // talalat.
+  const TOLERANCE_M = 0.8;
 
-  if (!screen) return false;
-  await page.mouse.move(screen[0], screen[1]);
-  return true;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const screen = (await page.evaluate((t: number[]) => {
+      const camera = (window as any).__spike.view.camera;
+      if (!camera) return null;
+      // Vector3-at a kamerabol kolcsonzunk: a THREE nincs kulon kiteve.
+      const point = camera.position.clone();
+      point.set(t[0], t[1], t[2]);
+      point.project(camera);
+      return [
+        (point.x * 0.5 + 0.5) * window.innerWidth,
+        (-point.y * 0.5 + 0.5) * window.innerHeight,
+      ];
+    }, target)) as [number, number] | null;
+    if (!screen) return false;
+
+    await page.mouse.move(screen[0], screen[1]);
+    await sleep(120);
+
+    const ray = (await page.evaluate(() => {
+      const spike = (window as any).__spike;
+      const [x, y] = spike.aim.ndc();
+      return {
+        from: spike.view.camera.position.toArray(),
+        to: spike.view.aimPointAt(x, y),
+      };
+    })) as { from: number[]; to: number[] };
+
+    // NEM a celkereszt alatti pont es a celpont TAVOLSAGAT merjuk: a
+    // sugar az auto FELULETEN all meg, ami a kozepponttol joformán
+    // fel autohossznyira van -- egy tokeletes celzas is 2.5 m-t adna.
+    // Ehelyett azt kerdezzuk, milyen kozel MEGY EL a sugar a celpont
+    // kozeppontja mellett: ez fugg csak a celzas iranyatol.
+    const off = distanceToRay(target, ray.from, ray.to);
+    if (off <= TOLERANCE_M) return true;
+  }
+  return false;
 }
 
 const hpOf = (page: Page) => page.evaluate("window.__spike.net.hp") as Promise<number>;
@@ -223,9 +284,16 @@ async function main(): Promise<void> {
       (await B.page.evaluate("window.__spike.net.ownWeapon")) === "cannon",
     `B HP: ${aliveBefore} -- a szerver elutasitotta a valtast`,
   );
-  const aimed = await aimAt(A.page, [seen[0], seen[1], seen[2]]);
-  check("a celzas az ellenfelre allithato", aimed, "kepernyore vetitve");
+  // ELOSZOR megvarjuk, hogy a kamera beallljon a teleport utan, es
+  // csak UTANA celzunk: a celzas visszacsatolt, tehat a legutolso
+  // igazitas mar az allo kamerara ervenyes.
   await sleep(400);
+  const aimed = await aimAt(A.page, [seen[0], seen[1], seen[2]]);
+  check(
+    "a celkereszt tenylegesen az ellenfelen van",
+    aimed,
+    "a kliens sajat celzas-sugara az ellenfelet metszi",
+  );
 
   // --- Sebzes ---
   const hpBefore = await hpOf(B.page);

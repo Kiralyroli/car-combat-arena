@@ -25,6 +25,16 @@ import {
 /** A jarmu-modell utvonala. Lasd EREDMENYEK.md: Sedan (generic-passenger-car-pack). */
 const VEHICLE_MODEL_URL = "/models/sedan.glb";
 
+/**
+ * A tetőn ülő fegyvertorony.
+ *
+ * Sketchfab-modell, atdolgozva: 248 ezerrol 14 ezer haromszogre
+ * ritkitva, a texturak 1024-rol 256-ra, es kettevagva forgo talpra
+ * (Turret_Base) es bolinto fegyverre (Turret_Gun). A forras es a
+ * feltuntetes a CREDITS.md-ben.
+ */
+const TURRET_MODEL_URL = "/models/turret.glb";
+
 const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as const;
 
 /** Milyen magasan lebegjen a HP-sav az auto kozeppontja felett (m). */
@@ -118,6 +128,8 @@ export class SceneView {
    * anyagokat hasznalnak, tehat olcsok.
    */
   private remoteTemplate!: THREE.Object3D;
+  /** A fegyvertorony sablonja -- minden auto ebbol kap egy klont. */
+  private turretTemplate!: THREE.Object3D;
   private remoteCars = new Map<string, RemoteCar>();
   /** A sajat autonk rakétavetője (a tetőn). */
   private launcher!: { root: THREE.Group; tube: THREE.Object3D };
@@ -210,6 +222,15 @@ export class SceneView {
     // objektum-grafot masolja, tehat olcso.
     this.remoteTemplate = gltf.scene.clone(true);
 
+    // A tornyot ugyanitt toltjuk be: mire az elso auto felepul, keszen
+    // kell allnia, kulonben fegyver nelkuli autok jelennenek meg.
+    const turretGltf = await loader.loadAsync(TURRET_MODEL_URL);
+    const turretBase = turretGltf.scene.getObjectByName("Turret_Base");
+    if (!turretBase) {
+      throw new Error(`Turret_Base csomopont nem talalhato: ${TURRET_MODEL_URL}`);
+    }
+    this.turretTemplate = turretBase;
+
     // Wrapper: a fizika ezt mozgatja/forgatja. A Body sajat origoja a
     // modellben talajszinten van, a fizika viszont a doboz KOZEPPONTJAT
     // szamolja -- ezert a Body -halfExtents.y lokalis eltolassal kerul
@@ -252,55 +273,28 @@ export class SceneView {
   // --- Rakétaveto (a tetőn) ---
 
   /**
-   * Egyszeru rakétaveto primitivekbol.
+   * A tetőn ülő fegyvertorony egy peldanya.
    *
-   * SZANDEKOSAN nem letoltott modell: a terv az asset-munkat az MVP
-   * utanra uteemezi (5. lepcso: eloszb tesztelok, csak utana tartalom),
-   * es a fegyverkeszlet sincs meg lezarva. Ez a placeholder viszont
-   * megoldja azt, ami most valoban hianyzik: latszik, hogy az auto fel
-   * van fegyverkezve, es hogy MERRE celoz.
+   * A modell (turret.glb) KET csomopontbol all, es pontosan azt a
+   * szerkezetet hozza, amire a celzas epul:
+   *   Turret_Base -- forgo talp (yaw),
+   *   Turret_Gun  -- benne bolinto fegyver (pitch), a talp gyereke.
    *
-   * A felepites keszakarva ugyanaz, mint egy kesobbi valodi modellnel
-   * lenne: egy forgo alap (yaw) es egy benne bolintó cső (pitch) --
-   * igy a csere egyetlen `WeaponPoint_Roof` csomoponttal megoldhato
-   * lesz (terv 6. fejezet).
+   * A meretei a WEAPON_MOUNT-ban vannak, MERVE a modellbol: a bolintas
+   * tengelye 0.534 m-rel a talp folott, a csotorkolat 1.421 m-rel elore.
+   * Ha a modell cserelodik, azokat ujra kell merni -- kulonben a loves
+   * nem a csobol indulna.
    */
   private createLauncher(): { root: THREE.Group; tube: THREE.Object3D } {
-    if (!this.launcherParts) {
-      this.launcherParts = {
-        base: new THREE.BoxGeometry(0.5, 0.16, 0.5),
-        tube: new THREE.CylinderGeometry(0.11, 0.13, WEAPON_MOUNT.tubeLength, 10),
-        material: new THREE.MeshStandardMaterial({
-          color: 0x3a4048,
-          roughness: 0.6,
-          metalness: 0.3,
-        }),
-      };
-      // A cső alapertelmezetten +Y fele all -- forgassuk -Z fele, hogy
-      // az "elore" a modell orr-iranya legyen (lasd config.ts).
-      this.launcherParts.tube.rotateX(Math.PI / 2);
-    }
-    const parts = this.launcherParts;
-
-    const root = new THREE.Group();
-    const base = new THREE.Mesh(parts.base, parts.material);
-    base.castShadow = true;
-    root.add(base);
-
-    // A cső kicsit fentebb es elorebb ul az alapon.
-    const tube = new THREE.Mesh(parts.tube, parts.material);
-    tube.position.set(0, WEAPON_MOUNT.tubeRise, -WEAPON_MOUNT.tubeForward);
-    tube.castShadow = true;
-    root.add(tube);
-
+    // clone(true): a geometriak es anyagok kozosek maradnak, csak az
+    // objektum-graf masolodik -- nyolc jatekosnal ez szamit.
+    const root = this.turretTemplate.clone(true) as THREE.Group;
+    const tube = root.getObjectByName("Turret_Gun");
+    if (!tube) throw new Error("Turret_Gun csomopont nem talalhato a modellben");
+    this.enableShadows(root);
     return { root, tube };
   }
 
-  private launcherParts: {
-    base: THREE.BoxGeometry;
-    tube: THREE.CylinderGeometry;
-    material: THREE.MeshStandardMaterial;
-  } | null = null;
 
   /**
    * A veto beallitasa a celzas szerint.
