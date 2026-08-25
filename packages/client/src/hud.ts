@@ -190,6 +190,9 @@ export class NetStat {
 
   show(): void {
     this.root.hidden = false;
+    // A befoglalo oszlop is: abban ul a sugo-gomb is.
+    const meta = document.getElementById("meta");
+    if (meta) meta.hidden = false;
   }
 
   update(fps: number, pingMs: number | null): void {

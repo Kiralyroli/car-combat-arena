@@ -35,6 +35,10 @@ interface Visible {
   player: boolean;
   /** Az fps/ping kijelzo -- ez dev modon KIVUL is kell, hogy latszodjon. */
   netstat: boolean;
+  /** A JATEKOSNAK szolo vezerles-sugo (nem a fejlesztoi #help). */
+  controls: boolean;
+  /** A sugo-gomb: ez arulja el, hogy a sugo letezik. */
+  helpButton: boolean;
 }
 
 const visible = (page: Page): Promise<Visible> =>
@@ -48,6 +52,11 @@ const visible = (page: Page): Promise<Visible> =>
     netstat:
       getComputedStyle(document.getElementById("netstat") as HTMLElement)
         .display !== "none",
+    controls: !(document.getElementById("controls") as HTMLElement).hidden,
+    // offsetParent: akkor null, ha barmelyik ose rejtve van -- a gomb a
+    // #meta oszlopban ul, tehat a sajat "hidden" jelzoje nem eleg.
+    helpButton:
+      (document.getElementById("help-toggle") as HTMLElement).offsetParent !== null,
   }));
 
 async function load(page: Page, url: string): Promise<void> {
@@ -94,6 +103,32 @@ async function main(): Promise<void> {
     initial.netstat,
     `netstat: ${initial.netstat}`,
   );
+  // A vezerles-sugo CSAK keresre nyilik: magatol nem takarhatja el a
+  // palyat. Amirol viszont tudni kell, hogy letezik -- ezt a mindig
+  // lathato "H sugo" gomb hirdeti.
+  check(
+    "a vezerles-sugo alapbol NEM latszik",
+    !initial.controls,
+    `vezerles-sugo: ${initial.controls}`,
+  );
+  check(
+    "a sugo-gomb viszont igen, tehat tudni lehet rola",
+    initial.helpButton,
+    `sugo-gomb: ${initial.helpButton}`,
+  );
+
+  // ...es a H tenylegesen megnyitja. E nelkul a fenti ket allitas
+  // ugy is teljesulne, hogy a sugo egyaltalan nem mukodik.
+  await page.keyboard.press("KeyH");
+  await sleep(500);
+  const afterH = await visible(page);
+  check(
+    "a H megnyitja a sugot",
+    afterH.controls,
+    `vezerles-sugo H utan: ${afterH.controls}`,
+  );
+  await page.keyboard.press("KeyH");
+  await sleep(900);
 
   // Ctrl+Shift+D
   await page.keyboard.down("Control");

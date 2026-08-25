@@ -21,6 +21,7 @@ import {
   type WeaponId,
 } from "@cca/shared";
 import { Aim } from "./aim";
+import { ControlsHelp } from "./controlsHelp";
 import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
 import { DevMode } from "./devMode";
 import {
@@ -162,6 +163,9 @@ async function main(): Promise<void> {
   const playerHud = new PlayerHud();
   const scoreboard = new Scoreboard();
   const netStat = new NetStat();
+  // A peldanyositas maga koti be a H billentyut es a sugo-gombot; a
+  // sugo CSAK keresre nyilik, tehat innen nem hivunk rajta semmit.
+  new ControlsHelp();
   initDebugPanel();
 
   // Dev mod: a fizika-csuszkak es a technikai panel CSAK itt latszik.
