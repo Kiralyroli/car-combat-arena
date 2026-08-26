@@ -18,45 +18,74 @@ import { clamp, rotateVec } from "./math";
  * tomegharc fegyvere, a gepfegyver az uldozese.
  */
 
+export type WeaponId = "cannon" | "machinegun";
+
+export const WEAPON_IDS: readonly WeaponId[] = ["cannon", "machinegun"];
+
+/** Aki nem valaszt, agyut kap -- ez a jatek eddigi (ismert) fegyvere. */
+export const DEFAULT_WEAPON: WeaponId = "cannon";
+
 /**
  * A tetőn ülő fegyver geometriaja, a karosszeria KOZEPPONTJAHOZ kepest.
  *
- * EGY forrasbol dolgozik a megjelenites (scene.ts epiti belole a
+ * EGY forrasbol dolgozik a megjelenites (scene.ts ebbol allitja be a
  * modellt) es a fizika (innen szamolodik a loves kiindulopontja). Ez
  * nem szepitkezes: kulon szamokkal a ket oldal eszrevetlenul elcsuszna,
  * es a jatekos azt latna, hogy a loves nem a csobol jon.
+ *
+ * FEGYVERENKENT KULON: a ket fegyvernek sajat modellje van (turret.glb
+ * es flak.glb), mas-mas csohosszal. Egy kozos szam valamelyiket
+ * elrontana -- vagy az agyu lone a cso kozepebol, vagy a gepfegyver a
+ * cso vege ELOTTI levegobol.
  */
-export const WEAPON_MOUNT = {
-  /**
-   * A torony talpanak magassaga (m).
-   *
-   * A modell tetőteje kb. 1.45 m-re van a talajtol, a chassis
-   * kozeppontja pedig halfExtents.y magasan -- a kettő kulonbsege adja
-   * a tetőszintet.
-   */
-  height: 1.45 - CHASSIS.halfExtents.y,
 
+/**
+ * A fegyver talpanak magassaga a karosszeria kozeppontja folott (m).
+ *
+ * Ez KOZOS: mindket fegyver ugyanarra a tetőre kerul. A modell tetőteje
+ * kb. 1.45 m-re van a talajtol, a chassis kozeppontja pedig
+ * halfExtents.y magasan -- a kettő kulonbsege adja a tetőszintet.
+ */
+export const WEAPON_MOUNT_HEIGHT = 1.45 - CHASSIS.halfExtents.y;
+
+export interface WeaponMount {
   /**
    * A BOLINTAS tengelye, a talp folott (m).
    *
-   * A torony-modellbol MERVE (turret.glb): a Turret_Gun csomopont
-   * eltolasa a Turret_Base-hez kepest. Nem talalgatott ertek -- ha a
-   * modell cserelodik, ujra kell merni, kulonben a loves nem a csobol
-   * indul (lasd weapon-origin ellenorzes a check:weapons-ban).
+   * A modellbol MERVE: a Turret_Gun csomopont eltolasa a Turret_Base-hez
+   * kepest. Nem talalgatott ertek -- ha a modell cserelodik, ujra kell
+   * merni, kulonben a loves nem a csobol indul.
    */
-  pitchPivot: 0.534,
-
+  pitchPivot: number;
   /**
    * A csotorkolat tavolsaga a bolintas tengelyetol, elore (m).
    *
-   * Szinten MERVE: a cso pontosan vizszintes a tengely magassagaban,
-   * tehat a bolintas a torkolatot ekkora sugaron forgatja.
+   * Szinten MERVE, es a modell keszitesenel KIKENYSZERITVE: a cso
+   * pontosan a bolintas tengelyenek magassagaban all vizszintesen, tehat
+   * a bolintas a torkolatot ekkora sugaron forgatja. Ha a cso a tengely
+   * folott vagy alatt lenne, ez az egy szam nem irna le a torkolatot.
    */
-  muzzleForward: 1.421,
+  muzzleForward: number;
+}
+
+/**
+ * Fegyverenkenti rogzites-geometria, mindketto a sajat modelljebol merve.
+ */
+export const WEAPON_MOUNTS: Record<WeaponId, WeaponMount> = {
+  // flak.glb -- Flak 18/36 88 mm, 2.6 m hosszura meretezve.
+  cannon: { pitchPivot: 0.59, muzzleForward: 1.779 },
+  // turret.glb -- 2.2 m hosszu gepagyu-torony.
+  machinegun: { pitchPivot: 0.534, muzzleForward: 1.421 },
 };
 
+export function weaponMount(weapon: WeaponId): WeaponMount {
+  return WEAPON_MOUNTS[weapon];
+}
+
 /** A csotorkolat tavolsaga a fegyver forgaspontjatol, elore. */
-export const MUZZLE_FORWARD = WEAPON_MOUNT.muzzleForward;
+export function muzzleForwardOf(weapon: WeaponId): number {
+  return WEAPON_MOUNTS[weapon].muzzleForward;
+}
 
 /**
  * A csotorkolat vilagbeli helye.
@@ -65,16 +94,18 @@ export const MUZZLE_FORWARD = WEAPON_MOUNT.muzzleForward;
  * rogzitve), az elore-eltolas viszont a CELZAS iranyaba mutat (a cso
  * arra bolint). Ezert nem eleg egyetlen eltolas-vektor.
  *
- * A forward parameter alapertelmezesben a csotorkolat; a raketa ennel tovabb
- * indul, hogy ne a sajat autoban szulessen meg (lasd ROCKET_SPAWN_OFFSET).
+ * A forward parameter alapertelmezesben a fegyver sajat csotorkolata; a
+ * raketa ennel tovabb indul, hogy ne a sajat autoban szulessen meg
+ * (lasd ROCKET_SPAWN_OFFSET).
  */
 export function muzzleWorldPosition(
   carPosition: readonly number[],
   carRotation: readonly number[],
   direction: readonly [number, number, number],
-  forward: number = MUZZLE_FORWARD,
+  weapon: WeaponId,
+  forward: number = muzzleForwardOf(weapon),
 ): [number, number, number] {
-  const pivot = weaponPivot(carPosition, carRotation);
+  const pivot = weaponPivot(carPosition, carRotation, weapon);
   return [
     pivot[0] + direction[0] * forward,
     pivot[1] + direction[1] * forward,
@@ -87,12 +118,12 @@ export function muzzleWorldPosition(
  *
  * Innen kell szamolni a celzas iranyat is -- nem az auto kozeppontjabol.
  *
- * MIERT: a torkolat 0.85 m-rel a kozeppont FOLOTT van. Ha a szoget a
- * kozeppontbol szamolnank, de a lovest a torkolatbol inditanank, a
- * ketto parhuzamos lenne, es a loves pont ennyivel a celpont FOLE
- * menne -- egy 1.51 m magas autonal ez a tetőt is elkerulne. Merve:
- * a visszatekeres-teszt azonnal nullara esett, amikor a torkolatot
- * feljebb vittem, de a celzas origoja a kozeppont maradt.
+ * MIERT: a torkolat majdnem egy meterrel a kozeppont FOLOTT van. Ha a
+ * szoget a kozeppontbol szamolnank, de a lovest a torkolatbol
+ * inditanank, a ketto parhuzamos lenne, es a loves pont ennyivel a
+ * celpont FOLE menne -- egy 1.51 m magas autonal ez a tetőt is
+ * elkerulne. Merve: a visszatekeres-teszt azonnal nullara esett, amikor
+ * a torkolatot feljebb vittem, de a celzas origoja a kozeppont maradt.
  *
  * A forgaspont SZANDEKOSAN nem fugg a celzas iranyatol (csak a cso
  * elore-nyulasa fugg tole), kulonben korkorös lenne a szamitas.
@@ -100,6 +131,7 @@ export function muzzleWorldPosition(
 export function weaponPivot(
   carPosition: readonly number[],
   carRotation: readonly number[],
+  weapon: WeaponId,
 ): [number, number, number] {
   const rise = rotateVec(
     {
@@ -108,7 +140,7 @@ export function weaponPivot(
       z: carRotation[2],
       w: carRotation[3],
     },
-    { x: 0, y: WEAPON_MOUNT.height + WEAPON_MOUNT.pitchPivot, z: 0 },
+    { x: 0, y: WEAPON_MOUNT_HEIGHT + WEAPON_MOUNTS[weapon].pitchPivot, z: 0 },
   );
   return [
     carPosition[0] + rise.x,
@@ -116,13 +148,6 @@ export function weaponPivot(
     carPosition[2] + rise.z,
   ];
 }
-
-export type WeaponId = "cannon" | "machinegun";
-
-export const WEAPON_IDS: readonly WeaponId[] = ["cannon", "machinegun"];
-
-/** Aki nem valaszt, agyut kap -- ez a jatek eddigi (ismert) fegyvere. */
-export const DEFAULT_WEAPON: WeaponId = "cannon";
 
 /**
  * Halozatrol erkezo ertek ellenorzese.

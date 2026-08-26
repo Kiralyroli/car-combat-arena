@@ -9,7 +9,11 @@
 import { CHASSIS } from "../src/config";
 import {
   MACHINEGUN,
-  MUZZLE_FORWARD,
+  muzzleForwardOf,
+  weaponMount,
+  weaponPivot,
+  WEAPON_IDS,
+  weaponLabel,
   muzzleWorldPosition,
   aimDirection,
   applySpread,
@@ -250,21 +254,44 @@ function main(): void {
   // Ez jatek kozben azonnal lathato hiba volt: a nyomjelzo a
   // lokharito magassagabol jott, nem a tetőn ülő csobol. A szam
   // magaban keveset mond, ezert a KAROSSZERIA TETEJEHEZ merjuk.
-  {
+  //
+  // MINDKET fegyverre kulon: sajat modelljuk van, sajat csohosszal.
+  // Egy kozos ellenorzes atengedne azt a hibat, amikor csak az egyik
+  // modell meretei csusznak el.
+  for (const weapon of WEAPON_IDS) {
+    const nev = weaponLabel(weapon);
     const roofAboveCenter = CHASSIS.halfExtents.y;
     const level: [number, number, number, number] = [0, 0, 0, 1];
     const forward: [number, number, number] = [0, 0, -1];
 
-    const muzzle = muzzleWorldPosition([0, 0, 0], level, forward);
+    const muzzle = muzzleWorldPosition([0, 0, 0], level, forward, weapon);
     check(
-      "a csotorkolat a karosszeria TETEJE folott van",
+      `${nev}: a csotorkolat a karosszeria TETEJE folott van`,
       muzzle[1] > roofAboveCenter,
       muzzle[1].toFixed(2) + ' m a kozepponttol, a tetőszint ' + roofAboveCenter.toFixed(2) + ' m',
     );
     check(
-      "a torkolat elore all a fegyver forgaspontjatol",
-      Math.abs(muzzle[2] + MUZZLE_FORWARD) < 1e-9,
+      `${nev}: a torkolat elore all a fegyver forgaspontjatol`,
+      Math.abs(muzzle[2] + muzzleForwardOf(weapon)) < 1e-9,
       muzzle[2].toFixed(2) + ' m (-Z = elore)',
+    );
+
+    // A torkolat a BOLINTASSAL egyutt fordul, es a forgasponttol mert
+    // tavolsaga kozben allando marad. Ez az, ami feljogosit arra, hogy
+    // a torkolatot EGYETLEN szammal irjuk le: ha a cso nem a tengely
+    // magassagaban allna, a bolintas kozelebb-tavolabb vinne.
+    const up = aimDirection(0, 0.6);
+    const raised = muzzleWorldPosition([0, 0, 0], level, up, weapon);
+    const pivot = weaponPivot([0, 0, 0], level, weapon);
+    const sugar = Math.hypot(
+      raised[0] - pivot[0],
+      raised[1] - pivot[1],
+      raised[2] - pivot[2],
+    );
+    check(
+      `${nev}: a torkolat a bolintassal allando sugaron mozog`,
+      Math.abs(sugar - muzzleForwardOf(weapon)) < 1e-9,
+      sugar.toFixed(3) + ' m, varva ' + muzzleForwardOf(weapon).toFixed(3) + ' m',
     );
 
     // Az auto elfordulasaval a fuggoleges eltolas is fordul: a fegyver
@@ -272,11 +299,26 @@ function main(): void {
     // tehat OLDALT kell lennie, nem folotte.
     const half = Math.SQRT1_2;
     const rolled: [number, number, number, number] = [0, 0, half, half];
-    const tilted = muzzleWorldPosition([0, 0, 0], rolled, forward);
+    const tilted = muzzleWorldPosition([0, 0, 0], rolled, forward, weapon);
     check(
-      "a fegyver az autoval egyutt dol",
+      `${nev}: a fegyver az autoval egyutt dol`,
       Math.abs(tilted[1]) < 1e-6 && Math.abs(tilted[0]) > 0.5,
       'oldalara dolve: x=' + tilted[0].toFixed(2) + ', y=' + tilted[1].toFixed(2),
+    );
+  }
+
+  // --- A ket fegyver geometriaja tenyleg KULONBOZIK ---
+  //
+  // Ha a ket modell szamai veletlenul egybeesnenek (pl. masolas-hiba
+  // miatt), a fenti ellenorzesek mind atmennenek, es eszrevetlen
+  // maradna, hogy az egyik fegyver a masik meretei szerint lo.
+  {
+    const cannon = weaponMount("cannon");
+    const mg = weaponMount("machinegun");
+    check(
+      "a ket fegyver csohossza kulonbozik",
+      Math.abs(cannon.muzzleForward - mg.muzzleForward) > 0.1,
+      `agyu: ${cannon.muzzleForward} m, gepfegyver: ${mg.muzzleForward} m`,
     );
   }
   // --- Szoras ---

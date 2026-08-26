@@ -105,7 +105,7 @@ function run(aimAtPast: boolean): { damage: number; offset: number } {
   // kozeppontjabol szamolnank, a teszt olyat merne, ami a jatekban
   // nem tortenik.
   const angles = aimAngles(
-    weaponPivot(shooterPos, [0, 0, 0, 1]),
+    weaponPivot(shooterPos, [0, 0, 0, 1], "machinegun"),
     aimTarget,
   );
   shooter.state = {

@@ -15,6 +15,13 @@
  *   npx tsx scripts/check-death.ts
  */
 import { chromium, type Browser, type Page } from "playwright";
+import {
+  LANE_FAR_Z,
+  LANE_NEAR_Z,
+  LANE_X,
+  laneIsClear,
+  laneLabel,
+} from "./arenaLane";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
@@ -157,6 +164,12 @@ async function main(): Promise<void> {
     "window.__spike.view.explosionsSpawned",
   )) as number;
 
+  check(
+    "a teszt savja szabad az arenaban",
+    laneIsClear(),
+    `${laneLabel()} -- e nelkul nem a sebzest mernenk`,
+  );
+
   let destroyed = false;
   let rams = 0;
   for (; rams < 12 && !destroyed; rams++) {
@@ -167,8 +180,18 @@ async function main(): Promise<void> {
     await waitUntilAlive(a);
     await waitUntilAlive(b);
 
-    await a.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 34 })");
-    await b.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 0 })");
+    // SZABAD SAVBAN futunk neki (arenaLane.ts). Korabban x=0 volt, es
+    // a 120 m-es palyan EPPEN oda kerult egy konteneres fedezek: az
+    // auto egy meter utan annak ment, a 12 rammelesbol egy sem ert el
+    // B-ig, es a teszt ugy bukott, mintha a sebzes romlott volna el.
+    await a.evaluate(
+      ([x, z]) => (window as any).__spike.backend.reset({ x, y: 1.0, z }),
+      [LANE_X, LANE_FAR_Z],
+    );
+    await b.evaluate(
+      ([x, z]) => (window as any).__spike.backend.reset({ x, y: 1.0, z }),
+      [LANE_X, LANE_NEAR_Z],
+    );
 
     // MEGVARJUK a szerver-oldali ujraszinkront, nem alszunk fix ideig.
     //

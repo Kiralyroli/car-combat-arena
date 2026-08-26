@@ -10,6 +10,13 @@
  *   npx tsx scripts/check-collision.ts
  */
 import { chromium, type Browser, type Page } from "playwright";
+import {
+  LANE_FAR_Z,
+  LANE_NEAR_Z,
+  LANE_X,
+  laneIsClear,
+  laneLabel,
+} from "./arenaLane";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 
@@ -109,13 +116,25 @@ async function waitForSettled(page: Page, timeoutMs = 8000): Promise<boolean> {
  * lassabban szimulal, rovid tavon a kocsi meg alig gyorsul fel, es az
  * utkozes erotlen lenne -- nem a fizika, hanem a teszt miatt.
  */
+/**
+ * A ket auto helye: EGY SZABAD SAVBAN, egymassal szemben.
+ *
+ * A savot es a szabadsag-ellenorzest az arenaLane.ts tartja -- a
+ * check:death ugyanazt hasznalja, mert ugyanaz a csapda varja.
+ */
 async function placeFacing(a: Page, b: Page): Promise<void> {
-  await a.evaluate(() => {
-    (window as any).__spike.backend.reset({ x: 0, y: 1.0, z: 30 });
-  });
-  await b.evaluate(() => {
-    (window as any).__spike.backend.reset({ x: 0, y: 1.0, z: 0 });
-  });
+  await a.evaluate(
+    ([x, z]) => {
+      (window as any).__spike.backend.reset({ x, y: 1.0, z });
+    },
+    [LANE_X, LANE_FAR_Z],
+  );
+  await b.evaluate(
+    ([x, z]) => {
+      (window as any).__spike.backend.reset({ x, y: 1.0, z });
+    },
+    [LANE_X, LANE_NEAR_Z],
+  );
 }
 
 async function main(): Promise<void> {
@@ -128,7 +147,28 @@ async function main(): Promise<void> {
 
   const clientB = await openClient(room);
   const b = clientB.page;
+
+  // ELOBB megvarjuk a meccs indulasat, es csak UTANA allitjuk fel a
+  // jelenetet.
+  //
+  // Ket jatekosnal a meccs magatol elindul, es az indulas MINDENKIT
+  // ujraszulet -- vagyis a szerver a spawn-pontjara teszi az autokat,
+  // felulirva a placeFacing-et. Amig a meccs nem megy, a kocsi nem is
+  // indul el: merve, a teljes gaz mellett is 0 km/h maradt, es a ket
+  // auto vegig 29 m-re allt egymastol. (Ugyanez a csapda a check:mg-ben
+  // is meg van jegyezve.)
+  await b.waitForFunction(
+    () => (window as any).__spike?.net?.match?.phase === "playing",
+    null,
+    { timeout: 25000 },
+  );
   await sleep(2000);
+
+  check(
+    "a teszt savja szabad az arenaban",
+    laneIsClear(),
+    `${laneLabel()} -- e nelkul nem az utkozest mernenk`,
+  );
 
   await placeFacing(a, b);
   await sleep(500);

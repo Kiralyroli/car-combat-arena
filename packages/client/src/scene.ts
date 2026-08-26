@@ -1,13 +1,14 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
-  WEAPON_MOUNT,
+  WEAPON_MOUNT_HEIGHT,
   SPAWN_POINTS,
   ARENA_HALF,
   type ArenaBox,
   ARENA,
   CAMERA,
   CHASSIS,
+  DEFAULT_WEAPON,
   EXPLOSION_RADIUS,
   PICKUP_HEIGHT,
   PICKUP_POINTS,
@@ -18,6 +19,7 @@ import {
   wheelTintFor,
   type RocketSnapshot,
   type Transform,
+  type WeaponId,
   type WheelDamage,
   type WheelReadout,
 } from "@cca/shared";
@@ -26,14 +28,19 @@ import {
 const VEHICLE_MODEL_URL = "/models/sedan.glb";
 
 /**
- * A tetőn ülő fegyvertorony.
+ * A tetőn ülő fegyverek modelljei -- FEGYVERENKENT MAS.
  *
- * Sketchfab-modell, atdolgozva: 248 ezerrol 14 ezer haromszogre
- * ritkitva, a texturak 1024-rol 256-ra, es kettevagva forgo talpra
- * (Turret_Base) es bolinto fegyverre (Turret_Gun). A forras es a
- * feltuntetes a CREDITS.md-ben.
+ * Mindketto atdolgozott Sketchfab-modell: kb. 14 ezer haromszogre
+ * ritkitva, 256-os texturakkal, es kettevagva forgo talpra
+ * (Turret_Base) es bolinto fegyverre (Turret_Gun). A ket csomopont
+ * neve SZANDEKOSAN azonos: a jatek ugyanugy kezeli oket, csak a
+ * meretek ternek el (lasd WEAPON_MOUNTS). A forras es a feltuntetes a
+ * CREDITS.md-ben.
  */
-const TURRET_MODEL_URL = "/models/turret.glb";
+const WEAPON_MODEL_URLS: Record<WeaponId, string> = {
+  cannon: "/models/flak.glb",
+  machinegun: "/models/turret.glb",
+};
 
 const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as const;
 
@@ -44,13 +51,13 @@ const HP_BAR_HEIGHT = CHASSIS.halfExtents.y + 1.4;
 const NAME_TAG_HEIGHT = HP_BAR_HEIGHT + 0.7;
 
 /**
- * A fegyver meretei a KOZOS forrasbol jonnek (WEAPON_MOUNT).
+ * A fegyver meretei a KOZOS forrasbol jonnek (WEAPON_MOUNT_HEIGHT).
  *
  * Korabban itt sajat szamok alltak, a loves kiindulopontja pedig
  * mashonnan szamolodott -- ezert jott a loves a lokharito magassagabol
  * a tetőn ülő cso helyett. Egy forras, ket felhasznalo.
  */
-const LAUNCHER_HEIGHT = WEAPON_MOUNT.height;
+const LAUNCHER_HEIGHT = WEAPON_MOUNT_HEIGHT;
 
 /**
  * Egy tavoli (halozati) jatekos autoja.
@@ -88,8 +95,15 @@ interface RemoteCar {
   wheelMeshes: THREE.Mesh[];
   /** A kerekek nyugalmi lokalis Y-koordinataja (a rugo-elmozdulas ehhez kepest hat). */
   wheelRestY: number[];
-  /** Rakétaveto a tetőn -- a celzas iranyaba fordul. */
+  /** Fegyver a tetőn -- a celzas iranyaba fordul. */
   launcher: { root: THREE.Group; tube: THREE.Object3D };
+  /**
+   * Melyik fegyver modellje all rajta most.
+   *
+   * A jatekos ujraszuleteskor valthat fegyvert, tehat a modellt menet
+   * kozben ki kell tudni cserelni -- ehhez tudni kell, mi van kint.
+   */
+  weapon: WeaponId;
   /** HP-sav az auto felett (billboard sprite). */
   hpBar: THREE.Sprite;
   /** Nevtabla a HP-sav felett. */
@@ -128,11 +142,13 @@ export class SceneView {
    * anyagokat hasznalnak, tehat olcsok.
    */
   private remoteTemplate!: THREE.Object3D;
-  /** A fegyvertorony sablonja -- minden auto ebbol kap egy klont. */
-  private turretTemplate!: THREE.Object3D;
+  /** Fegyverenkenti torony-sablon -- minden auto ebbol kap egy klont. */
+  private weaponTemplates = {} as Record<WeaponId, THREE.Object3D>;
   private remoteCars = new Map<string, RemoteCar>();
-  /** A sajat autonk rakétavetője (a tetőn). */
+  /** A sajat autonk fegyvere (a tetőn). */
   private launcher!: { root: THREE.Group; tube: THREE.Object3D };
+  /** Melyik fegyver modellje all most a sajat autonkon. */
+  private ownWeapon: WeaponId = DEFAULT_WEAPON;
 
   private camPos = new THREE.Vector3(0, 6, -12);
   private camLook = new THREE.Vector3();
@@ -222,14 +238,22 @@ export class SceneView {
     // objektum-grafot masolja, tehat olcso.
     this.remoteTemplate = gltf.scene.clone(true);
 
-    // A tornyot ugyanitt toltjuk be: mire az elso auto felepul, keszen
-    // kell allnia, kulonben fegyver nelkuli autok jelennenek meg.
-    const turretGltf = await loader.loadAsync(TURRET_MODEL_URL);
-    const turretBase = turretGltf.scene.getObjectByName("Turret_Base");
-    if (!turretBase) {
-      throw new Error(`Turret_Base csomopont nem talalhato: ${TURRET_MODEL_URL}`);
-    }
-    this.turretTemplate = turretBase;
+    // MINDKET fegyver modelljet ugyanitt toltjuk be: mire az elso auto
+    // felepul, keszen kell allniuk, kulonben fegyver nelkuli autok
+    // jelennenek meg. Parhuzamosan toltjuk -- a ket keres egymastol
+    // fuggetlen, sorban varakozva feleslegesen lassitana az inditast.
+    const weapons = Object.keys(WEAPON_MODEL_URLS) as WeaponId[];
+    const loaded = await Promise.all(
+      weapons.map((w) => loader.loadAsync(WEAPON_MODEL_URLS[w])),
+    );
+    weapons.forEach((weapon, i) => {
+      const url = WEAPON_MODEL_URLS[weapon];
+      const base = loaded[i].scene.getObjectByName("Turret_Base");
+      if (!base) {
+        throw new Error(`Turret_Base csomopont nem talalhato: ${url}`);
+      }
+      this.weaponTemplates[weapon] = base;
+    });
 
     // Wrapper: a fizika ezt mozgatja/forgatja. A Body sajat origoja a
     // modellben talajszinten van, a fizika viszont a doboz KOZEPPONTJAT
@@ -239,9 +263,9 @@ export class SceneView {
     body.position.y -= CHASSIS.halfExtents.y;
     chassisWrapper.add(body);
 
-    // Rakétaveto a tetőre. A jarmu GYEREKE, tehat egyutt mozog es dol
+    // Fegyver a tetőre. A jarmu GYEREKE, tehat egyutt mozog es dol
     // vele -- csak a celzas-irany szamolodik le rola (lasd aimLauncher).
-    this.launcher = this.createLauncher();
+    this.launcher = this.createLauncher(this.ownWeapon);
     this.launcher.root.position.y = LAUNCHER_HEIGHT;
     chassisWrapper.add(this.launcher.root);
 
@@ -273,24 +297,29 @@ export class SceneView {
   // --- Rakétaveto (a tetőn) ---
 
   /**
-   * A tetőn ülő fegyvertorony egy peldanya.
+   * A tetőn ülő fegyver egy peldanya.
    *
-   * A modell (turret.glb) KET csomopontbol all, es pontosan azt a
-   * szerkezetet hozza, amire a celzas epul:
+   * MINDKET modell (turret.glb, flak.glb) ugyanabbol a KET csomopontbol
+   * all, es pontosan azt a szerkezetet hozza, amire a celzas epul:
    *   Turret_Base -- forgo talp (yaw),
    *   Turret_Gun  -- benne bolinto fegyver (pitch), a talp gyereke.
    *
-   * A meretei a WEAPON_MOUNT-ban vannak, MERVE a modellbol: a bolintas
-   * tengelye 0.534 m-rel a talp folott, a csotorkolat 1.421 m-rel elore.
-   * Ha a modell cserelodik, azokat ujra kell merni -- kulonben a loves
-   * nem a csobol indulna.
+   * A meretek a WEAPON_MOUNTS-ban vannak, fegyverenkent MERVE a
+   * modellbol. Ha egy modell cserelodik, azokat ujra kell merni --
+   * kulonben a loves nem a csobol indulna.
    */
-  private createLauncher(): { root: THREE.Group; tube: THREE.Object3D } {
+  private createLauncher(
+    weapon: WeaponId,
+  ): { root: THREE.Group; tube: THREE.Object3D } {
     // clone(true): a geometriak es anyagok kozosek maradnak, csak az
     // objektum-graf masolodik -- nyolc jatekosnal ez szamit.
-    const root = this.turretTemplate.clone(true) as THREE.Group;
+    const root = this.weaponTemplates[weapon].clone(true) as THREE.Group;
     const tube = root.getObjectByName("Turret_Gun");
-    if (!tube) throw new Error("Turret_Gun csomopont nem talalhato a modellben");
+    if (!tube) {
+      throw new Error(
+        `Turret_Gun csomopont nem talalhato: ${WEAPON_MODEL_URLS[weapon]}`,
+      );
+    }
     this.enableShadows(root);
     return { root, tube };
   }
@@ -1046,6 +1075,38 @@ export class SceneView {
   }
 
   /**
+   * A tavoli auto fegyver-modelljenek csereje.
+   *
+   * A jatekos ujraszuleteskor valthat fegyvert, tehat a torony nem
+   * allando: ki kell cserelni, kulonben az agyus ellenfel tovabbra is
+   * gepfegyverrel latszana -- es a jatekos abbol olvassa ki, mire
+   * szamitson tole.
+   */
+  setRemoteWeapon(id: string, weapon: WeaponId): void {
+    const car = this.remoteCars.get(id);
+    if (!car || car.weapon === weapon) return;
+    // A regi torony geometriait/anyagait NEM szabaditjuk fel: a klon
+    // OSZTOZIK rajtuk a sablonnal es a tobbi autoval (clone(true)) --
+    // eldobva a tobbiek modellje tunne el. Csak a jelenetbol vesszuk ki.
+    car.wrapper.remove(car.launcher.root);
+    car.launcher = this.createLauncher(weapon);
+    car.launcher.root.position.y = LAUNCHER_HEIGHT;
+    car.wrapper.add(car.launcher.root);
+    car.weapon = weapon;
+  }
+
+  /** Ugyanez a SAJAT autonkra. */
+  setOwnWeapon(weapon: WeaponId): void {
+    if (this.ownWeapon === weapon) return;
+    this.ownWeapon = weapon;
+    if (!this.chassisMesh) return;
+    this.chassisMesh.remove(this.launcher.root);
+    this.launcher = this.createLauncher(weapon);
+    this.launcher.root.position.y = LAUNCHER_HEIGHT;
+    this.chassisMesh.add(this.launcher.root);
+  }
+
+  /**
    * Ahogy EZ a kliens latja egy tavoli auto szinet -- vagy null.
    *
    * A tesztek ebbol ellenorzik, hogy ket kulon kliens ugyanazt latja-e;
@@ -1098,8 +1159,10 @@ export class SceneView {
     wrapper.add(car);
     this.enableShadows(wrapper);
 
-    // Rakétaveto a tavoli autora is: igy latszik, ha ranK celoznak.
-    const launcher = this.createLauncher();
+    // Fegyver a tavoli autora is: igy latszik, ha rank celoznak. A
+    // fegyver fajtajat a snapshotbol tudjuk meg (setRemoteWeapon), addig
+    // az alapertelmezettel indul.
+    const launcher = this.createLauncher(DEFAULT_WEAPON);
     launcher.root.position.y = LAUNCHER_HEIGHT;
     wrapper.add(launcher.root);
 
@@ -1145,6 +1208,7 @@ export class SceneView {
       wheelMeshes,
       wheelRestY,
       launcher,
+      weapon: DEFAULT_WEAPON,
       hpBar,
       nameTag,
       shownName: "",

@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import {
   DEFAULT_CAR_COLOR,
+  DEFAULT_WEAPON,
   INTERP_DELAY_MS,
   type CarColorId,
   type PlayerSnapshot,
+  type WeaponId,
 } from "@cca/shared";
 
 /**
@@ -126,6 +128,15 @@ export class RemotePlayers {
    */
   private readonly colors = new Map<string, CarColorId>();
 
+  /**
+   * Ki milyen fegyverrel jatszik.
+   *
+   * A tetőn ülő modell ebbol all elo, tehat rá lehet nezni egy autora,
+   * es latni, mire szamitsunk tole. Ujraszuleteskor valtozhat, ezert
+   * minden snapshotbol frissul.
+   */
+  private readonly weapons = new Map<string, WeaponId>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
@@ -146,6 +157,10 @@ export class RemotePlayers {
     return this.colors.get(id) ?? DEFAULT_CAR_COLOR;
   }
 
+  weaponOf(id: string): WeaponId {
+    return this.weapons.get(id) ?? DEFAULT_WEAPON;
+  }
+
   ids(): string[] {
     return [...this.buffers.keys()];
   }
@@ -161,6 +176,7 @@ export class RemotePlayers {
     this.lives.delete(id);
     this.protectedIds.delete(id);
     this.colors.delete(id);
+    this.weapons.delete(id);
   }
 
   clear(): void {
@@ -170,6 +186,7 @@ export class RemotePlayers {
     this.lives.clear();
     this.protectedIds.clear();
     this.colors.clear();
+    this.weapons.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
@@ -179,6 +196,7 @@ export class RemotePlayers {
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
       this.colors.set(player.id, player.color);
+      this.weapons.set(player.id, player.weapon);
       if (player.protected) this.protectedIds.add(player.id);
       else this.protectedIds.delete(player.id);
 

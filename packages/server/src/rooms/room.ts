@@ -947,6 +947,7 @@ export class Room {
         player.state.position,
         player.state.rotation,
         direction,
+        "machinegun",
       );
 
       for (let i = 0; i < result.shots; i++) {

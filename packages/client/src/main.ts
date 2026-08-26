@@ -144,7 +144,14 @@ async function main(): Promise<void> {
     // A FEGYVER forgaspontjabol, nem az auto kozeppontjabol: a loves is
     // onnan indul (lasd weaponPivot). Ha a ketto elter, a loves
     // parhuzamosan elmegy a celpont mellett.
-    const origin = weaponPivot(chassis.position, chassis.quaternion);
+    //
+    // A SAJAT fegyverunkkel: a ket fegyver forgaspontja mas magassagban
+    // van (kulon modell), tehat ugyanaz a celkereszt mas szoget jelent.
+    const origin = weaponPivot(
+      chassis.position,
+      chassis.quaternion,
+      net.ownWeapon,
+    );
     const dx = target[0] - origin[0];
     const dy = target[1] - origin[1];
     const dz = target[2] - origin[2];
@@ -512,6 +519,9 @@ async function main(): Promise<void> {
       // (playerJoined vagy snapshot), a vege ugyanaz -- es minden
       // kliens ugyanazt a jatekost ugyanolyannak latja.
       view.setRemoteColor(id, carColorHex(net.remotes.colorOf(id)));
+      // A FEGYVER ugyanigy: ujraszuleteskor valthat, es a tetőn ülő
+      // modellbol kell latszania, mire szamitsunk az ellenfeltol.
+      view.setRemoteWeapon(id, net.remotes.weaponOf(id));
 
       const state = net.remotes.sample(id, now);
       if (!state) continue;
@@ -614,6 +624,10 @@ async function main(): Promise<void> {
     const ownAim = currentAim(currChassis);
     view.setOwnAim(ownAim.yaw, ownAim.pitch);
     view.setOwnColor(carColorHex(net.ownColor));
+    // A sajat fegyverunk modellje is a halozati allapotbol jon: a
+    // valasztast a SZERVER hagyja jova (elve nem lehet valtani), tehat
+    // amit kirajzolunk, az a tenylegesen ervenyes fegyver.
+    view.setOwnWeapon(net.ownWeapon);
 
     net.sendState(
       {

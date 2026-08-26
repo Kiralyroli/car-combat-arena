@@ -82,7 +82,7 @@ export class RocketSimulation {
     // -- a kliens csak a celpontot adja. A forgaspont (nem az auto
     // kozeppontja) azert kell, mert a lovedek is onnan indul: kulonben a
     // ket egyenes parhuzamos lenne, es a raketa a celpont folott menne el.
-    const pivot = weaponPivot(shooter.position, shooter.rotation);
+    const pivot = weaponPivot(shooter.position, shooter.rotation, "cannon");
     let dx = target[0] - pivot[0];
     let dy = target[1] - pivot[1];
     let dz = target[2] - pivot[2];
@@ -106,6 +106,7 @@ export class RocketSimulation {
       shooter.position,
       shooter.rotation,
       [dx, dy, dz],
+      "cannon",
       ROCKET_SPAWN_OFFSET,
     );
 
