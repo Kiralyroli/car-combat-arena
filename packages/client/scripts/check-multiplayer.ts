@@ -36,7 +36,11 @@ function clientUrl(hash: string): string {
     LAG_MS > 0 ? `&lag=${LAG_MS}${JITTER_MS > 0 ? `&jitter=${JITTER_MS}` : ""}` : "";
   // A ?name= ATUGORJA a nev-parbeszedet -- kulonben minden e2e futas
   // ott allna meg, a csatlakozasra varva.
-  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}${hash}`;
+  // A ?dekor=0 kikapcsolja a texturazott talajt es a panorama-eget:
+  // azok a JATEKMENETBEN nem szamitanak, a szoftveres rendereloben
+  // viszont annyira lelassitjak a lapot, hogy a fizika lemarad (lasd
+  // scene.ts dekoracioBe).
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}&dekor=0${hash}`;
 }
 
 let failures = 0;

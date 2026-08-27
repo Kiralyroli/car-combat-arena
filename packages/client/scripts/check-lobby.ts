@@ -27,7 +27,8 @@ async function openLobby(): Promise<{ browser: Browser; page: Page }> {
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba] ${e.message}`));
-  await page.goto(CLIENT_URL);
+  // A ?dekor=0-rol lasd a scene.ts dekoracioBe fuggvenyet.
+  await page.goto(`${CLIENT_URL}?dekor=0`);
   await page.waitForSelector("#lobby:not([hidden])", { timeout: 20000 });
   return { browser, page };
 }

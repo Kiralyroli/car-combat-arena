@@ -35,7 +35,7 @@ async function open(
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba: ${name}] ${e.message}`));
-  await page.goto(`${CLIENT_URL}?name=${name}&color=${color}${hash}`);
+  await page.goto(`${CLIENT_URL}?name=${name}&color=${color}&dekor=0${hash}`);
   await page.waitForFunction(() => !!(window as any).__spike?.net?.playerId, null, {
     timeout: 20000,
   });

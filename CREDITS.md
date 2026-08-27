@@ -72,3 +72,39 @@ közkincs), de a rend kedvéért itt is szerepelnek:
 | `agyu.wav` | ágyúlövés | CC0 |
 | `robbanas.wav` | robbanás | CC0 |
 | `tulmelegedes.wav` | fegyver-túlmelegedés — [„lavaburn" / memerunknown](https://freesound.org/people/memerunknown/sounds/670075/) | CC0 |
+
+## Textúrák
+
+### Talaj — `packages/client/public/textures/homok-*.webp`
+
+**„Fine Sand Material"** — készítette **chrisg4919**
+
+- Forrás: <https://sketchfab.com/3d-models/fine-sand-material-6e54464d405a4c1e8bdb0f81e8d74db2>
+- Licenc: [CC Attribution 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+**Módosítva.** Az eredeti egy anyagminta: három előnézeti gömb 261 ezer
+háromszöggel és 4096×4096-os textúrákkal, 86 MB-ban. A geometriája a
+játékban nem használható; csak a textúrák kellettek:
+
+- alapszín 1024×1024-re kicsinyítve, WEBP formátumban (17 kB),
+- a normálmap 512×512-re (26 kB) — jelenleg nincs használatban, mert
+  autóból nézve a homok szemcséje nem látszik, viszont minden
+  talaj-képponton egy plusz textúramintát jelentene,
+- a talajon 8 méterenként ismétlődik, anizotrop szűréssel.
+
+### Égbolt — `packages/client/public/textures/eg.webp`
+
+**„Kloofendal 48d Partly Cloudy (Pure Sky)"** — Greg Zaal (eredeti) és
+Jarod Guest (ég-változat), [Poly Haven](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky)
+
+- Licenc: **CC0** (közkincs) — feltüntetés nem kötelező, de illik
+
+**Módosítva.** A 4K-s HDR (EXR, 75 MB) tónus-leképezve WebP-be
+(4096×2048, 278 kB), „Standard" nézet-transzformációval — a Filmic/AgX
+kimosta volna az eget. A játékban két dolgot ad: hátteret, és a
+`PMREMGenerator`-on át környezeti fényt (ettől lettek a fémes felületek
+— a fegyvertorony, a Flak — életszerűek a korábbi lapos szürke helyett).
+
+Az első próbálkozás egy gömb-modellbe csomagolt égbolt volt; azt
+elvetettük, mert a **horizont-sávja üres** volt — épp az a rész, amit a
+játékban látni lehet.

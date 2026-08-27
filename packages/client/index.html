@@ -257,11 +257,20 @@
         justify-content: space-between;
         gap: 24px;
         padding: 18px 24px 20px;
-        /* Lagy sotetites alulrol: a HUD olvashato marad vilagos palyan
-           is, de nem vag el egy kemeny savot a kepbol. */
-        /* Enyhe sotetites, hogy a szoveg olvashato legyen -- de ne
-           hasson a jatekra boritott retegnek. */
-        background: linear-gradient(to top, rgba(13, 17, 23, 0.6), transparent 85%);
+        /*
+           Lagy sotetites alulrol: a HUD olvashato marad VILAGOS palyan
+           is, de nem vag el egy kemeny savot a kepbol.
+
+           A homokos, nappali palyaval ez onmagaban kevesnek bizonyult:
+           a cimkek (HP, BOOST, GUMIK) a sav felso reszen ulnek, ahol az
+           atmenet mar majdnem atlatszo -- a vilagos foldon gyakorlatilag
+           eltuntek. Ezert az atmenet feljebb er, ES a szoveg sajat
+           arnyekot kap (lentebb): az barmilyen hatteren mukodik, es nem
+           kell tovabb sotetiteni a jatekteret.
+        */
+        background: linear-gradient(to top, rgba(13, 17, 23, 0.72), transparent 100%);
+        /* A szoveg sajat kontrasztja -- fuggetlenul attol, mi van mogotte. */
+        text-shadow: 0 1px 3px rgba(1, 4, 9, 0.9), 0 0 8px rgba(1, 4, 9, 0.6);
         pointer-events: none;
         user-select: none;
         font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
@@ -281,7 +290,8 @@
         width: 52px;
         font-size: 11px;
         letter-spacing: 0.12em;
-        color: #8b949e;
+        /* Vilagosabb, mint a korabbi #8b949e: nappali palyan az elveszett. */
+        color: #c9d1d9;
       }
       #player-hud .bar {
         position: relative;
@@ -926,6 +936,21 @@
             target="_blank"
             rel="noopener noreferrer"
             >bear17</a
+          >
+          (<a
+            href="https://creativecommons.org/licenses/by/4.0/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >CC BY</a
+          >), módosítva
+        </div>
+        <div class="credit">
+          Talaj:
+          <a
+            href="https://sketchfab.com/3d-models/fine-sand-material-6e54464d405a4c1e8bdb0f81e8d74db2"
+            target="_blank"
+            rel="noopener noreferrer"
+            >chrisg4919</a
           >
           (<a
             href="https://creativecommons.org/licenses/by/4.0/"

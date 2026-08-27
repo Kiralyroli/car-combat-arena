@@ -562,6 +562,10 @@ async function main(): Promise<void> {
     aim,
     // A hang allapota szinten merheto (lasd check:sound).
     audio,
+    // A NYERS vezerles-allapot: enelkul csak azt lehet merni, hogy az
+    // auto elmozdult-e, ami a renderelo sebessegetol fugg. A billentyu
+    // utja a vezerlesig viszont fuggetlen ettol -- lasd check:ui-input.
+    input,
     boostTank,
     view,
     net,

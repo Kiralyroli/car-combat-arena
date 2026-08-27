@@ -41,7 +41,8 @@ async function openLobby(): Promise<{ browser: Browser; page: Page }> {
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba] ${e.message}`));
-  await page.goto(CLIENT_URL);
+  // A ?dekor=0-rol lasd a scene.ts dekoracioBe fuggvenyet.
+  await page.goto(`${CLIENT_URL}?dekor=0`);
   await page.waitForSelector("#lobby:not([hidden])", { timeout: 20000 });
   return { browser, page };
 }
@@ -121,19 +122,51 @@ async function main(): Promise<void> {
 
   const before = await position();
 
-  // 3 masodperc, mert allo helyzetbol lassan indul, es a headless
-  // bongeszo ~16 fps-sel fut: 1 masodperc utan meg csak ~0.1 m van.
-  // Merve: 3 masodperc alatt ~22 m, tehat az 5 m-es kuszob bosegesen
-  // felette van a zajnak, es elnemitott vezerlesnel 0 m lenne.
+  // 3 masodperc, mert allo helyzetbol lassan indul.
+  //
+  // A KUSZOB SZANDEKOSAN ALACSONY. Ez a teszt azt meri, hogy a
+  // BILLENTYU ELJUT-E a vezerleshez a szovegbeirás utan -- nem azt,
+  // hogy milyen gyorsan gyorsul az auto. A ket eset kozott nem
+  // fokozat, hanem szakadek van: ha az input elveszne, az elmozdulas
+  // PONTOSAN 0 lenne.
+  //
+  // A korabbi 5 m-es kuszob a jelenet akkori (jóval olcsobb)
+  // renderelesehez volt merve -- "3 masodperc alatt ~22 m". A
+  // homok-textura, a panorama-eg es a kornyezeti feny utan a szoftveres
+  // renderelo (SwiftShader) annyira lelassult, hogy a fizika lemarad, es
+  // ugyanez a 3 masodperc 2.4-5.3 m-t ad. Ez a TESZTKORNYEZET
+  // tulajdonsaga, nem a jateke -- valodi videokartyan a texturak
+  // koltsege elhanyagolhato. A kuszobot ezert a merni kivant
+  // kulonbseghez igazitottuk, nem a renderelo sebessegehez.
   await page.keyboard.down("KeyW");
+
+  // KOZVETLEN meres: eljut-e a billentyu a vezerlesig?
+  //
+  // Ez a teszt lenyege, es ez NEM fugg a renderelo sebessegetol. Az
+  // elmozdulas onmagaban megteveszto merce: a szoftveres rendereloben
+  // a fizika lemarad, es ugyanaz a 3 masodperc hol 5 m-t, hol 0.3 m-t
+  // ad -- utobbi mar nem kulonboztetheto meg az "input elveszett"
+  // esettol.
+  await sleep(300);
+  const gaz = (await page.evaluate(
+    () => (window as any).__spike.input.read().throttle as number,
+  )) as number;
+  check(
+    "a W eljut a vezerlesig (gaz allasa)",
+    gaz > 0.9,
+    `throttle = ${gaz}`,
+  );
+
   await sleep(3000);
   await page.keyboard.up("KeyW");
 
   const after = await position();
   const moved = Math.hypot(after[0] - before[0], after[2] - before[2]);
+  // Es az auto TENYLEG el is indul. A kuszob csak a nulla ellen ved: a
+  // pontos ertek a renderelo sebessegetol fugg (lasd fentebb).
   check(
-    "a W tovabbra is gyorsit a palyan",
-    moved > 5,
+    "az auto tenylegesen el is indul",
+    moved > 0.1,
     `${moved.toFixed(2)} m elmozdulas`,
   );
 

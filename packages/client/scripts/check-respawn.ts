@@ -35,7 +35,7 @@ async function openClient(
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba: ${name}] ${e.message}`));
-  await page.goto(`${CLIENT_URL}?name=${name}&weapon=machinegun${hash}`);
+  await page.goto(`${CLIENT_URL}?name=${name}&weapon=machinegun&dekor=0${hash}`);
   await page.waitForFunction(() => !!(window as any).__spike?.net?.playerId, null, {
     timeout: 20000,
   });

@@ -42,6 +42,31 @@ const WEAPON_MODEL_URLS: Record<WeaponId, string> = {
   machinegun: "/models/turret.glb",
 };
 
+/**
+ * Diszites nelkuli mod: `?dekor=0`.
+ *
+ * MIERT VAN: a panorama-eg es a texturazott talaj a kep MINDEN pixelen
+ * dolgozik. Valodi videokartyan ez elhanyagolhato, a bongeszos tesztek
+ * viszont szoftveres renderelovel (SwiftShader) futnak, ahol annyira
+ * lelassult tole a lap, hogy a FIZIKA maradt le: az auto 3 masodperc
+ * alatt 22 m helyett 2 m-t tett meg, es a rammeles-tesztek egyszeruen
+ * nem tudtak osszehozni az utkozest.
+ *
+ * Ugyanaz a megfontolas, mint a BARE_ARENA-nal (config.ts): ami a
+ * meresben nem szamit, az ne is befolyasolja a merest. A tesztek a
+ * jatekmenetet es a halozatot vizsgaljak -- azoknak a talaj SZINE
+ * kozombos. A latvanyt kulon, kepernyokepekkel ellenorizzuk.
+ *
+ * A jatekosok soha nem latjak ezt: kizarolag a tesztek adjak meg.
+ */
+function dekoracioBe(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("dekor") !== "0";
+  } catch {
+    return true;
+  }
+}
+
 const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as const;
 
 /** Milyen magasan lebegjen a HP-sav az auto kozeppontja felett (m). */
@@ -184,8 +209,26 @@ export class SceneView {
     document.body.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0d1117);
-    this.scene.fog = new THREE.Fog(0x0d1117, 60, 140);
+    // NAPPALI, poros ipari udvar.
+    //
+    // A korabbi majdnem-fekete (0x0d1117) egy sotet, semleges dobozos
+    // arenahoz keszult. A homok-talajjal az nem all ossze: vilagos
+    // foldon sotet eg csak akkor van, ha vihar jon.
+    //
+    // A KOD SZINE megegyezik az egevel: igy a tavoli targyak nem egy
+    // masik szinbe olvadnak bele, hanem eltunni latszanak a porban.
+    // Kezdete 70 m -- azon tul mar amugy sem lehet eltalalni senkit
+    // (a gepfegyver hatotava 70 m), tehat a kod nem rejt el olyat,
+    // amire lonel.
+    // A KOD SZINE a panorama-eg HORIZONTJAROL van mintaveve (0xabb1c1),
+    // nem talalgatva: igy a tavoli targyak nem egy masik szinbe olvadnak
+    // bele, hanem eltunni latszanak a porban.
+    //
+    // A hatter ELOSZOR sima szin -- ha a panorama betolt, az veszi at
+    // (lasd loadSky). Ha nem tolt be, ez marad, es a jatek megy tovabb.
+    this.scene.background = new THREE.Color(0xabb1c1);
+    this.scene.fog = new THREE.Fog(0xabb1c1, 70, 190);
+    if (dekoracioBe()) this.loadSky();
 
     this.camera = new THREE.PerspectiveCamera(
       62,
@@ -1422,9 +1465,16 @@ export class SceneView {
     // fenykep nelkul is jol lathatoak legyenek (lasd normalizeMaterials).
     // Emelve (1.1 -> 1.6), hogy a fem-jellegu PBR anyagok kornyezeti
     // fenykep nelkul is jol lathatoak legyenek (lasd normalizeMaterials).
-    this.scene.add(new THREE.HemisphereLight(0x9fb4d0, 0x2a2f38, 1.6));
+    // Eg + a TALAJROL visszaverodo feny. A also szin mostantol a
+    // homok melegebb tonusa, nem a regi sotetszurke: a homokos udvaron
+    // az arnyekban levo felulet alulrol is meleg fenyt kap.
+    // A felgomb-feny MERSEKELVE, mert a panorama-eg (scene.environment)
+    // maga is szort fenyt ad: a ketto egyutt kimosna a feluleteket. Ami
+    // marad, az a TALAJROL visszaverodo meleg feny -- azt a panorama nem
+    // tudja, mert nem a palyan keszult.
+    this.scene.add(new THREE.HemisphereLight(0xcfe0f0, 0x8a7a63, 1.0));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+    const sun = new THREE.DirectionalLight(0xfff4e0, 2.6);
     sun.position.set(28, 44, 18);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -1438,6 +1488,120 @@ export class SceneView {
     this.scene.add(sun);
   }
 
+  /**
+   * Panorama-eg hatternek ES kornyezeti fenynek.
+   *
+   * KET dolgot ad egyszerre:
+   *  - HATTER: a fal folott eg latszik, nem egy sima szin. Nappali
+   *    palyan ez a kulonbseg azonnal latszik.
+   *  - KORNYEZETI FENY (scene.environment): a fem-jellegu feluletek --
+   *    a fegyvertorony, a Flak -- eddig kornyezeti kep NELKUL
+   *    vilagitottak, ezert laposan szurkek voltak. Ettol kapnak
+   *    visszaverodest.
+   *
+   * A betoltes NEM allithatja meg a jatekot: hiba eseten marad a sima
+   * szinu hatter, amit a konstruktor mar beallitott.
+   */
+  private loadSky(): void {
+    new THREE.TextureLoader().load(
+      "/textures/eg.webp",
+      (tex) => {
+        // Panorama (equirektangularis) kep: a Three.js ebbol tudja
+        // gombbe hajlitani, kulon geometria nelkul.
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        // A Poly Haven panoramai a szokasos allasban vannak (a zenit a
+        // kep tetejen), tehat NEM kell forditani. Az elozo, gomb-modellbe
+        // csomagolt eg forditva allt -- es a horizont-savja ures volt,
+        // ami epp az a resz, amit a jatekban latunk.
+        this.scene.background = tex;
+
+        // A KORNYEZETI FENYHEZ eloszurt valtozat kell, nem a nyers kep.
+        //
+        // A nyers panoramat kornyezetnek hasznalva minden felulet
+        // minden kepkockan a teljes 2048-as textural mintavesz --
+        // merve: a lap annyira lelassult tole, hogy a fizika lemaradt
+        // (a check:ui-input szerint az auto 3 masodperc alatt 22 m
+        // helyett 2.7 m-t tett meg). A PMREM egyszer, elore keszit
+        // belole egy kicsi, elmosott valtozatot -- ez az, amire a
+        // szort feny es a homalyos tukrozodes valojaban szuksege van.
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        this.scene.environment = pmrem.fromEquirectangular(tex).texture;
+        pmrem.dispose();
+      },
+      undefined,
+      () => {
+        // Marad a sima szin -- lasd a konstruktort.
+      },
+    );
+  }
+
+  /**
+   * A TALAJ anyaga: ismetelt homok-textura.
+   *
+   * Kulon kezeljuk a tobbi arena-elemtol, mert a talaj mas: egyetlen,
+   * hatalmas (120 x 120 m) felulet, amin a jatekos vegig hajt. Egy sima
+   * szinnel nem latszik rajta a sebesseg -- eddig ezt egy racs potolta.
+   *
+   * A textura ISMETLODIK (RepeatWrapping): egy 1024-es kep felbontasa
+   * 120 m-en 8.5 pixel/meter lenne, ami elmosodott massza. Igy viszont
+   * a mintazat 8 m-enkent ujraindul, ami autobol nezve reszletes marad.
+   *
+   * A betoltes NEM allithatja meg a jatekot: ha a textura nem jon meg,
+   * a talaj a korabbi sima szinevel marad.
+   */
+  private groundMaterial(box: ArenaBox): THREE.MeshStandardMaterial {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 1,
+      metalness: 0,
+    });
+
+    if (!dekoracioBe()) {
+      mat.color.setHex(box.color);
+      return mat;
+    }
+
+    const loader = new THREE.TextureLoader();
+    // Hany meterenkent ismetlodjon a mintazat.
+    const METERENKENT = 8;
+    const ismetles = (box.halfExtents.x * 2) / METERENKENT;
+
+    loader.load(
+      "/textures/homok-alap.webp",
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(ismetles, ismetles);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        // Anizotrop szures: a talajt nagyon lapos szogbol latjuk, es
+        // enelkul a tavolabbi resz csikos masszava mosodik.
+        // Anizotrop szures: a talajt nagyon lapos szogbol latjuk, es
+        // enelkul a tavolabbi resz csikos masszava mosodik.
+        tex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+        mat.map = tex;
+        mat.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        // Nincs textura -- marad a sima szin, a jatek megy tovabb.
+        mat.color.setHex(box.color);
+        mat.needsUpdate = true;
+      },
+    );
+
+    // NORMAL MAP SZANDEKOSAN NINCS.
+    //
+    // Kiprobaltam: a homok szemcseje autobol nezve nem latszik (a
+    // kamera 6 m-rel a kocsi mogott es folott van, a talajt lapos
+    // szogbol latjuk), viszont MINDEN talaj-pixelen egy plusz
+    // texturamintat jelentene -- a talaj pedig a kep nagy reszet
+    // kitolti. A kicsomagolt kep megmaradt a textures/ alatt, ha
+    // kesobb megis kellene.
+
+    return mat;
+  }
+
   private buildArena(): void {
     for (const box of ARENA) {
       const geo = new THREE.BoxGeometry(
@@ -1445,11 +1609,14 @@ export class SceneView {
         box.halfExtents.y * 2,
         box.halfExtents.z * 2,
       );
-      const mat = new THREE.MeshStandardMaterial({
-        color: box.color,
-        roughness: 0.9,
-        metalness: 0.05,
-      });
+      const mat =
+        box.name === "ground"
+          ? this.groundMaterial(box)
+          : new THREE.MeshStandardMaterial({
+              color: box.color,
+              roughness: 0.9,
+              metalness: 0.05,
+            });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(box.position.x, box.position.y, box.position.z);
       if (box.rotation) {
@@ -1470,8 +1637,17 @@ export class SceneView {
     // meretben maradt, es a kulso savok csupasz felulettel latszottak.
     const CELL = 2;
     const size = ARENA_HALF * 2;
-    const grid = new THREE.GridHelper(size, size / CELL, 0x4a5568, 0x323a45);
+    // A racs a HOMOK-TALAJON visszafogott.
+    //
+    // Sotet, semleges palyan a racs volt az egyetlen fogodzo a
+    // sebesseghez. A homok-textura ezt mar magatol megadja (8
+    // meterenkent ismetlodo mintazat), tehat a racsnak eleg halkan
+    // jelen lennie -- teljes erovel kockas papirnak latszana a homokon.
+    const grid = new THREE.GridHelper(size, size / CELL, 0x6b6152, 0x5c5348);
     grid.position.y = 0.02;
+    const gridMat = grid.material as THREE.Material;
+    gridMat.transparent = true;
+    gridMat.opacity = 0.25;
     this.scene.add(grid);
 
     // Ugyanez a racs a FALAKON is.

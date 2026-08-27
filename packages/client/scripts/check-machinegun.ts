@@ -42,7 +42,7 @@ async function openClient(
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba: ${name}] ${e.message}`));
   const lag = LAG_MS > 0 ? `&lag=${LAG_MS}` : "";
-  await page.goto(`${CLIENT_URL}?name=${name}&weapon=${weapon}${lag}${hash}`);
+  await page.goto(`${CLIENT_URL}?name=${name}&weapon=${weapon}${lag}&dekor=0${hash}`);
   await page.waitForFunction(() => !!(window as any).__spike?.net?.playerId, null, {
     timeout: 20000,
   });
@@ -182,7 +182,18 @@ const shotsOf = (page: Page) =>
 async function fireFor(
   page: Page,
   ms: number,
-): Promise<{ peakHeat: number; sawFlash: boolean }> {
+  /**
+   * Ha meg van adva, tuzeles KOZBEN is a celponton tartjuk a keresztet.
+   *
+   * Ezt egy jatekos is megteszi. A teszt korabban csak a sorozat ELOTT
+   * celzott, es ha a kamera meg befele tartott a helyere, a rogzitett
+   * egerpozicio kozben mas vilagbeli iranyt kezdett jelenteni -- innen
+   * jott a hol 100%, hol 22% talalati arany. A mozgo celpont kovetese
+   * MAS kerdes (lasd lentebb, azt szandekosan nem merjuk itt); ez a
+   * celpont all, csak a kamera nem.
+   */
+  keepOn?: [number, number, number],
+): Promise<{ peakHeat: number; sawFlash: boolean; sawLabel: boolean }> {
   await page.mouse.down();
   let peakHeat = 0;
   // A VILLOGAST is menet kozben figyeljuk.
@@ -191,20 +202,47 @@ async function fireFor(
   // sorozaton belul -- a sorozat UTAN mar rég vege. Eloszor ott mertem,
   // es a teszt ugy bukott, mintha a villogas el sem indult volna.
   let sawFlash = false;
+  // A HUD feliratat is MENET KOZBEN nezzuk: a lefulladas allapota a
+  // hules soran megszunik, tehat a sorozat utan mar megint szazalek
+  // allhat a kijelzon. (Merve: "59%" egy olyan futasban, ahol a fegyver
+  // kozben bizonyitottan lefulladt.)
+  let sawLabel = false;
   const until = Date.now() + ms;
   while (Date.now() < until) {
     await sleep(120);
-    const minta = (await page.evaluate(() => ({
-      heat: (window as any).__spike.net.heat as number,
-      villog:
-        document.getElementById("weapon")?.classList.contains("tulmeleg") ??
-        false,
-    }))) as { heat: number; villog: boolean };
+    // EGY hivas: igazitas es mintavetel egyszerre. A headless lap 3-6
+    // fps-en fut, es minden kulon oda-vissza hivas megvarja a fo szalat.
+    const minta = (await page.evaluate((cel: number[] | undefined) => {
+      const spike = (window as any).__spike;
+      if (cel) {
+        const camera = spike.view.camera;
+        const pont = camera.position.clone();
+        pont.set(cel[0], cel[1], cel[2]);
+        pont.project(camera);
+        const vaszon = document.querySelector("canvas");
+        vaszon?.dispatchEvent(
+          new MouseEvent("mousemove", {
+            clientX: (pont.x * 0.5 + 0.5) * window.innerWidth,
+            clientY: (-pont.y * 0.5 + 0.5) * window.innerHeight,
+            bubbles: true,
+          }),
+        );
+      }
+      return {
+        heat: spike.net.heat as number,
+        villog:
+          document.getElementById("weapon")?.classList.contains("tulmeleg") ??
+          false,
+        felirat:
+          document.getElementById("weapon-state")?.textContent?.trim() ?? "",
+      };
+    }, keepOn)) as { heat: number; villog: boolean; felirat: string };
     peakHeat = Math.max(peakHeat, minta.heat);
     if (minta.villog) sawFlash = true;
+    if (minta.felirat === "TULMELEG") sawLabel = true;
   }
   await page.mouse.up();
-  return { peakHeat, sawFlash };
+  return { peakHeat, sawFlash, sawLabel };
 }
 
 async function main(): Promise<void> {
@@ -328,7 +366,7 @@ async function main(): Promise<void> {
   const shotsBefore = await shotsOf(A.page);
   const tracersBefore = await shotsOf(B.page);
 
-  await fireFor(A.page, 1500);
+  await fireFor(A.page, 1500, [seen[0], seen[1], seen[2]]);
   await sleep(900);
 
   const hpAfter = await hpOf(B.page);
@@ -355,7 +393,16 @@ async function main(): Promise<void> {
 
   // --- Tulmelegedes ---
   await aimAt(A.page, [seen[0], seen[1], seen[2]]);
-  const burst = await fireFor(A.page, 4000);
+  // HOSSZU sorozat: a lefulladasnak biztosan be kell kovetkeznie.
+  //
+  // 4 masodperc kevesnek bizonyult: a hoszint 84 es 99 kozott tetozott,
+  // vagyis a fegyver EPP csak nem fulladt le -- a lefulladasra epulo
+  // ellenorzesek (HUD-felirat, villogas) igy hol teljesultek, hol nem.
+  // A tiszta szamtan szerint 2.7 masodperc eleg lenne, de a headless
+  // lapon a tuzeles nem tokeletesen folyamatos. Nem a hatarhoz
+  // meretezunk: 7 masodperc alatt akkor is lefullad, ha kozben
+  // akadozik.
+  const burst = await fireFor(A.page, 7000);
   // A hoszint PONTOS gorbejet a check:weapons meri, determinisztikusan.
   // Itt az ATVITEL a kerdes: eljut-e a szerver altal szamolt hoszint a
   // kliensig. Egy szoros kuszob itt csak ingatagga tenne a tesztet --
@@ -366,13 +413,10 @@ async function main(): Promise<void> {
   // Korabban a kijelzo a hoszintbol tippelt (>= 99%), ami gyakorlatilag
   // sosem teljesult -- a fegyver leallt, a HUD meg egy szazalekot
   // mutatott. A jatekos szamara ez magyarazat nelkuli leallas volt.
-  const tulmelegKiiras = (await A.page.evaluate(
-    () => document.getElementById("weapon-state")?.textContent?.trim() ?? "",
-  )) as string;
   check(
     "a HUD kiirja a tulmelegedest",
-    tulmelegKiiras === "TULMELEG",
-    `a kijelzon: "${tulmelegKiiras}"`,
+    burst.sawLabel,
+    burst.sawLabel ? "a kijelzon: TULMELEG" : "a kijelzon vegig szazalek allt",
   );
 
 // A kijelzo VILLOG a lefulladaskor -- es maganak abba is hagyja.
@@ -433,19 +477,52 @@ async function main(): Promise<void> {
   // hogy "a gepfegyver nem tudja kiloni az ellenfelet -- B HP: 100",
   // holott epp az elobb lotte ki. Az allitas az, hogy KI TUDJA loni:
   // ezt az bizonyitja, hogy az elet valaha nullara esett.
-  await aimAt(A.page, seen);
+  // MEGVARJUK, hogy a fegyver lehuljon.
+  //
+  // Az elozo sorozat epp azert volt hosszu, hogy TULMELEGEDJEN -- ha
+  // rogton nekiallunk kiloni B-t, az elso menet lefulladt fegyverrel
+  // indul, es ures. Negy menetbol egy igy elveszett, es a teszt
+  // idonkent ugy bukott, hogy "a gepfegyver nem tudja kiloni az
+  // ellenfelet", holott csak varni kellett volna.
+  for (let i = 0; i < 40; i++) {
+    const forro = await A.page.evaluate(
+      () => (window as any).__spike.net.overheated as boolean,
+    );
+    if (!forro) break;
+    await sleep(200);
+  }
+
   let killed = false;
   for (let round = 0; round < 4 && !killed; round++) {
     // ELOSZOR megnezzuk, el-e meg: halott autora celozni ertelmetlen, es
     // draga is -- a visszacsatolt aimAt 40 probalkozason at keresne a
-    // mar eltunt kocsit, kozben pedig B ujraszuletne.
+    // mar eltunt kocsit.
     if ((await hpOf(B.page)) <= 0) {
       killed = true;
       break;
     }
+
+    // B-t VISSZATESSZUK a helyere minden menetben.
+    //
+    // A sebzes-meres alatt B mar meg is halhatott (16 HP-rol indult), es
+    // akkor a szerver egy MASIK spawn-pontra szuli ujra -- akar a palya
+    // tuloldalara, a gepfegyver 70 m-es hatotavan kivulre. A teszt
+    // ilyenkor a REGI helyere lott, es ugy bukott, hogy "a gepfegyver
+    // nem tudja kiloni az ellenfelet". Nem a fegyverrol szolt, hanem
+    // arrol, hogy a celpont idokozben elkerult.
+    await placeAt(B.page, 25, 8);
+    let helyen = false;
+    for (let i = 0; i < 25 && !helyen; i++) {
+      await sleep(200);
+      const b = await seenPosition(A.page);
+      helyen = b !== null && Math.hypot(b[0] - 25, b[2] - 8) < 0.4;
+    }
+
     const at = await seenPosition(A.page);
     if (at) await aimAt(A.page, at);
-    await fireFor(A.page, 2200);
+    // Tuzeles kozben is a celponton tartjuk a keresztet -- ugyanazert,
+    // amiert a sebzes-meresnel (lasd fireFor).
+    await fireFor(A.page, 2200, at ?? undefined);
     // A tuz KOZBEN is figyeljuk, nem csak a vegen -- a halal es az
     // ujraszuletes kozott csak nehany masodperc van.
     for (let i = 0; i < 14 && !killed; i++) {

@@ -36,7 +36,7 @@ async function openClient(
   });
   const page = await browser.newPage();
   page.on("pageerror", (e) => console.log(`  [oldal-hiba: ${name}] ${e.message}`));
-  await page.goto(`${CLIENT_URL}?name=${name}&weapon=${weapon}${hash}`);
+  await page.goto(`${CLIENT_URL}?name=${name}&weapon=${weapon}&dekor=0${hash}`);
   await page.waitForFunction(() => !!(window as any).__spike?.net?.playerId, null, {
     timeout: 20000,
   });
@@ -92,6 +92,19 @@ async function main(): Promise<void> {
     await sleep(250);
     allap = await allapot(A.page);
   }
+
+  // A MASIK kliens hangjait is megvarjuk.
+  //
+  // A teszt azt is meri, hogy B hallja-e A loveset -- ahhoz viszont
+  // B-nek is be kell toltenie a felveteleket. Korabban csak A-ra
+  // vartunk, es amikor a jelenet nehezebb lett (talaj-textura,
+  // panorama-eg), B rendszeresen lemaradt: a teszt ugy jelentette, hogy
+  // "a masik jatekos nem hallja a lovest", holott csak meg toltott.
+  for (let i = 0; i < 60; i++) {
+    const b = await allapot(B.page);
+    if (b.ctx === "running" && b.pufferek >= 5) break;
+    await sleep(250);
+  }
   check(
     "az AudioContext felebredt a felhasznaloi gesztusra",
     allap.ctx === "running",
@@ -120,12 +133,37 @@ async function main(): Promise<void> {
     { timeout: 20000 },
   );
   await sleep(600);
+
+  // Az egeret a PALYA fole visszuk, mielott tuzelunk.
+  //
+  // Az aim.ts az esemeny CELPONTJA alapjan dont (onGameSurface): a HUD
+  // folott leadott kattintas SZANDEKOSAN nem loves. A Playwright egere
+  // viszont a bal felso sarokban all, ahol eppen a szobakod-jelvény van
+  // -- onnan a tuz el sem indul. Enelkul a teszt ugy jelentette, hogy
+  // "a gepfegyver-tuz nem indit hangot".
+  await A.page.mouse.move(640, 400);
+  await sleep(200);
+
   const elotte = (await allapot(A.page)).inditottak;
   await A.page.mouse.down();
   await sleep(900);
   await A.page.mouse.up();
-  await sleep(500);
-  const utana = (await allapot(A.page)).inditottak;
+
+  // MEGVARJUK, amig a hangok tenyleg megszolalnak.
+  //
+  // A nyomjelzok -- es veluk a hangok -- kesleltetve erkeznek
+  // (INTERP_DELAY_MS), a lassu lap pedig meg tovabb sorbanallhat. Egy
+  // fix 500 ms-os varakozas eleg volt a regi, olcso jelenetnel, de a
+  // texturazott palyaval mar nem: a teszt ugy jelentette, hogy A nem
+  // hallja a sajat lovesét, mikozben B ugyanabban a futasban 13-at
+  // hallott. Ezert addig varunk, amig a szamlalo meg nő.
+  let utana = 0;
+  for (let i = 0; i < 20; i++) {
+    await sleep(200);
+    const most = (await allapot(A.page)).inditottak;
+    if (most === utana && most > elotte) break;
+    utana = most;
+  }
   check(
     "a gepfegyver-tuz hangot indit",
     utana > elotte + 3,
@@ -161,8 +199,12 @@ async function main(): Promise<void> {
     // Vegig nyomva tartjuk: a fegyver biztosan lefullad (a check:weapons
     // szerint kb. 2.6 mp folyamatos tuz utan).
     await A.page.mouse.move(640, 330);
+    // HOSSZU sorozat: a lefulladasnak biztosan be kell kovetkeznie. A
+    // tiszta szamtan szerint 2.7 masodperc eleg lenne, de a headless
+    // lapon a tuzeles nem tokeletesen folyamatos -- 4 masodperccel a
+    // hoszint 84 es 99 kozott tetozott, vagyis EPP csak nem fulladt le.
     await A.page.mouse.down();
-    await sleep(4000);
+    await sleep(7000);
     await A.page.mouse.up();
     await sleep(500);
     const lefulladas = await tulmelegedesHangok();
