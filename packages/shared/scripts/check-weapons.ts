@@ -22,6 +22,7 @@ import {
   stepMachinegun,
   toWeaponId,
 } from "../src/weapons";
+import { heatColor } from "../src/heatVisuals";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -321,6 +322,52 @@ function main(): void {
       `agyu: ${cannon.muzzleForward} m, gepfegyver: ${mg.muzzleForward} m`,
     );
   }
+// --- A hoszint SZINE ---
+  //
+  // A szam onmagaban keveset mond harc kozben: a jatekos a szinbol
+  // erzekeli, mennyire kozeli a lefulladas. A skalanak ezert egyirányban
+  // kell haladnia, es a vegen tenyleg pirosnak kell lennie -- ez az,
+  // amit egy kesobbi atszinezes csendben el tudna rontani.
+  {
+    const hue = (szin: string): number =>
+      Number(szin.slice(4, szin.indexOf(",")));
+
+    const lepesek = [0, 25, 50, 75, 100].map(heatColor);
+    let monoton = true;
+    for (let i = 1; i < lepesek.length; i++) {
+      if (hue(lepesek[i]) > hue(lepesek[i - 1])) monoton = false;
+    }
+    check(
+      "a hoszinttel egyre pirosabb, visszalepes nelkul",
+      monoton,
+      lepesek.map((sz, i) => `${i * 25}%: ${hue(sz)}`).join(", ") + " (szinarnyalat-fok)",
+    );
+    check(
+      "nulla hoszinten zold",
+      hue(heatColor(0)) > 90,
+      heatColor(0),
+    );
+    check(
+      "a maximumon piros",
+      hue(heatColor(100)) < 15,
+      heatColor(100),
+    );
+    // A skala SZANDEKOSAN nem lineáris: az also felen alig valtozik.
+    // Enelkul a jatekos mar 40%-nal riadot latna, holott ott meg batran
+    // tuzelhet.
+    check(
+      "a felso harmadban valtozik erdemben, nem az alsoban",
+      hue(heatColor(50)) > hue(heatColor(100)) + 60 &&
+        hue(heatColor(0)) - hue(heatColor(50)) < 40,
+      `0%: ${hue(heatColor(0))}, 50%: ${hue(heatColor(50))}, 100%: ${hue(heatColor(100))}`,
+    );
+    check(
+      "a hatarokon kivuli ertek sem torik el",
+      heatColor(-20) === heatColor(0) && heatColor(500) === heatColor(100),
+      "0 ala es 100 fole is levagva",
+    );
+  }
+
   // --- Szoras ---
   {
     const direction: [number, number, number] = [0, 0, -1];

@@ -95,6 +95,15 @@ export class NetworkClient {
   /** A gepfegyver hoszintje (0..100) a szerver szerint. */
   heat = 0;
 
+  /**
+   * Lefulladt-e a fegyver (tulmelegedes).
+   *
+   * A hoszintbol NEM allapithato meg: a szerver a lefulladas
+   * pillanataban mar hul is, tehat a snapshotba szinte sosem esik bele
+   * a pontos maximum (lasd PlayerSnapshot.overheated).
+   */
+  overheated = false;
+
   /** Serthetetlenek vagyunk-e eppen (ujraszuletes utan). */
   ownProtected = false;
 
@@ -388,6 +397,7 @@ export class NetworkClient {
           this.boostGrants = own.boostGrants;
           this.ownWeapon = own.weapon;
           this.heat = own.heat;
+          this.overheated = own.overheated;
           this.ownProtected = own.protected;
           this.ownColor = own.color;
           this.lives = own.lives;

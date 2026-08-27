@@ -1006,6 +1006,7 @@ export class Room {
         lives: player.lives,
         weapon: player.weapon,
         heat: player.mg.heat,
+        overheated: player.mg.overheated,
         protected: this.isProtected(player, now),
         color: player.color,
       });

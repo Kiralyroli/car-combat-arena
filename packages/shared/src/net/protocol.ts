@@ -46,7 +46,7 @@ export const INTERP_DELAY_MS = 100;
  * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
  * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -140,6 +140,22 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * egy elveszett csomag sem csusztatja el tartosan.
    */
   heat: number;
+  /**
+   * Lefulladt-e eppen a fegyver (tulmelegedes miatt tuzeles-tilalom).
+   *
+   * MIERT KULON MEZO, es nem a hoszintbol kovetkeztetunk: a szerver a
+   * lefulladas pillanataban mar hulni is kezd, tehat a 20 Hz-es
+   * snapshotba szinte sosem esik bele a pontos maximum. A kliens igy
+   * NEM tudja megallapitani a hoszintbol, hogy a fegyver tenyleg
+   * lefulladt-e -- merve: a csucs, amit a kliens lat, 94 korul van a
+   * 100-bol. Egy kuszob-tippel a hang hol elmaradna, hol hamisan
+   * megszolalna.
+   *
+   * MINDENKIRE megy, nem csak magunkra: hallani, hogy az ellenfel
+   * gepfegyvere lefulladt, valodi informacio -- par masodpercig nem
+   * tud loni.
+   */
+  overheated: boolean;
   /**
    * Serthetetlen-e eppen (ujraszuletes utani rovid vedelem).
    *

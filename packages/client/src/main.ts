@@ -17,6 +17,8 @@ import {
   DEFAULT_CAR_COLOR,
   type CarColorId,
   weaponPivot,
+  yawOf,
+  ARCADE,
   type TracerSnapshot,
   type WeaponId,
 } from "@cca/shared";
@@ -37,10 +39,22 @@ import { Lobby, RoomBadge } from "./lobby";
 import { Input } from "./input";
 import { NetworkClient } from "./network/networkClient";
 import { ExplosionQueue } from "./network/explosionQueue";
+import { GameAudio } from "./audio";
+import { SoundToggle } from "./soundToggle";
 import { DelayedQueue } from "./network/delayedQueue";
 import { RespawnWeaponPick } from "./respawnPick";
 import { BoostTank } from "./boostTank";
 import { SceneView } from "./scene";
+
+/**
+ * A hangolas felso viszonyitasi pontja (km/h).
+ *
+ * A BOOSTOLT vegsebesseg, nem a sima: boostolva is szol a motor, es
+ * ott sem szabad elszaladnia a hangolasnak.
+ */
+const TOP_SPEED_KMH = ARCADE.boostMaxSpeed * 3.6;
+
+
 
 /**
  * A jatekszerver cime.
@@ -120,9 +134,34 @@ async function main(): Promise<void> {
     // szerver adja -- lasd Room.stepWeapons. Ha itt is lonenk, minden
     // kattintas egy EXTRA lovest adna a sorozathoz.
     if (net.ownWeapon !== "cannon") return;
+
+    // AZ UJRATOLTES ALATT A KATTINTAS NEM LOVES.
+    //
+    // Ugyanaz a szabaly, mint a szerveren (Room.tryFire): ott a
+    // lastFiredAt CSAK elfogadott lovesnel lep elore. Korabban itt
+    // minden kattintasra elorelepett, tehat kattintgatva a HUD
+    // visszaszamlaloja folyton ujraindult, holott a loves el sem sult --
+    // a jatekos ezt igy latta: "folyamatosan elindul a visszaszamlalas,
+    // de nem lo, csak idokozonkent".
+    //
+    // A halozati keses nem borítja fel: a kliens T+1200-kor engedi a
+    // kovetkezot, ami T+1200+ping-kor er a szerverhez -- eppen akkor,
+    // amikor ott is lejar az ablak (az T+ping-kor indult).
+    const most = performance.now();
+    if (most - lastFireAt < ROCKET_COOLDOWN_MS) return;
+    lastFireAt = most;
+
+    // A SAJAT lovesunk hangja azonnal szol, nem a szerver valaszara.
+    //
+    // A tobbi jatekos lovesehez a snapshotban megjeleno raketa a jel --
+    // de a SAJATUNKHOZ az nem eleg: kozvetlen kozelrol (falnak lőve) a
+    // raketa mar a kovetkezo szerver-lepesben megszunik, tehat sosem
+    // kerul snapshotba, es a jatekos semmit nem hallana.
+    const auto = backend.getChassis();
+    audio.playAt("agyu", auto.position, auto.position, yawOf(auto.quaternion));
+
     const [ndcX, ndcY] = aim.ndc();
     net.fire(view.aimPointAt(ndcX, ndcY));
-    lastFireAt = performance.now();
   }
   aim.onFire(fireAtCrosshair);
 
@@ -165,6 +204,48 @@ async function main(): Promise<void> {
       pitch: Math.atan2(dy, horizontal || 1e-4),
     };
   }
+  // A hang CSAK felhasznaloi gesztus utan indulhat el (bongeszo-szabaly),
+  // ezert itt meg csak letrejon: a hangkartyat az elso kattintas vagy
+  // billentyu ebreszti fel. Kulon engedelykero gomb igy nem kell.
+  const audio = new GameAudio();
+  /** A legutobbi fizikai lepes gazallasa (-1..1) -- a motorhanghoz. */
+  let utolsoGaz = 0;
+  /** Mely raketak lovesehez szolt mar hang -- hogy egyszer szoljon. */
+  const hallottRaketak = new Set<number>();
+  /**
+   * Ki volt mar tulmelegedve -- jatekosonkent.
+   *
+   * A hoszint MINDEN snapshotban erkezik, tehat a tulmelegedes egy
+   * ALLAPOT, nem esemeny: allapotot lejatszani nem lehet. Az esemeny a
+   * FELFUTO EL -- amikor egy meg nem tulmelegedett fegyver eleri a
+   * maximumot. Ezt jegyezzuk meg jatekosonkent.
+   */
+  const tulmelegedve = new Map<string, boolean>();
+
+  /**
+   * Tulmelegedes-hang, ha a fegyver EPPEN MOST fulladt le.
+   *
+   * A hoszint lassan hul vissza, tehat a "maximumon van" allapot
+   * masodpercekig tart -- ha arra jatszanank hangot, folyamatosan
+   * sisteregne.
+   */
+  function tulmelegedesHang(
+    id: string,
+    lefulladt: boolean,
+    hol: readonly number[],
+    hallgato: readonly number[],
+    hallgatoYaw: number,
+  ): void {
+    const most = lefulladt;
+    if (most && !tulmelegedve.get(id)) {
+      audio.playAt("tulmelegedes", hol, hallgato, hallgatoYaw);
+    }
+    tulmelegedve.set(id, most);
+  }
+  const ebresztHangot = (): void => audio.ebreszt();
+  window.addEventListener("pointerdown", ebresztHangot);
+  window.addEventListener("keydown", ebresztHangot);
+
   const hud = new Hud(backend.name, backend.version);
   const matchHud = new MatchHud();
   const playerHud = new PlayerHud();
@@ -173,6 +254,8 @@ async function main(): Promise<void> {
   // A peldanyositas maga koti be a H billentyut es a sugo-gombot; a
   // sugo CSAK keresre nyilik, tehat innen nem hivunk rajta semmit.
   new ControlsHelp();
+  // Ugyanez a hangnal, az M billentyuvel.
+  new SoundToggle(audio);
   initDebugPanel();
 
   // Dev mod: a fizika-csuszkak es a technikai panel CSAK itt latszik.
@@ -314,6 +397,7 @@ async function main(): Promise<void> {
     onPlayerLeft: (id) => {
       view.removeRemoteCar(id);
       backend.removeRemoteBody(id);
+      audio.stopEngine(id);
       hud.setNetworkStatus(`szoba ${net.roomCode}`, view.remoteCarCount);
     },
     onExplosion: (position) => {
@@ -373,6 +457,7 @@ async function main(): Promise<void> {
       for (const id of view.remoteCarIds()) {
         view.removeRemoteCar(id);
         backend.removeRemoteBody(id);
+        audio.stopEngine(id);
       }
       hud.setNetworkStatus("kapcsolat bontva", 0);
     },
@@ -475,6 +560,8 @@ async function main(): Promise<void> {
     // A celzas is elerheto: enelkul nem lehet megmerni, hogy a
     // nyomva tartott gomb eljut-e a halozati allapotig.
     aim,
+    // A hang allapota szinten merheto (lasd check:sound).
+    audio,
     boostTank,
     view,
     net,
@@ -550,6 +637,10 @@ async function main(): Promise<void> {
       // A boost a TARTALYBOL fogy, es csak akkor hat, ha van meg benne.
       // A fogyasztas a fizikai lepeshez kotodik (nem a kepkockahoz),
       // kulonben lassabb gepen mas ideig tartana ugyanannyi boost.
+      // A gazallas a MOTORHANGHOZ is kell; a fizikai lepes a hiteles
+      // forrasa (a kepkockankenti input.read() epp ket lepes koze
+      // eshetne, es a hang megrandulna tole).
+      utolsoGaz = raw.throttle;
       const boost = boostTank.consume(raw.boost, FIXED_DT * 1000);
       backend.step(FIXED_DT, { ...raw, boost });
       accumulator -= FIXED_DT;
@@ -657,6 +748,41 @@ async function main(): Promise<void> {
       now,
     );
 
+    // A HANG HALLGATOJA a sajat autonk -- nem a kamera.
+    //
+    // A jatekos az autoban ul, a kamera csak nezi kivulrol. Kameraval
+    // szamolva a hatunk mogott zajlo esemenyek kozelebbrol szolnanak,
+    // mint amilyen kozel valojaban vannak.
+    const hallgatoHely = currChassis.position;
+    const hallgatoYaw = yawOf(currChassis.quaternion);
+
+    // A SAJAT fegyverunk tulmelegedese -- ez mondja meg a jatekosnak,
+    // miert allt le a tuz.
+    tulmelegedesHang(
+      "sajat",
+      net.overheated,
+      hallgatoHely,
+      hallgatoHely,
+      hallgatoYaw,
+    );
+
+    // A SAJAT motorunk -- de csak amig el az auto. A roncsnak nincs
+    // jaro motorja: e nelkul a halal-kepernyo alatt (arena-attekinto
+    // kamera) tovabb jarna a hang, mintha mi sem tortent volna.
+    if ((net.hp ?? 0) > 0) {
+      audio.updateEngine(
+        "sajat",
+        hallgatoHely,
+        hallgatoHely,
+        hallgatoYaw,
+        backend.getTelemetry().speedKmh,
+        utolsoGaz,
+        TOP_SPEED_KMH,
+      );
+    } else {
+      audio.stopEngine("sajat");
+    }
+
     for (const id of net.remotes.ids()) {
       // Uj jatekos is felbukkanhat pusztan a snapshotbol (pl. ha a
       // playerJoined ertesites elveszne) -- ilyenkor itt potoljuk.
@@ -685,6 +811,15 @@ async function main(): Promise<void> {
           ? [body.position[0], body.position[1], body.position[2]]
           : [state.position.x, state.position.y, state.position.z];
         view.spawnExplosion(at, now);
+        // A MEGSEMMISULES sajat hangja -- nem ugyanaz, mint a rakéta
+        // robbanasa. Rammelessel kilott autonal nincs is rakéta, tehat e
+        // nelkul a kocsi NEMAN semmisulne meg. Ha rakéta olte meg,
+        // ketto szol egymas utan (becsapodas, majd az auto) -- ez igy
+        // helyes: ket kulon esemeny.
+        audio.playAt("robbanas", at, hallgatoHely, hallgatoYaw);
+        // A roncsnak nincs jaro motorja. E nelkul a kilott auto helyen
+        // tovabb jarna a hang, mig a jatekos ujra nem szuletik.
+        audio.stopEngine(id);
       }
 
       // Megsemmisult auto: eltunik, es a FIZIKAI TESTE is megszunik --
@@ -718,6 +853,31 @@ async function main(): Promise<void> {
         );
       }
       view.updateRemoteCar(id, state);
+
+      // A tavoli auto motorja is szol -- ebbol hallani, hogy valaki
+      // kozeledik, meg ha nem is latszik. A gazallasat nem ismerjuk
+      // (az a masik kliens sajat inputja), ezert a SEBESSEGEBOL
+      // kozelitjuk: aki gyorsan megy, az gazt is ad.
+      // Az ELLENFEL fegyvere is hallhatoan lefullad: ebbol tudja a
+      // jatekos, hogy par masodpercig nem lohet ra.
+      tulmelegedesHang(
+        id,
+        net.remotes.isOverheated(id),
+        [state.position.x, state.position.y, state.position.z],
+        hallgatoHely,
+        hallgatoYaw,
+      );
+
+      const sebesseg = state.velocity.length() * 3.6;
+      audio.updateEngine(
+        id,
+        [state.position.x, state.position.y, state.position.z],
+        hallgatoHely,
+        hallgatoYaw,
+        sebesseg,
+        Math.min(1, sebesseg / 40),
+        TOP_SPEED_KMH,
+      );
     }
 
     // A rakétakat a szerver lepteti -- mi csak a legutobbi snapshothoz
@@ -739,12 +899,42 @@ async function main(): Promise<void> {
       }
     }
 
-    view.syncRockets(net.rockets.sample(renderNow));
+    // AGYU-HANG: minden UJ raketa egy elsult lovest jelent.
+    //
+    // Nem a sajat tuzelesunkre inditjuk, hanem a szerver altal
+    // visszaadott raketakra -- igy a MASOK lovese is hallatszik,
+    // ugyanabbol a forrasbol, es pontosan akkor, amikor a lovedek
+    // megjelenik a kepen.
+    const raketak = net.rockets.sample(renderNow);
+    for (const raketa of raketak) {
+      if (hallottRaketak.has(raketa.id)) continue;
+      hallottRaketak.add(raketa.id);
+      // A SAJAT lovesunk hangja mar a kattintaskor megszolalt (azonnali
+      // visszajelzes, halozati oda-vissza nelkul) -- itt csak a
+      // TOBBIEKE jon.
+      if (raketa.ownerId === net.playerId) continue;
+      audio.playAt("agyu", raketa.position, hallgatoHely, hallgatoYaw);
+    }
+    // A mar nem letezo raketak sorszamait elengedjuk, kulonben a
+    // halmaz egy hosszu meccs alatt korlatlanul nőne.
+    if (hallottRaketak.size > raketak.length + 64) {
+      const elok = new Set(raketak.map((r) => r.id));
+      for (const id of hallottRaketak) {
+        if (!elok.has(id)) hallottRaketak.delete(id);
+      }
+    }
+
+    view.syncRockets(raketak);
     view.syncPickups(net.pickupsAvailable, renderNow);
 
-    // Az esedekesse valt robbanasok: latvany ES lokes egyszerre.
+    // Az esedekesse valt robbanasok: latvany, HANG es lokes egyszerre.
     for (const position of explosionQueue.due(renderNow)) {
       view.spawnExplosion(position, renderNow);
+      // A hang UGYANEKKOR szol, nem a szerver uzenetenek pillanataban:
+      // a robbanas latvanya kesleltetve jelenik meg (explosionQueue),
+      // hogy oda essen, ahol a jatekos LATJA az esemenyt. Ha a hang
+      // elore szaladna, a ketto szetvalna.
+      audio.playAt("robbanas", position, hallgatoHely, hallgatoYaw);
       // A SEBZEST a szerver mar alkalmazta (a HP-ban jon vissza); itt a
       // FIZIKAI LOKES tortenik. Azert a kliensen, mert a hibrid
       // modellben a sajat auto mozgasa hozza tartozik -- a szerver nem
@@ -755,6 +945,9 @@ async function main(): Promise<void> {
 
     for (const tracer of tracerQueue.due(renderNow)) {
       view.spawnTracer(tracer.from, tracer.to, tracer.hit, renderNow);
+      // A hang a CSOTORKOLATBOL szol, nem a becsapodasbol: a lovest ott
+      // halljuk, ahol elsult.
+      audio.playAt("gepfegyver", tracer.from, hallgatoHely, hallgatoYaw);
     }
     view.updateTracers(renderNow);
     view.updateShields(renderNow);
@@ -770,6 +963,7 @@ async function main(): Promise<void> {
       Math.max(0, ROCKET_COOLDOWN_MS - (renderNow - lastFireAt)),
       net.ownWeapon,
       net.heat,
+      net.overheated,
     );
 
     // A halal-kepernyo fegyvervalasztoja: csak amig varunk az

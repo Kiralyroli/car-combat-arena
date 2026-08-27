@@ -1,5 +1,7 @@
 import {
   carColorHex,
+  heatColor,
+  OVERHEAT_FLASH_MS,
   type CarColorId,
   type MatchSnapshot,
   type Telemetry,
@@ -230,6 +232,37 @@ export class PlayerHud {
   private tyreCells: HTMLElement[] = [];
   private lastTyreKey = "";
   private lastWeaponKey = "";
+  /** Lefulladt-e a fegyver az ELOZO frissiteskor -- a villogas elehez. */
+  private lastOverheated = false;
+  private villogasTimer: number | null = null;
+
+  /**
+   * Rovid piros villogas a lefulladas pillanataban.
+   *
+   * Az osztalyt a VEGEN levesszuk, kulonben a kovetkezo lefulladas nem
+   * inditana ujra az animaciot (a bongeszo ugyanazt az osztalyt mar
+   * lefutottnak tekinti).
+   */
+  private villogtat(): void {
+    if (this.villogasTimer !== null) window.clearTimeout(this.villogasTimer);
+
+    if (this.weapon.classList.contains("tulmeleg")) {
+      // Mar villog (ket lefulladas gyorsan egymas utan): egy kepkockat
+      // varunk, kulonben az osztaly levetele es visszatetele ugyanabban
+      // a kepkockaban tortenne, es a bongeszo nem inditana ujra az
+      // animaciot.
+      this.weapon.classList.remove("tulmeleg");
+      requestAnimationFrame(() => this.weapon.classList.add("tulmeleg"));
+    } else {
+      // Az ELSO villanas azonnal indul: ez figyelmeztetes, egy
+      // kepkockanyi keses is lathatoan kesobb kapja el a szemet.
+      this.weapon.classList.add("tulmeleg");
+    }
+    this.villogasTimer = window.setTimeout(() => {
+      this.weapon.classList.remove("tulmeleg");
+      this.villogasTimer = null;
+    }, OVERHEAT_FLASH_MS);
+  }
 
   constructor() {
     this.root = must("player-hud");
@@ -261,6 +294,8 @@ export class PlayerHud {
     weapon: WeaponId = "cannon",
     /** A gepfegyver hoszintje (0..100). */
     heat = 0,
+    /** Lefulladt-e a fegyver (a SZERVER szerint). */
+    overheated = false,
   ): void {
     // HP. Halozat nelkul nincs ertelmes erteke (a szerver dönti el).
     const hpPercent = hp === null ? 0 : Math.max(0, Math.min(100, hp));
@@ -284,10 +319,23 @@ export class PlayerHud {
     // "keszultseg" szam mindkettot felreertheto modon abrazolna.
     if (weapon === "machinegun") {
       const percent = Math.max(0, Math.min(100, heat));
-      const overheated = percent >= 99;
+
+      // VILLOGAS a lefulladas pillanataban -- csak az ELSO kepkockan
+      // inditjuk, kulonben az animacio minden frissitesnel ujraindulna,
+      // es allando villogas lenne belole.
+      if (overheated && !this.lastOverheated) this.villogtat();
+      this.lastOverheated = overheated;
+      // A LEFULLADAST a szerver mondja meg, nem a hoszintbol tippeljuk.
+      //
+      // Korabban itt "percent >= 99" allt, ami gyakorlatilag SOHA nem
+      // teljesult: a szerver a lefulladas pillanataban mar hulni is
+      // kezd, tehat a 20 Hz-es snapshotba nem esik bele a pontos
+      // maximum -- a kliens altal latott csucs 94 korul van. A jatekos
+      // igy azt latta, hogy a fegyver leall, a kijelzo meg egy
+      // szazalekot mutat, minden magyarazat nelkul.
       // A hoszintet egesz szazalekra kerekitve kulcsoljuk: kulonben
       // minden frame-ben a DOM-hoz nyulnank.
-      const key = `mg|${Math.round(percent)}`;
+      const key = `mg|${Math.round(percent)}|${overheated}`;
       if (key !== this.lastWeaponKey) {
         this.lastWeaponKey = key;
         this.weaponName.textContent = "GEPFEGYVER";
@@ -295,6 +343,11 @@ export class PlayerHud {
         this.weaponState.textContent = overheated
           ? "TULMELEG"
           : `${percent.toFixed(0)}%`;
+        // A SZIN a hoszintbol jon (heatColor): a jatekos harc kozben nem
+        // olvas szazalekot, a szint viszont perifériasan is erzekeli.
+        // Lefulladva a skala vegen allunk, fuggetlenul attol, hogy a
+        // hules mar elkezdodott-e.
+        this.weaponState.style.color = heatColor(overheated ? 100 : percent);
       }
       return;
     }

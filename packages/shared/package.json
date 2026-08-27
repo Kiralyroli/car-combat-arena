@@ -27,7 +27,8 @@
     "check:weapons": "tsx scripts/check-weapons.ts",
     "check:pickups": "tsx scripts/check-pickups.ts",
     "check:match": "tsx scripts/check-match.ts",
-    "check:names": "tsx scripts/check-names.ts"
+    "check:names": "tsx scripts/check-names.ts",
+    "check:audio": "tsx scripts/check-audio.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0"

@@ -54,6 +54,7 @@ function player(t: number): PlayerSnapshot {
     protected: false,
     color: "blue",
     heat: 0,
+  overheated: false,
   };
 }
 

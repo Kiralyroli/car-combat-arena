@@ -16,6 +16,7 @@
  *
  * Futtatas: npm run check:mg   (vagy: npm run check:mg -- --lag=200)
  */
+import { OVERHEAT_FLASH_MS } from "@cca/shared";
 import { chromium, type Browser, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
@@ -119,9 +120,15 @@ async function aimAt(
   target: [number, number, number],
 ): Promise<boolean> {
   // A celzas akkor jo, ha a sugar ennyin belul megy el a celpont
-  // kozeppontja mellett. Egy auto kb. 2 m szeles, tehat 0.8 m biztos
-  // talalat.
-  const TOLERANCE_M = 0.8;
+  // KOZEPPONTJA mellett.
+  //
+  // Az elso valasztas 0.8 m volt -- "az auto 2 m szeles, tehat belefer".
+  // Csakhogy a fel-szelesseg EPP 1 m: egy 0.8 m-re elmeno sugar mar a
+  // karosszeria szelet surolja, es a szorassal a lovesek egy resze
+  // mellemegy. A teszt ettol hol 100%-os, hol 31%-os talalati aranyt
+  // adott -- ugyanazzal a kóddal, valodi hiba nelkul. 0.35 m-nel a
+  // celpont kozepe fele lovunk, ahol a szoras sem szamit.
+  const TOLERANCE_M = 0.35;
 
   for (let attempt = 0; attempt < 40; attempt++) {
     const screen = (await page.evaluate((t: number[]) => {
@@ -162,7 +169,6 @@ async function aimAt(
 }
 
 const hpOf = (page: Page) => page.evaluate("window.__spike.net.hp") as Promise<number>;
-const heatOf = (page: Page) => page.evaluate("window.__spike.net.heat") as Promise<number>;
 const shotsOf = (page: Page) =>
   page.evaluate("window.__spike.view.tracersSpawned") as Promise<number>;
 
@@ -176,16 +182,29 @@ const shotsOf = (page: Page) =>
 async function fireFor(
   page: Page,
   ms: number,
-): Promise<{ peakHeat: number }> {
+): Promise<{ peakHeat: number; sawFlash: boolean }> {
   await page.mouse.down();
   let peakHeat = 0;
+  // A VILLOGAST is menet kozben figyeljuk.
+  //
+  // Rovid (OVERHEAT_FLASH_MS), es a lefulladas barhol bekovetkezhet a
+  // sorozaton belul -- a sorozat UTAN mar rég vege. Eloszor ott mertem,
+  // es a teszt ugy bukott, mintha a villogas el sem indult volna.
+  let sawFlash = false;
   const until = Date.now() + ms;
   while (Date.now() < until) {
     await sleep(120);
-    peakHeat = Math.max(peakHeat, await heatOf(page));
+    const minta = (await page.evaluate(() => ({
+      heat: (window as any).__spike.net.heat as number,
+      villog:
+        document.getElementById("weapon")?.classList.contains("tulmeleg") ??
+        false,
+    }))) as { heat: number; villog: boolean };
+    peakHeat = Math.max(peakHeat, minta.heat);
+    if (minta.villog) sawFlash = true;
   }
   await page.mouse.up();
-  return { peakHeat };
+  return { peakHeat, sawFlash };
 }
 
 async function main(): Promise<void> {
@@ -236,8 +255,17 @@ async function main(): Promise<void> {
   const settled = async (): Promise<{ b: [number, number, number] | null; ok: boolean }> => {
     const b = await seenPosition(A.page);
     const a = await seenPosition(B.page);
-    const bOk = b !== null && Math.hypot(b[0] - 25, b[2] - 8) < 1.2;
-    const aOk = a !== null && Math.hypot(a[0] - 25, a[2] - 20) < 1.2;
+    // SZOROS tures.
+    //
+    // Korabban 1.2 m volt, es a teszt neha 0%-os talalati aranyt adott
+    // ugy, hogy a celzas bizonyitottan az ellenfelen volt: 12 m-en egy
+    // 1.2 m-es eltolas mar tobb, mint az auto fel-szelessege, tehat a
+    // lovo szerver-oldali helye annyira mellecsuszhatott, hogy a sugar
+    // elment a celpont mellett. Az ujraszinkron ennel jóval pontosabban
+    // beall -- csak meg kell varni.
+    const TURES_M = 0.4;
+    const bOk = b !== null && Math.hypot(b[0] - 25, b[2] - 8) < TURES_M;
+    const aOk = a !== null && Math.hypot(a[0] - 25, a[2] - 20) < TURES_M;
     return { b, ok: bOk && aOk };
   };
 
@@ -333,6 +361,50 @@ async function main(): Promise<void> {
   // kliensig. Egy szoros kuszob itt csak ingatagga tenne a tesztet --
   // a mintavetel (120 ms) es a tulmelegedes utani azonnali hules miatt
   // a csucs koruli ertekek elcsuszhatnak.
+  // A HUD ki is MONDJA, hogy tulmelegedett.
+  //
+  // Korabban a kijelzo a hoszintbol tippelt (>= 99%), ami gyakorlatilag
+  // sosem teljesult -- a fegyver leallt, a HUD meg egy szazalekot
+  // mutatott. A jatekos szamara ez magyarazat nelkuli leallas volt.
+  const tulmelegKiiras = (await A.page.evaluate(
+    () => document.getElementById("weapon-state")?.textContent?.trim() ?? "",
+  )) as string;
+  check(
+    "a HUD kiirja a tulmelegedest",
+    tulmelegKiiras === "TULMELEG",
+    `a kijelzon: "${tulmelegKiiras}"`,
+  );
+
+// A kijelzo VILLOG a lefulladaskor -- es maganak abba is hagyja.
+  //
+  // A szin folyamatosan valtozik a hoszinttel; a lefulladas viszont
+  // kulon figyelmeztetes, mert a jatekos ilyenkor hiaba tartja nyomva a
+  // gombot. Rovid: ha a hules vegeig villogna (masodpercek), a jatekos
+  // a sajat HUD-jat nezne a harc helyett.
+  check(
+    "lefulladaskor villog a fegyver-kijelzo",
+    burst.sawFlash,
+    burst.sawFlash ? "a .tulmeleg osztaly bekapcsolt" : "nem villogott",
+  );
+  // A villogas ABBAHAGYASA: addig varunk, amig lejar -- de nem tovabb.
+  //
+  // Nem egy pillanatot mintazunk: a lefulladas a sorozat VEGEN is
+  // bekovetkezhet, olyankor a villogas meg jogosan tart. Az allitas az,
+  // hogy MAGATOL abbamarad, nem az, hogy egy adott pillanatban all.
+  let villogasVege = false;
+  for (let i = 0; i < 20 && !villogasVege; i++) {
+    villogasVege =
+      (await A.page.evaluate(() =>
+        document.getElementById("weapon")?.classList.contains("tulmeleg"),
+      )) === false;
+    if (!villogasVege) await sleep(120);
+  }
+  check(
+    "a villogas maganak abbahagyja",
+    villogasVege,
+    `${OVERHEAT_FLASH_MS} ms-on belul magatol leall`,
+  );
+
   check(
     "a hoszint tartos tuznel erdemben felfut",
     burst.peakHeat > 60,
@@ -354,20 +426,38 @@ async function main(): Promise<void> {
   check("a masik jatekos agyuval maradt", bWeapon === "cannon", `${bWeapon}`);
 
   // Kiloljuk B-t, hogy a halal-kepernyo megjelenjen.
+  //
+  // A megsemmisulest MENET KOZBEN jegyezzuk fel, nem a vegen olvassuk
+  // ki. B ugyanis ujraszuletik (RESPAWN_DELAY_MS), tehat egy kesobbi
+  // mintavetel mar teli eletet lat -- a teszt ilyenkor azt jelentette,
+  // hogy "a gepfegyver nem tudja kiloni az ellenfelet -- B HP: 100",
+  // holott epp az elobb lotte ki. Az allitas az, hogy KI TUDJA loni:
+  // ezt az bizonyitja, hogy az elet valaha nullara esett.
   await aimAt(A.page, seen);
-  for (let round = 0; round < 4; round++) {
-    if ((await hpOf(B.page)) <= 0) break;
+  let killed = false;
+  for (let round = 0; round < 4 && !killed; round++) {
+    // ELOSZOR megnezzuk, el-e meg: halott autora celozni ertelmetlen, es
+    // draga is -- a visszacsatolt aimAt 40 probalkozason at keresne a
+    // mar eltunt kocsit, kozben pedig B ujraszuletne.
+    if ((await hpOf(B.page)) <= 0) {
+      killed = true;
+      break;
+    }
     const at = await seenPosition(A.page);
     if (at) await aimAt(A.page, at);
     await fireFor(A.page, 2200);
-    await sleep(1400);
+    // A tuz KOZBEN is figyeljuk, nem csak a vegen -- a halal es az
+    // ujraszuletes kozott csak nehany masodperc van.
+    for (let i = 0; i < 14 && !killed; i++) {
+      if ((await hpOf(B.page)) <= 0) killed = true;
+      else await sleep(100);
+    }
   }
 
-  const killed = (await hpOf(B.page)) <= 0;
   check(
     "a gepfegyver ki tudja loni az ellenfelet",
     killed,
-    `B HP: ${await hpOf(B.page)}`,
+    killed ? "B elete nullara esett" : `B HP: ${await hpOf(B.page)}`,
   );
 
   if (killed) {

@@ -137,6 +137,17 @@ export class RemotePlayers {
    */
   private readonly weapons = new Map<string, WeaponId>();
 
+  /**
+   * Ki mennyire melegedett fel.
+   *
+   * Ebbol hallatszik, ha egy ellenfel gepfegyvere lefulladt -- ez valodi
+   * informacio a jatekosnak: tudja, hogy par masodpercig nem tud loni.
+   */
+  private readonly heats = new Map<string, number>();
+
+  /** Kinek fulladt le eppen a fegyvere (lasd PlayerSnapshot.overheated). */
+  private readonly overheated = new Set<string>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
@@ -161,6 +172,14 @@ export class RemotePlayers {
     return this.weapons.get(id) ?? DEFAULT_WEAPON;
   }
 
+  heatOf(id: string): number {
+    return this.heats.get(id) ?? 0;
+  }
+
+  isOverheated(id: string): boolean {
+    return this.overheated.has(id);
+  }
+
   ids(): string[] {
     return [...this.buffers.keys()];
   }
@@ -177,6 +196,8 @@ export class RemotePlayers {
     this.protectedIds.delete(id);
     this.colors.delete(id);
     this.weapons.delete(id);
+    this.heats.delete(id);
+    this.overheated.delete(id);
   }
 
   clear(): void {
@@ -187,6 +208,8 @@ export class RemotePlayers {
     this.protectedIds.clear();
     this.colors.clear();
     this.weapons.clear();
+    this.heats.clear();
+    this.overheated.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
@@ -197,6 +220,9 @@ export class RemotePlayers {
       this.lives.set(player.id, player.lives);
       this.colors.set(player.id, player.color);
       this.weapons.set(player.id, player.weapon);
+      this.heats.set(player.id, player.heat);
+      if (player.overheated) this.overheated.add(player.id);
+      else this.overheated.delete(player.id);
       if (player.protected) this.protectedIds.add(player.id);
       else this.protectedIds.delete(player.id);
 

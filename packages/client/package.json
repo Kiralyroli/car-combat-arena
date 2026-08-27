@@ -26,7 +26,10 @@
     "check:mg": "tsx scripts/check-machinegun.ts",
     "check:lobby": "tsx scripts/check-lobby.ts",
     "check:input": "tsx scripts/check-ui-input.ts",
-    "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200"
+    "check:lag": "tsx scripts/check-multiplayer.ts --lag=200 && tsx scripts/check-collision.ts --lag=200",
+    "audio": "tsx scripts/prepare-audio.ts",
+    "check:sound": "tsx scripts/check-sound.ts",
+    "check:cannon": "tsx scripts/check-cannon.ts"
   },
   "dependencies": {
     "@cca/shared": "*",

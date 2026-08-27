@@ -14,6 +14,9 @@
  */
 import {
   EXPLOSION_RADIUS,
+  WHEEL_LAYOUT,
+  wheelExplosionDamage,
+  wheelWorldPosition,
   WHEEL_MAX_HP,
   WHEEL_REGEN_DELAY_MS,
   damageWheel,
@@ -113,11 +116,20 @@ function main(): void {
   // ilyenkor az ora nem indulna ujra, a jatekos tuz alatt gyogyulna.
   //
   // A robbanas helyet NEM talalgatjuk: a rakéta ERINTESRE robban, tehat
-  // a gyujto auto FELULETEN, nem a kozeppontjan. Eloszor megmerjuk,
-  // hova esik, es csak utana allitjuk oda az aldozatot.
+  // a felulete pontjan, nem egy elore tudott koordinatan. Eloszor
+  // megmerjuk, hova esik, es csak utana allitjuk oda az aldozatot.
+  //
+  // Az aldozat a ROPPALYA MELLE kerul, nem ele: ha az utban allna, maga
+  // valtoztatna meg, hol robban a rakéta -- vagyis a merest a sajat
+  // jelenlete tenne ervenytelenne. (Ez tenylegesen megtortent: a
+  // robbanas helye 1.5 m-t mozdult egy fuggetlen javitastol, es a
+  // kezzel hangolt eltolas ettol elcsuszott.)
   {
     /** Egy loves; visszaadja, hol robbant. */
-    const fireAndLocate = (victimZ: number | null): {
+    const fireAndLocate = (
+      victimAt: [number, number] | null,
+      victimRot: [number, number, number, number] = [0, 0, 0, 1],
+    ): {
       at: [number, number, number] | null;
       room: Room;
       victim: ReturnType<Room["add"]> | null;
@@ -141,12 +153,12 @@ function main(): void {
       } as ClientState;
 
       let victim: ReturnType<Room["add"]> | null = null;
-      if (victimZ !== null) {
+      if (victimAt !== null) {
         victim = room.add("v", () => {}, "Aldozat", "cannon");
         victim.state = {
           ...victim.state,
-          position: [0, 1, victimZ],
-          rotation: [0, 0, 0, 1],
+          position: [victimAt[0], 1, victimAt[1]],
+          rotation: victimRot,
         } as ClientState;
         victim.lastDamagedAt = 0;
       }
@@ -169,26 +181,69 @@ function main(): void {
     );
 
     if (probe.at) {
-      // 2. Az aldozat kozeppontja a hatosugaron KIVUL, az elso kerekei
-      //    (1.495 m-rel az orr fele) meg belul.
-      const victimZ = probe.at[2] + EXPLOSION_RADIUS + 0.7;
-      const shot = fireAndLocate(victimZ);
-      const victim = shot.victim!;
+      // Az aldozat OLDALT all a robbanas mellett, ORRAL FELE fordulva:
+      // a kozeppontja a hatosugaron KIVUL, az elso kerekei (1.495 m-rel
+      // elorebb) viszont BELUL.
+      //
+      // A tavolsagot nem kezzel hangoljuk, hanem MEGKERESSUK a
+      // konstansokbol -- igy ha a hatosugar, a kerek-sebzes vagy a
+      // kerek-geometria valtozik, a teszt egyutt mozdul, vagy hangosan
+      // megmondja, hogy igy mar nem all elo a merni kivant helyzet.
+      const bumm = probe.at;
+      // Orral -X fele: (0,0,-1) elforgatva +90 fokkal az Y korul.
+      const fele: [number, number, number, number] = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
+      /** A legkozelebbi kerek tavolsaga a robbanastol, adott oldal-tavnal. */
+      const legkozelebbiKerek = (oldalTav: number): number => {
+        const kozep: [number, number, number] = [bumm[0] + oldalTav, 1, bumm[2]];
+        let legkisebb = Infinity;
+        for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
+          const w = wheelWorldPosition(kozep, fele, i);
+          legkisebb = Math.min(
+            legkisebb,
+            Math.hypot(w[0] - bumm[0], w[1] - bumm[1], w[2] - bumm[2]),
+          );
+        }
+        return legkisebb;
+      };
 
-      const bodyHurt = victim.hp < 100;
-      const wheelHurt = victim.wheels[0].hp < WHEEL_MAX_HP;
+      // A kozeppont a hatosugaron kivul kell legyen (kulonben a
+      // karosszeria is serulne), a kerek viszont meg kapjon sebzest.
+      let felso: number | null = null;
+      for (let d = EXPLOSION_RADIUS; d < EXPLOSION_RADIUS + 5; d += 0.05) {
+        if (wheelExplosionDamage(legkozelebbiKerek(d)) > 0) felso = d;
+        else break;
+      }
       check(
-        "a robbanas a kerekeket eri, a karosszeriat nem",
-        wheelHurt && !bodyHurt,
-        `kerek: ${victim.wheels[0].hp.toFixed(0)} HP, karosszeria: ${victim.hp} HP`,
+        "van olyan hely, ahol a kerek serul, a karosszeria nem",
+        felso !== null && felso > EXPLOSION_RADIUS,
+        felso === null
+          ? "NINCS ilyen tavolsag -- a merni kivant helyzet nem all elo"
+          : `${EXPLOSION_RADIUS} .. ${felso.toFixed(2)} m kozott`,
       );
-      check(
-        "a CSAK kerekre eso sebzes is ujrainditja az orat",
-        victim.lastDamagedAt > 0,
-        victim.lastDamagedAt > 0
-          ? "ujraindult"
-          : "NEM indult ujra -- tuz alatt gyogyulna",
-      );
+
+      if (felso !== null) {
+        // A tartomany KOZEPE, hogy egyik hatarhoz se alljunk szorosan.
+        const oldalt = (EXPLOSION_RADIUS + felso) / 2;
+        const shot = fireAndLocate([bumm[0] + oldalt, bumm[2]], fele);
+        const victim = shot.victim!;
+
+        const bodyHurt = victim.hp < 100;
+        const wheelHurt = victim.wheels.some((w) => w.hp < WHEEL_MAX_HP);
+        check(
+          "a robbanas a kerekeket eri, a karosszeriat nem",
+          wheelHurt && !bodyHurt,
+          `${oldalt.toFixed(2)} m-rol -- kerekek: ${victim.wheels
+            .map((w) => w.hp.toFixed(0))
+            .join("/")} HP, karosszeria: ${victim.hp} HP`,
+        );
+        check(
+          "a CSAK kerekre eso sebzes is ujrainditja az orat",
+          victim.lastDamagedAt > 0,
+          victim.lastDamagedAt > 0
+            ? "ujraindult"
+            : "NEM indult ujra -- tuz alatt gyogyulna",
+        );
+      }
     }
   }
   // --- Megsemmisult jatekos nem gyogyul ---

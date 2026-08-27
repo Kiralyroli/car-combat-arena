@@ -343,6 +343,30 @@
       #player-hud .weapon .state { font-size: 14px; color: #3fb950; }
       #player-hud .weapon.reloading .state { color: #d29922; }
 
+      /*
+         LEFULLADAS: rovid piros villogas.
+         A szint a script allitja (heatColor), a villogas viszont
+         figyelmeztetes -- azt a keret es a hatter adja, hogy akkor is
+         elkapja a szem, ha a jatekos eppen mashova nez. Rovid:
+         a lefulladas maga masodpercekig tart, es vegig villogva a
+         jatekos a sajat HUD-jat nezne a harc helyett.
+      */
+      @keyframes tulmeleg-villog {
+        0%, 100% { border-color: #30363d; background: rgba(1, 4, 9, 0.6); }
+        50% { border-color: #f85149; background: rgba(248, 81, 73, 0.28); }
+      }
+      #player-hud .weapon.tulmeleg {
+        animation: tulmeleg-villog 0.3s ease-in-out 3;
+      }
+      /* Aki a mozgast zavaronak talalja, annak allo piros keret marad. */
+      @media (prefers-reduced-motion: reduce) {
+        #player-hud .weapon.tulmeleg {
+          animation: none;
+          border-color: #f85149;
+          background: rgba(248, 81, 73, 0.28);
+        }
+      }
+
       #player-hud .tyre-block { display: flex; align-items: center; gap: 10px; }
       #player-hud .tyres { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
       #player-hud .tyre {
@@ -682,7 +706,13 @@
       /* Dev modban a szobakod lekerul, tehat feljebb kezdodhet. */
       body.dev #meta { top: 14px; }
 
-      #help-toggle {
+      /*
+        A hang-kapcsolo ugyanazt a format viseli, mint a sugo-gomb: a
+        ketto egymas mellett all, es a jatekos ne higgye, hogy ketfele
+        dologrol van szo.
+      */
+      #help-toggle,
+      #sound-toggle {
         display: flex;
         align-items: center;
         gap: 6px;
@@ -695,8 +725,12 @@
         cursor: pointer;
         pointer-events: auto;
       }
-      #help-toggle:hover { color: #e6edf3; border-color: #6e7681; }
-      #help-toggle kbd {
+      #help-toggle:hover,
+      #sound-toggle:hover { color: #e6edf3; border-color: #6e7681; }
+      /* Nemitva halvanyabb -- egy pillantasbol latszik az allapot. */
+      #sound-toggle.ki { color: #6e7681; opacity: 0.65; }
+      #help-toggle kbd,
+      #sound-toggle kbd {
         padding: 1px 5px;
         background: #21262d;
         border: 1px solid #4d5866;
@@ -861,13 +895,17 @@
         <div id="lobby-error" class="err" hidden></div>
 
         <!--
-          FELTUNTETES. MINDKET fegyver-modell CC-BY licencu, ami
-          kotelezove teszi a szerzo megnevezeset. A CREDITS.md a
-          repoban van, de a jatekosok azt nem latjak -- a feltuntetes
-          ott kell legyen, ahol a mu megjelenik.
+          FELTUNTETES. A ket fegyver-modell es a gepfegyver HANGJA
+          CC-BY licencu, ami kotelezove teszi a szerzo megnevezeset. A
+          CREDITS.md a repoban van, de a jatekosok azt nem latjak -- a
+          feltuntetes ott kell legyen, ahol a mu megjelenik.
+
+          A tobbi hang CC0 (kozkincs): azoknal nem kotelezo, ezert nem
+          is terheljuk vele a lobbyt -- a CREDITS.md-ben viszont ott
+          vannak.
         -->
         <div class="credit">
-          Gépfegyver:
+          Gépfegyver-torony:
           <a
             href="https://sketchfab.com/3d-models/science-fiction-machine-gun-the-expanse-115af5f738ca47fda420b9019c200b3c"
             target="_blank"
@@ -882,12 +920,27 @@
           >), módosítva
         </div>
         <div class="credit">
-          Ágyú:
+          Ágyú-modell:
           <a
             href="https://sketchfab.com/3d-models/flak-18-36-88mm-anti-aircraft-cannon-95b1335520714a78b83f67a1c04a75da"
             target="_blank"
             rel="noopener noreferrer"
             >bear17</a
+          >
+          (<a
+            href="https://creativecommons.org/licenses/by/4.0/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >CC BY</a
+          >), módosítva
+        </div>
+        <div class="credit">
+          Gépfegyver-hang:
+          <a
+            href="https://freesound.org/people/ryanconway/sounds/200277/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >ryanconway</a
           >
           (<a
             href="https://creativecommons.org/licenses/by/4.0/"
@@ -941,6 +994,9 @@
       <button id="help-toggle" type="button" title="Vezérlés (H)">
         <kbd>H</kbd> súgó
       </button>
+      <button id="sound-toggle" type="button" title="Hang ki/be (M)">
+        <kbd>M</kbd> <span id="sound-state">hang</span>
+      </button>
     </div>
 
     <!--
@@ -957,6 +1013,7 @@
         <span>egér</span><span>célzás</span>
         <span>bal gomb</span><span>tűz</span>
         <span><kbd>R</kbd></span><span>talpra állás</span>
+        <span><kbd>M</kbd></span><span>hang ki/be</span>
       </div>
       <div class="again">H — bezárja</div>
     </div>

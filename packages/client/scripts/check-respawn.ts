@@ -229,30 +229,58 @@ async function main(): Promise<void> {
     )) as number | undefined;
 
     let chosen: number | null = null;
+    let lekesve = false;
     if (other !== undefined) {
       // Tobb probalkozas: a kamera meg befele tart a felulnezetbe, tehat
       // a jelolo kepernyo-helye ket kepkocka kozott is elmozdulhat.
       // Ugyanezt tenne egy jatekos is, ha elsore melle kattint.
-      for (let attempt = 0; attempt < 5 && chosen !== other; attempt++) {
-        const screen = (await B.page.evaluate((index: number) => {
+      //
+      // A vetites ES a kattintas EGY hivasban tortenik, a lapon belul.
+      //
+      // MIERT: az egesz valasztas csak addig lehetseges, amig a jatekos
+      // halott (RESPAWN_DELAY_MS = 5 mp). A headless lap 3-6 fps-en fut,
+      // es minden Playwright-hivas megvarja a lap fo szalat -- kulon
+      // hivasokkal (vetites, mouse.move, mouse.down, mouse.up, olvasas)
+      // egyetlen probalkozas 1.7 mp-et vitt el, harom pedig a teljes
+      // ablakot. Merve: a ciklus 5171 ms-ig tartott, es a jatekos
+      // menet kozben ujraszuletett.
+      //
+      // Az eger-esemenyeket a VASZONRA kuldjuk (onnan buborekolnak a
+      // window-ig, ahol a celzas hallgat rajuk): az aim.ts a kattintast
+      // az esemeny CELPONTJA alapjan szuri (onGameSurface), tehat a
+      // window-ra kuldott esemeny nem szamitana kattintasnak a palyan.
+      // Igy viszont ugyanaz az ut fut le, mint egy valodi kattintasnal:
+      // sugarkoveto talalat es a "halal alatt a kattintas nem loves"
+      // szabaly is merve van.
+      for (let attempt = 0; attempt < 4 && chosen !== other; attempt++) {
+        const kattintott = await B.page.evaluate((index: number) => {
           const spike = (window as any).__spike;
+          if (spike.net.pendingSpawn === null) return "lekesve";
           const marker = spike.view.spawnChoicePosition(index);
-          if (!marker) return null;
+          if (!marker) return "nincs jelolo";
           const camera = spike.view.camera;
           const point = camera.position.clone();
           point.set(marker[0], marker[1], marker[2]);
           point.project(camera);
-          return [
-            (point.x * 0.5 + 0.5) * window.innerWidth,
-            (-point.y * 0.5 + 0.5) * window.innerHeight,
-          ];
-        }, other)) as [number, number] | null;
-        if (!screen) break;
+          const clientX = (point.x * 0.5 + 0.5) * window.innerWidth;
+          const clientY = (-point.y * 0.5 + 0.5) * window.innerHeight;
+          const vaszon = document.querySelector("canvas");
+          if (!vaszon) return "nincs vaszon";
+          for (const type of ["mousemove", "mousedown", "mouseup"]) {
+            vaszon.dispatchEvent(
+              new MouseEvent(type, { clientX, clientY, button: 0, bubbles: true }),
+            );
+          }
+          return "ok";
+        }, other);
 
-        await B.page.mouse.move(screen[0], screen[1]);
-        await B.page.mouse.down();
-        await B.page.mouse.up();
-        await sleep(220);
+        if (kattintott === "lekesve") {
+          lekesve = true;
+          break;
+        }
+        if (kattintott === "nincs jelolo" || kattintott === "nincs vaszon") break;
+
+        await sleep(150);
         chosen = (await B.page.evaluate(
           "window.__spike.net.pendingSpawnIndex",
         )) as number | null;
@@ -262,7 +290,9 @@ async function main(): Promise<void> {
     check(
       "a palyara kattintva atvalaszthato a hely",
       other !== undefined && chosen === other,
-      `kert: ${other}, terv: ${chosen}`,
+      lekesve
+        ? "a jatekos ujraszuletett, mielott a teszt kattintani tudott volna"
+        : `kert: ${other}, terv: ${chosen}`,
     );
     plan = (await B.page.evaluate("window.__spike.net.pendingSpawn")) as
       | [number, number, number]
