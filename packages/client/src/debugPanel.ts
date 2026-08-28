@@ -105,7 +105,22 @@ export function setDebugPanelVisible(visible: boolean): void {
   if (root) root.hidden = !visible;
 }
 
-export function initDebugPanel(): void {
+/**
+ * A hitbox-kapcsolo, hogy kivulrol is vissza lehessen allitani.
+ *
+ * KELL: dev modbol kilepve a hitboxokat kenyszeritve kikapcsoljuk, es
+ * olyankor a pipa ne maradjon bent -- kulonben legkozelebb bekapcsolt
+ * allapotot mutatna, kikapcsolt dobozok mellett.
+ */
+let hitboxCheckbox: HTMLInputElement | null = null;
+
+export function setHitboxesChecked(checked: boolean): void {
+  if (hitboxCheckbox) hitboxCheckbox.checked = checked;
+}
+
+export function initDebugPanel(
+  opts: { onHitboxes?: (visible: boolean) => void } = {},
+): void {
   const root = document.getElementById("debug-panel");
   if (!root) return;
   // A lathatosagot a hivo allitja be a dev mod szerint -- itt
@@ -138,7 +153,24 @@ export function initDebugPanel(): void {
   exportBtn.type = "button";
   exportBtn.title = "Aktuális beállítások letöltése JSON fájlként";
 
-  buttons.append(resetBtn, exportBtn);
+  // HITBOXOK: az UTKOZO dobozok kirajzolasa.
+  //
+  // Nem szepsegkerdes: a latvany es az utkozes ket kulon forrasbol jon
+  // (a modell, illetve az ArenaBox-ok), es az elcsuszasuk CSENDES -- a
+  // jatekos nekimegy a semminek, vagy athajt azon, amit lat. Ez a
+  // kapcsolo ranezesre megmutatja, hol van tenylegesen a fal.
+  const hitboxLabel = document.createElement("label");
+  hitboxLabel.className = "debug-toggle";
+  hitboxLabel.title = "Az ütköző dobozok kirajzolása";
+  const hitboxInput = document.createElement("input");
+  hitboxInput.type = "checkbox";
+  hitboxInput.addEventListener("change", () => {
+    opts.onHitboxes?.(hitboxInput.checked);
+  });
+  hitboxLabel.append(hitboxInput, document.createTextNode("hitboxok"));
+  hitboxCheckbox = hitboxInput;
+
+  buttons.append(resetBtn, exportBtn, hitboxLabel);
   root.appendChild(buttons);
 
   const body = document.createElement("div");

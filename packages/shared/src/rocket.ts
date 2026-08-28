@@ -1,3 +1,4 @@
+import { CAR_BOXES } from "./carHitbox";
 import { CHASSIS } from "./config";
 
 /**
@@ -140,11 +141,27 @@ export function segmentCarEntry(
     carRotation,
   );
 
-  return segmentBoxEntry(start, end, [0, 0, 0], [
-    CHASSIS.halfExtents.x + radius,
-    CHASSIS.halfExtents.y + radius,
-    CHASSIS.halfExtents.z + radius,
-  ]);
+  // TOBB DOBOZ, nem egy: a modell teljes befoglaloja a kabin
+  // magassagaban haromszor akkora, mint maga az auto -- a
+  // motorhaztetö es a csomagtarto FOLOTTI levego is talalatnak
+  // szamitana. A dobozok mertek (carHitbox.ts), es mind a regi
+  // befoglalon BELUL vannak: senki nem lett eltalalhatobb, csak a
+  // hamis talalatok tuntek el.
+  //
+  // A LEGKOZELEBBI talalat kell, nem az elso: a nyomjelzo csiknak es a
+  // robbanasnak a becsapodas helyen kell vegzodnie.
+  let legkozelebbi: number | null = null;
+  for (const b of CAR_BOXES) {
+    const t = segmentBoxEntry(start, end, [b.dx, b.dy, b.dz], [
+      b.hx + radius,
+      b.hy + radius,
+      b.hz + radius,
+    ]);
+    if (t !== null && (legkozelebbi === null || t < legkozelebbi)) {
+      legkozelebbi = t;
+    }
+  }
+  return legkozelebbi;
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   PROP_MERETEK,
   ARENA,
   CAMERA,
+  CAR_BOXES,
   CHASSIS,
   DEFAULT_WEAPON,
   EXPLOSION_RADIUS,
@@ -1303,6 +1304,19 @@ export class SceneView {
 
   removeRemoteCar(id: string): void {
     this.setShield(id, this.scene, false);
+
+    // A hitbox is menjen vele, kulonben egy kilepett jatekos doboza
+    // ottmaradna a palyan.
+    const hb = this.carHitboxes.get(id);
+    if (hb) {
+      this.hitboxGroup?.remove(hb);
+      for (const gy of hb.children) {
+        const l = gy as THREE.LineSegments;
+        l.geometry.dispose();
+        (l.material as THREE.Material).dispose();
+      }
+      this.carHitboxes.delete(id);
+    }
     const car = this.remoteCars.get(id);
     if (!car) return;
     this.scene.remove(car.wrapper);
@@ -1329,6 +1343,8 @@ export class SceneView {
   updateRemoteCar(id: string, state: RemoteVisualState): void {
     const car = this.remoteCars.get(id);
     if (!car) return;
+
+    this.syncCarHitbox(id, state.position.toArray(), state.quaternion.toArray());
 
     // Gordules: a ket frame kozotti elmozdulas vetulete az orr iranyara,
     // osztva a kerek sugaraval (r sugaru kerek d utat megteve d/r
@@ -1917,7 +1933,113 @@ export class SceneView {
       );
     }
 
+    this.syncCarHitbox(
+      "sajat",
+      interpolatedChassis.position,
+      interpolatedChassis.quaternion,
+    );
+
     return interpolatedChassis;
+  }
+
+  // --- Hitboxok (dev mod) ---
+
+  /**
+   * Az UTKOZO dobozok kirajzolasa dratvazkent.
+   *
+   * MIERT KELL: a latvany es az utkozes KET KULON forrasbol jon (a
+   * modell, illetve az ArenaBox-ok), es a ketto eszrevetlenul
+   * elcsuszhat. A kovetkezmeny csendes: a jatekos nekimegy a semminek,
+   * vagy athajt azon, amit lat. Ezt ranezesre lehetetlen eszrevenni --
+   * hacsak nem latszik, hol van tenylegesen a fal.
+   *
+   * A rejtett dobozokat is megmutatja: eppen azok a gyanusak.
+   */
+  private hitboxGroup: THREE.Group | null = null;
+  private carHitboxes = new Map<string, THREE.Group>();
+
+  /** egy dratvaz-doboz a megadott fel-meretekkel. */
+  private makeHitbox(
+    halfX: number,
+    halfY: number,
+    halfZ: number,
+    color: number,
+  ): THREE.LineSegments {
+    const geo = new THREE.BoxGeometry(halfX * 2, halfY * 2, halfZ * 2);
+    const lines = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geo),
+      new THREE.LineBasicMaterial({ color, depthTest: false }),
+    );
+    geo.dispose();
+    // A dobozok MINDEN mas fole rajzolodnak: kulonben eppen az a fal
+    // takarna el a sajat hitboxat, amit ellenorizni akarunk.
+    lines.renderOrder = 999;
+    return lines;
+  }
+
+  /** Latszanak-e eppen a hitboxok. */
+  get hitboxesVisible(): boolean {
+    return this.hitboxGroup !== null && this.hitboxGroup.visible;
+  }
+
+  setHitboxesVisible(visible: boolean): void {
+    if (!this.hitboxGroup) {
+      if (!visible) return;
+      this.hitboxGroup = new THREE.Group();
+      // ARENA: a fizika, a loves es minden meres EZEKKEL szamol.
+      for (const box of ARENA) {
+        if (box.name === "ground") continue;
+        const lines = this.makeHitbox(
+          box.halfExtents.x,
+          box.halfExtents.y,
+          box.halfExtents.z,
+          0x3fb950,
+        );
+        lines.position.set(box.position.x, box.position.y, box.position.z);
+        if (box.rotation) {
+          lines.rotation.set(box.rotation.x, box.rotation.y, box.rotation.z);
+        }
+        this.hitboxGroup.add(lines);
+      }
+      this.scene.add(this.hitboxGroup);
+    }
+    this.hitboxGroup.visible = visible;
+    for (const l of this.carHitboxes.values()) l.visible = visible;
+  }
+
+  /**
+   * Egy auto hitboxanak igazitasa.
+   *
+   * Az autoke MOZOG, tehat kepkockankent kell allitani -- az arenae nem.
+   */
+  private syncCarHitbox(
+    id: string,
+    position: readonly number[],
+    quaternion: readonly number[],
+  ): void {
+    if (!this.hitboxGroup?.visible) return;
+    let csoport = this.carHitboxes.get(id);
+    if (!csoport) {
+      // A TALALAT-dobozok, nem egyetlen tegla: az auto felso feleben a
+      // teljes befoglalo haromszor akkora, mint maga a kocsi (lasd
+      // carHitbox.ts). Eppen az a lenyeg, hogy ez ranezesre latszodjon.
+      csoport = new THREE.Group();
+      for (const b of CAR_BOXES) {
+        const doboz = this.makeHitbox(b.hx, b.hy, b.hz, 0x39d0ff);
+        doboz.position.set(b.dx, b.dy, b.dz);
+        csoport.add(doboz);
+      }
+      this.carHitboxes.set(id, csoport);
+      this.hitboxGroup.add(csoport);
+    }
+    csoport.visible = true;
+    csoport.position.set(position[0], position[1], position[2]);
+    csoport.quaternion.set(
+      quaternion[0],
+      quaternion[1],
+      quaternion[2],
+      quaternion[3],
+    );
   }
 
   updateCamera(chassis: Transform): void {

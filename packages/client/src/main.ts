@@ -25,7 +25,11 @@ import {
 } from "@cca/shared";
 import { Aim } from "./aim";
 import { ControlsHelp } from "./controlsHelp";
-import { initDebugPanel, setDebugPanelVisible } from "./debugPanel";
+import {
+  initDebugPanel,
+  setDebugPanelVisible,
+  setHitboxesChecked,
+} from "./debugPanel";
 import { DevMode } from "./devMode";
 import {
   hideLoading,
@@ -257,7 +261,7 @@ async function main(): Promise<void> {
   new ControlsHelp();
   // Ugyanez a hangnal, az M billentyuvel.
   new SoundToggle(audio);
-  initDebugPanel();
+  initDebugPanel({ onHitboxes: (be) => view.setHitboxesVisible(be) });
 
   // Dev mod: a fizika-csuszkak es a technikai panel CSAK itt latszik.
   // A jatekosnak a PlayerHud marad (HP, boost, sebesseg, fegyver).
@@ -267,6 +271,12 @@ async function main(): Promise<void> {
     hud.setVisible(enabled);
     // A CSS ebbol tudja kikerulni a csuszka-panelt (lasd body.dev).
     document.body.classList.toggle("dev", enabled);
+    // A hitboxok CSAK dev modban latszanak: kilepeskor kenyszeritve
+    // eltunnek, kulonben bekapcsolva maradnanak a jatekos kepernyojen.
+    if (!enabled) {
+      view.setHitboxesVisible(false);
+      setHitboxesChecked(false);
+    }
   });
 
   input.onAction((action) => {

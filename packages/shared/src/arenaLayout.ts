@@ -17,7 +17,7 @@
  * es a melyseget megcserelni. Ipari udvarnal ez amugy is termeszetes.
  * (A check:layout kulon ellenorzi.)
  */
-import { PROP_MERETEK, type PropNev } from "./arenaProps";
+import { PROP_MERETEK, PROP_TALPAK, type PropNev } from "./arenaProps";
 import type { ArenaBox } from "./config";
 
 /** Megengedett elfordulasok fokban -- lasd a fenti indoklast. */
@@ -30,24 +30,32 @@ export interface PropPlacement {
   z: number;
   yaw?: PropYaw;
   /**
-   * Milyen utkozest kapjon.
+   * TOMOR test, a modell alaprajza helyett.
    *
-   *  - "tomb": egyetlen doboz, a modell teljes meretevel (zart epulet).
-   *  - "szin": NYITOTT rakodoszin -- csak a ket hosszanti oszlopsor
-   *    tomor, kozotte at lehet hajtani. A keszletben ez az egyetlen
-   *    igazan nyitott epulet (a raktarak zartak), es ez adja a
-   *    "behajthato csarnok" szerepet.
+   * A palyahataron allo epuleteknek ez kell. Nekik nem az a dolguk,
+   * hogy hihetoen alljanak, hanem hogy ZARJAK a palyat -- a mert
+   * alaprajzuk viszont lyukas (kapuk, oszlopok kozotti resek), es
+   * azokon az auto egyszeruen kihajtana. Merve: az alaprajzukkal a
+   * hatar eszaki oldalan 45,5 m res maradt.
+   *
+   * A jatekos ebbol semmit nem vesz eszre: a hatar epulete kifele lóg,
+   * belulrol csak a falat latja.
    */
-  kind?: "tomb" | "szin";
+  tomor?: boolean;
 }
 
 /**
- * Az OSZLOPSOR vastagsaga a nyitott szinnel (m).
+ * Meddig szamit a modell alakja az UTKOZESNEL (m).
  *
- * A modellen az oszlopok kb. fel meter vastagok; egy meterrel szamolunk,
- * hogy a jatekos ne akadjon be egy alig lathato elbe.
+ * Ez alatt merjuk ki a modell alaprajzat (lasd kit-meret.ts), es ebbol
+ * lesznek az utkozo dobozok. Ami e FOLOTT van, az nem befolyasolja az
+ * alaprajzot: oda az auto ugysem er fel.
+ *
+ * A 2,5 m az auto magassaga (1,51 m) plusz rahagyas ugrasra es
+ * bukkenore. Feljebb vinni ertelmetlen -- a magas epuletek attol csak
+ * visszakapnak a valodinal nagyobb alaprajzot.
  */
-const OSZLOP_VASTAGSAG = 1;
+export const UTKOZES_MAGASSAG = 2.5;
 
 /**
  * A palyan allo, UTKOZO epuletek.
@@ -93,8 +101,8 @@ export const LAYOUT: PropPlacement[] = [
   //
   // A keszletben ez az egyetlen igazan nyitott epulet -- a raktarak
   // zart tombok. Az utkozese csak a ket oszlopsor, kozotte szabad az ut.
-  { prop: "Railroad_Loadbay_Shed_1", x: 27, z: 1, yaw: 90, kind: "szin" },
-  { prop: "Railroad_Loadbay_Shed_1", x: -29, z: -1, yaw: 90, kind: "szin" },
+  { prop: "Railroad_Loadbay_Shed_1", x: 27, z: 0, yaw: 90 },
+  { prop: "Railroad_Loadbay_Shed_1", x: -29, z: -1, yaw: 90 },
 
   // --- Nehany fedezek a nyitott kozepen ---
   //
@@ -180,6 +188,7 @@ export function perimeterPlacements(hatar: number): PropPlacement[] {
         x: oldal.hossz[0] * kozepHossz + oldal.kifele[0] * kozepMely,
         z: oldal.hossz[1] * kozepHossz + oldal.kifele[1] * kozepMely,
         yaw: oldal.yaw,
+        tomor: true,
       });
       eddig += hosszuMeret;
     }
@@ -197,6 +206,7 @@ export function perimeterPlacements(hatar: number): PropPlacement[] {
       prop: SAROK,
       x: sx * (hatar + sarokMeret.szelesseg / 2),
       z: sz * (hatar + sarokMeret.melyseg / 2),
+      tomor: true,
     });
   }
 
@@ -246,66 +256,88 @@ export function placementFootprint(p: PropPlacement): {
 /**
  * Az elhelyezesek atszamolasa UTKOZO DOBOZOKRA.
  *
- * Egy zart epulet egy dobozt ad; a nyitott szin ketto oszlopsort, hogy
- * kozotte at lehessen hajtani.
+ * Egy epulet ANNYI dobozt ad, ahany teglalappal a talajszinti
+ * alaprajza le van fedve (PROP_TALPAK, generalt). Ez tobbnyire egy
+ * doboz -- a raktarak tomorek --, de egy nyitott rakodoszinbol ket
+ * oszlopsor lesz, egy viztoronybol pedig negy lab, kozottuk szabad
+ * uttal.
+ *
+ * A MODELL viszont egyetlen peldany marad: az ELSO dobozhoz kotjuk,
+ * propAt-tal az epulet kozeppontjara allitva. A tobbi doboz "hidden",
+ * kulonben ugyanaz az epulet tobbszor rajzolodna ki egymasra.
  */
 export function layoutBoxes(layout: PropPlacement[] = LAYOUT): ArenaBox[] {
   const boxes: ArenaBox[] = [];
 
   for (let i = 0; i < layout.length; i++) {
     const p = layout[i];
-    const { szelesseg, melyseg, magassag } = placementFootprint(p);
+    const m = PROP_MERETEK[p.prop];
+    const yaw = p.yaw ?? 0;
     // A modell szine a texturajabol jon; a doboz szine csak akkor
     // latszik, ha a modell nem toltodne be.
     const color = 0x8a8f98;
-    const nev = `${p.prop}_${i}`;
 
-    if (p.kind === "szin") {
-      // KET oszlopsor a hosszanti oldalakon, kozotte szabad athajtas.
-      // A hosszanti irany a nagyobbik meret.
-      const hosszanti = melyseg >= szelesseg ? "z" : "x";
-      const felMagas = magassag / 2;
-      for (const oldal of [-1, 1]) {
-        boxes.push({
-          // A MODELL csak az egyik dobozhoz tartozik, kulonben ketszer
-          // rajzolodna ki ugyanoda. A MASIKAT viszont el kell rejteni:
-          // dobozkent kirajzolva egy szurke fal allna a szin belsejeben.
-          prop: oldal > 0 ? p.prop : undefined,
-          propYaw: oldal > 0 ? p.yaw ?? 0 : undefined,
-          // A modell az EPULET kozepere kerul, nem az oszlopsoreba.
-          propAt: oldal > 0 ? { x: p.x, z: p.z } : undefined,
-          hidden: oldal < 0,
-          name: `${nev}_oszlop${oldal > 0 ? "A" : "B"}`,
-          halfExtents:
-            hosszanti === "z"
-              ? { x: OSZLOP_VASTAGSAG / 2, y: felMagas, z: melyseg / 2 }
-              : { x: szelesseg / 2, y: felMagas, z: OSZLOP_VASTAGSAG / 2 },
-          position:
-            hosszanti === "z"
-              ? {
-                  x: p.x + (oldal * (szelesseg - OSZLOP_VASTAGSAG)) / 2,
-                  y: felMagas,
-                  z: p.z,
-                }
-              : {
-                  x: p.x,
-                  y: felMagas,
-                  z: p.z + (oldal * (melyseg - OSZLOP_VASTAGSAG)) / 2,
-                },
-          color,
-        });
+    // Ha egy modellhez nincs mert alaprajz (uj modell, meg nem futott a
+    // kit-meret), a teljes befoglalo doboz az ESES IRANYA: inkabb
+    // legyen az utkozes tul nagy, mint hogy egy epulet athajthato
+    // legyen.
+    // A TELJES befoglalo doboz -- a hatarnak ez kell, es ez a
+    // tartalek is, ha egy modellhez meg nincs mert alaprajz.
+    const egesz = [
+      {
+        dx: 0,
+        dz: 0,
+        szelesseg: m.szelesseg,
+        melyseg: m.melyseg,
+        magassag: m.magassag,
+      },
+    ];
+    const talpak =
+      p.tomor === true ? egesz : PROP_TALPAK[p.prop] ?? egesz;
+
+    for (let j = 0; j < talpak.length; j++) {
+      const t = talpak[j];
+      // A FORGATAS derekszogu (lasd a fajl elejen), tehat eleg a
+      // koordinatakat felcserelni -- nincs szuksege szogfuggvenyre, es
+      // nem is csuszik el kerekitessel.
+      let dx = t.dx;
+      let dz = t.dz;
+      let szelesseg = t.szelesseg;
+      let melyseg = t.melyseg;
+      if (yaw === 90) {
+        dx = -t.dz;
+        dz = t.dx;
+        szelesseg = t.melyseg;
+        melyseg = t.szelesseg;
+      } else if (yaw === 180) {
+        dx = -t.dx;
+        dz = -t.dz;
+      } else if (yaw === 270) {
+        dx = t.dz;
+        dz = -t.dx;
+        szelesseg = t.melyseg;
+        melyseg = t.szelesseg;
       }
-      continue;
-    }
 
-    boxes.push({
-      prop: p.prop,
-      propYaw: p.yaw ?? 0,
-      name: nev,
-      halfExtents: { x: szelesseg / 2, y: magassag / 2, z: melyseg / 2 },
-      position: { x: p.x, y: magassag / 2, z: p.z },
-      color,
-    });
+      // A MAGASSAG dobozonkent kulon jon: addig er fel, ameddig a
+      // modell felette tart. Ha mindegyik a teljes magassagot kapna, a
+      // lovesek hazudnanak -- egy 1,4 m-es rakodoperon nyolcmeteres
+      // falkent allitana meg a lovedeket.
+      const felMagas = t.magassag / 2;
+
+      boxes.push({
+        // A MODELL csak az elso dobozhoz tartozik; a helye az epulet
+        // kozeppontja, nem a doboze.
+        prop: j === 0 ? p.prop : undefined,
+        propYaw: j === 0 ? yaw : undefined,
+        propAt: j === 0 ? { x: p.x, z: p.z } : undefined,
+        hidden: j > 0,
+        name: talpak.length > 1 ? `${p.prop}_${i}_${j}` : `${p.prop}_${i}`,
+        halfExtents: { x: szelesseg / 2, y: felMagas, z: melyseg / 2 },
+        position: { x: p.x + dx, y: felMagas, z: p.z + dz },
+        color,
+      });
+    }
   }
 
   return boxes;

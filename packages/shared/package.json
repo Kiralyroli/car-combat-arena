@@ -30,6 +30,7 @@
     "check:names": "tsx scripts/check-names.ts",
     "check:audio": "tsx scripts/check-audio.ts",
     "check:layout": "tsx scripts/check-layout.ts",
+    "check:carbox": "tsx scripts/check-carbox.ts",
     "check:camera": "tsx scripts/check-camera.ts"
   },
   "dependencies": {

@@ -15,6 +15,8 @@
 import {
   ARENA_HALF,
   CHASSIS,
+  PROP_MERETEK,
+  PROP_TALPAK,
   LAYOUT,
   PICKUP_POINTS,
   PICKUP_RADIUS,
@@ -252,6 +254,104 @@ function main(): void {
       befele.length === 0
         ? "mind kifele all"
         : befele.map((b) => b.name).join(", "),
+    );
+  }
+
+  // --- A mert alaprajz a MODELLEN BELUL marad ---
+  //
+  // A talp-teglalapok a modell alaprajzabol jonnek (kit-meret.ts). Ha
+  // egy elcsuszna, utkozes lenne ott, ahol a modellnek nyoma sincs --
+  // vagyis lathatatlan fal, csak eppen egy epulet MELLETT.
+  {
+    const kilog: string[] = [];
+    for (const [nev, talpak] of Object.entries(PROP_TALPAK)) {
+      const m = PROP_MERETEK[nev as keyof typeof PROP_MERETEK];
+      if (!m) continue;
+      for (const t of talpak) {
+        // Fel cella rahagyas: a racs FELFELE kerekit (lasd kit-meret).
+        if (
+          Math.abs(t.dx) + t.szelesseg / 2 > m.szelesseg / 2 + 1 ||
+          Math.abs(t.dz) + t.melyseg / 2 > m.melyseg / 2 + 1 ||
+          t.magassag > m.magassag + 0.01
+        ) {
+          kilog.push(
+            `${nev}: ${t.dx},${t.dz} (${t.szelesseg}x${t.melyseg}x${t.magassag})`,
+          );
+        }
+      }
+    }
+    const db = Object.values(PROP_TALPAK).reduce((s, t) => s + t.length, 0);
+    check(
+      "minden talp-teglalap a modellen belul van",
+      kilog.length === 0,
+      kilog.length === 0
+        ? `${db} teglalap ${Object.keys(PROP_TALPAK).length} modellre`
+        : kilog.slice(0, 3).join("; "),
+    );
+  }
+
+  // --- A dobozok MAGASSAGA koveti a modellt ---
+  //
+  // Minden doboz addig er fel, ameddig felette a modell tart -- nem a
+  // modell teljes magassagaig. Ha a magassag-terkep csendben elromlik,
+  // minden doboz a teljes magassagot kapja: a jatek ettol meg megy, de
+  // a lovesek hazudnak, egy 1,4 m-es rakodoperon nyolcmeteres falkent
+  // allitja meg a lovedeket. Merve: 165 dobozbol 123 alacsonyabb.
+  {
+    let alacsonyabb = 0;
+    let osszes = 0;
+    for (const [nev, talpak] of Object.entries(PROP_TALPAK)) {
+      const m = PROP_MERETEK[nev as keyof typeof PROP_MERETEK];
+      if (!m) continue;
+      for (const t of talpak) {
+        osszes++;
+        if (t.magassag < m.magassag - 1) alacsonyabb++;
+      }
+    }
+    // A FELE csak egy also korlat: a lenyeg, hogy ne EGYETLEN doboz
+    // magassaga legyen a modell teteje.
+    check(
+      "a dobozok magassaga koveti a modellt",
+      alacsonyabb > osszes / 2,
+      `${alacsonyabb} / ${osszes} doboz alacsonyabb a modell tetejenel`,
+    );
+  }
+
+  // --- Az ATHAJTHATO epuletek athajthatok maradnak ---
+  //
+  // Ez a talp-meres egesz ertelme. Ha a generalas elromlik es egyetlen
+  // tomor dobozt ad vissza, a palya CSENDBEN visszaalakul: minden
+  // jatszik tovabb, csak a viztorony megint tomor hasab lesz, es a
+  // rakodoszinbe nem lehet behajtani. Ezert nezzuk meg konkretan.
+  {
+    const AUTO = CHASSIS.halfExtents.x * 2;
+    const bajos: string[] = [];
+    for (const nev of ["Watertower_1", "Railroad_Loadbay_Shed_1"] as const) {
+      const talpak = PROP_TALPAK[nev];
+      const m = PROP_MERETEK[nev];
+      // Vegighaladunk a kozepvonalon (z = 0), es megnezzuk, van-e
+      // legalabb egy auto szelessegu szabad savja.
+      let legjobb = 0;
+      let futo = 0;
+      for (let x = -m.szelesseg / 2; x <= m.szelesseg / 2; x += 0.1) {
+        const utban = talpak.some(
+          (t) =>
+            Math.abs(x - t.dx) < t.szelesseg / 2 &&
+            Math.abs(0 - t.dz) < t.melyseg / 2,
+        );
+        futo = utban ? 0 : futo + 0.1;
+        legjobb = Math.max(legjobb, futo);
+      }
+      if (legjobb < AUTO) {
+        bajos.push(`${nev}: ${legjobb.toFixed(1)} m (kell ${AUTO.toFixed(1)})`);
+      }
+    }
+    check(
+      "az athajthato epuletekben elfer az auto",
+      bajos.length === 0,
+      bajos.length === 0
+        ? `a viztorony labai es a rakodoszin kozott van ${AUTO.toFixed(1)} m-nel szelesebb sav`
+        : bajos.join("; "),
     );
   }
 
