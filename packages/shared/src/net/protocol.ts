@@ -15,6 +15,7 @@
  * erintese nelkul.
  */
 
+import type { AbilityId } from "../abilities";
 import type { MatchPhase } from "../match";
 import type { CarColorId } from "../carColors";
 import type { WeaponId } from "../weapons";
@@ -45,8 +46,12 @@ export const INTERP_DELAY_MS = 100;
  * 2: fegyvervalasztas (agyu / gepfegyver), a hozza tartozo mezokkel --
  * a regi kliens nem tudna se fegyvert kuldeni, se nyomjelzot rajzolni,
  * ezert inkabb egyertelmu hibaval alljon meg, mint fura jatekkal.
+ *
+ * 8: KEPESSEGEK (gyogyitas / pajzs). A regi kliens nem tudna kepesseget
+ * valasztani, es -- ami rosszabb -- nem latna a masik jatekos pajzsat:
+ * a lovesei ok nelkul tunnenek el. Inkabb ne is csatlakozzon.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -132,6 +137,36 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
   lives: number;
   /** Melyik fegyverrel jatszik -- a HUD es az eredmenyjelzo mutatja. */
   weapon: WeaponId;
+  /** Melyik kepesseget valasztotta ehhez az elethez. */
+  ability: AbilityId;
+  /**
+   * Fut-e eppen a kepesseg hatasa.
+   *
+   * KULON MEZO, nem a hatralevo idobol kovetkeztetve: a szerver es a
+   * kliens orai kulon jarnak, tehat egy idobelyegbol a kliens rosszul
+   * szamolna. (Ugyanez a hiba mar megtortent a tulmelegedesnel.)
+   *
+   * MINDENKIRE megy, nem csak magunkra: ha a pajzs elnyeli a lovest,
+   * azt a TAMADONAK is latnia kell -- kulonben szamara a loves ok
+   * nelkul tunik el.
+   */
+  abilityActive: boolean;
+  /**
+   * Mennyi van meg a visszatoltesbol (ms), 0 = kesz.
+   *
+   * A HUD ebbol rajzol, tehat pontosan azt latja a jatekos, ami szerint
+   * a szerver dont.
+   */
+  abilityCooldownMs: number;
+  /**
+   * Mennyi van meg a HATASBOL (ms), 0 = nem fut.
+   *
+   * Az `abilityActive` csak annyit mond, hogy tortenik valami; a
+   * jatekosnak azt is latnia kell, MEDDIG. Egy pajzs, amirol nem tudni,
+   * mikor jar le, nem hasznalhato idozitesre -- pedig eppen az az
+   * ertelme.
+   */
+  abilityActiveMs: number;
   /**
    * A gepfegyver hoszintje (0..100), agyunal mindig 0.
    *
@@ -220,6 +255,7 @@ export interface JoinMessage {
   name?: string;
   /** Valasztott fegyver; hianyzo vagy ismeretlen ertek eseten agyu. */
   weapon?: WeaponId;
+  ability?: AbilityId;
   /**
    * Valasztott autoszin; hianyzo vagy ismeretlen ertek eseten sarga.
    *
@@ -241,6 +277,29 @@ export interface JoinMessage {
 export interface SelectWeaponMessage {
   type: "selectWeapon";
   weapon: WeaponId;
+}
+
+/**
+ * Kepesseg-valasztas.
+ *
+ * Ugyanaz a szabaly, mint a fegyvernel: a szerver donti el, hogy
+ * SZABAD-e eppen (csak ujraszuleteskor vagy meccs elott). Menekules
+ * kozben nem lehet atvaltani arra, ami eppen jobban jonne.
+ */
+export interface SelectAbilityMessage {
+  type: "selectAbility";
+  ability: AbilityId;
+}
+
+/**
+ * A kepesseg elsutese -- KERES, nem tény.
+ *
+ * A kliens nem dontheti el, hogy sikerult-e: mindket kepesseg a sebzes
+ * kimenetelet valtoztatja, azt pedig a szerver birtokolja. Egy hazug
+ * kliens kulonben folyamatosan gyogyithatna magat.
+ */
+export interface UseAbilityMessage {
+  type: "useAbility";
 }
 
 export interface StateMessage {
@@ -315,6 +374,8 @@ export type ClientMessage =
   | StateMessage
   | PingMessage
   | SelectWeaponMessage
+  | SelectAbilityMessage
+  | UseAbilityMessage
   | ChooseSpawnMessage
   | FireMessage;
 

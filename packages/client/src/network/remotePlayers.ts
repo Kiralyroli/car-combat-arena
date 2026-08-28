@@ -117,6 +117,14 @@ export class RemotePlayers {
    * jatek.
    */
   private readonly protectedIds = new Set<string>();
+  /**
+   * Kik GYOGYULNAK eppen.
+   *
+   * A latvanyhoz kell (zold burok): a jatekosnak latnia kell, hogy az
+   * ellenfel eppen visszatolti magat -- kulonben csak annyit tapasztal,
+   * hogy "nem fogy az elete".
+   */
+  private readonly healingIds = new Set<string>();
 
   /**
    * Ki milyen szinu.
@@ -164,6 +172,10 @@ export class RemotePlayers {
     return this.protectedIds.has(id);
   }
 
+  isHealing(id: string): boolean {
+    return this.healingIds.has(id);
+  }
+
   colorOf(id: string): CarColorId {
     return this.colors.get(id) ?? DEFAULT_CAR_COLOR;
   }
@@ -194,6 +206,7 @@ export class RemotePlayers {
     this.names.delete(id);
     this.lives.delete(id);
     this.protectedIds.delete(id);
+    this.healingIds.delete(id);
     this.colors.delete(id);
     this.weapons.delete(id);
     this.heats.delete(id);
@@ -206,6 +219,7 @@ export class RemotePlayers {
     this.names.clear();
     this.lives.clear();
     this.protectedIds.clear();
+    this.healingIds.clear();
     this.colors.clear();
     this.weapons.clear();
     this.heats.clear();
@@ -225,6 +239,11 @@ export class RemotePlayers {
       else this.overheated.delete(player.id);
       if (player.protected) this.protectedIds.add(player.id);
       else this.protectedIds.delete(player.id);
+      if (player.ability === "heal" && player.abilityActive) {
+        this.healingIds.add(player.id);
+      } else {
+        this.healingIds.delete(player.id);
+      }
 
       let buffer = this.buffers.get(player.id);
       if (!buffer) {

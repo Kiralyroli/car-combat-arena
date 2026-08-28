@@ -893,7 +893,7 @@
     <div id="hud" hidden></div>
     <div id="help" hidden>
       <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
-      <b>Space</b> kezifek &nbsp; <b>C</b> korulnezes &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> (5 mp) ujraindulas<br />
+      <b>Space</b> kezifek &nbsp; <b>Q</b> kepesseg &nbsp; <b>C</b> korulnezes &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> (5 mp) ujraindulas<br />
       <b>1 2 3 4</b> kerek kiloves (FL FR RL RR, csak offline) &nbsp; <b>0</b> kerekek javitasa<br />
       <b>Ctrl+Shift+D</b> fejlesztoi mod ki/be &nbsp; (<b>?dev=1</b> az URL-ben ugyanez)
     </div>
@@ -930,6 +930,18 @@
           <button type="button" class="weapon" data-weapon="machinegun">
             <span class="wname">Gépfegyver</span>
             <span class="wdesc">Azonnali találat, sűrű tűz. Túlmelegszik.</span>
+          </button>
+        </div>
+
+        <!-- KEPESSEG: a fegyver melletti masodik valasztas (Q gomb). -->
+        <div id="ability-pick" class="weapons">
+          <button type="button" class="weapon" data-ability="shield">
+            <span class="wname">Pajzs</span>
+            <span class="wdesc">3 mp-ig elnyeli a sebzést</span>
+          </button>
+          <button type="button" class="weapon" data-ability="heal">
+            <span class="wname">Gyógyítás</span>
+            <span class="wdesc">Azonnal +40 élet</span>
           </button>
         </div>
 
@@ -1057,7 +1069,7 @@
     <div id="respawn-pick" hidden>
       <div class="box">
         <div class="hdr">ÚJJÁSZÜLETÉS <span id="respawn-in"></span></div>
-        <div class="sub">Most válthatsz fegyvert — és a pályára kattintva helyet is</div>
+        <div class="sub">Most válthatsz fegyvert és képességet — a pályára kattintva helyet is</div>
         <div id="respawn-weapons" class="weapons">
           <button type="button" class="weapon" data-weapon="cannon">
             <span class="wname">Ágyú</span>
@@ -1066,6 +1078,16 @@
           <button type="button" class="weapon" data-weapon="machinegun">
             <span class="wname">Gépfegyver</span>
             <span class="wdesc">Azonnali találat, túlmelegszik</span>
+          </button>
+        </div>
+        <div id="respawn-abilities" class="weapons">
+          <button type="button" class="weapon" data-ability="shield">
+            <span class="wname">Pajzs</span>
+            <span class="wdesc">3 mp-ig elnyeli a sebzést</span>
+          </button>
+          <button type="button" class="weapon" data-ability="heal">
+            <span class="wname">Gyógyítás</span>
+            <span class="wdesc">Azonnal +40 élet</span>
           </button>
         </div>
       </div>
@@ -1100,6 +1122,7 @@
         <span><kbd>A</kbd> <kbd>D</kbd></span><span>kormány</span>
         <span><kbd>Shift</kbd></span><span>boost</span>
         <span><kbd>Space</kbd></span><span>kézifék, drift</span>
+        <span><kbd>Q</kbd></span><span>képesség (pajzs / gyógyítás)</span>
         <span><kbd>C</kbd> nyomva</span><span>körülnézés az egérrel</span>
         <span><kbd>R</kbd> 5 mp-ig</span><span>újraindulás (a helyünkre tesz, javít)</span>
         <span>egér</span><span>célzás</span>
@@ -1143,6 +1166,15 @@
         <div class="weapon" id="weapon">
           <span class="cap" id="weapon-name">AGYU</span>
           <span class="state" id="weapon-state">KESZ</span>
+        </div>
+        <!--
+          KEPESSEG: a fegyver mintajara. A jatekosnak latnia kell, hogy
+          kesz van-e -- egy visszatoltodo kepesseg neluule csak
+          "nem tortenik semmi" elmeny lenne.
+        -->
+        <div class="weapon" id="ability">
+          <span class="cap" id="ability-name">PAJZS</span>
+          <span class="state" id="ability-state">KESZ</span>
         </div>
         <div class="tyre-block">
           <span class="cap">GUMIK</span>

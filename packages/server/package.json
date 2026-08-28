@@ -17,7 +17,8 @@
     "check:net": "tsx scripts/smoke-two-clients.ts",
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --external:ws --external:@dimforge/rapier3d-compat --outfile=dist/server.js",
     "check:pointblank": "tsx scripts/check-pointblank.ts",
-    "check:shotmesh": "tsx scripts/check-shotmesh.ts"
+    "check:shotmesh": "tsx scripts/check-shotmesh.ts",
+    "check:ability": "tsx scripts/check-ability.ts"
   },
   "dependencies": {
     "@cca/shared": "*",

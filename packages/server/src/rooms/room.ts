@@ -1,3 +1,15 @@
+import {
+  ABILITIES,
+  abilityActive,
+  abilityActiveLeft,
+  abilityCooldownLeft,
+  healPerMs,
+  activateAbility,
+  idleAbility,
+  toAbilityId,
+  type AbilityId,
+  type AbilityState,
+} from "@cca/shared";
 import { RocketSimulation, explosionDamageFor } from "../simulation/rockets";
 import { resolveHitscan } from "../simulation/machinegun";
 import {
@@ -179,6 +191,25 @@ export interface ServerPlayer {
    * jobban jonne.
    */
   weapon: WeaponId;
+  /**
+   * A valasztott KEPESSEG es annak allapota.
+   *
+   * Ugyanaz a szabaly, mint a fegyvernel: elve nem valthato (lasd
+   * setAbility).
+   */
+  ability: AbilityId;
+  abilityState: AbilityState;
+  /**
+   * Mennyi eletet kell MEG visszaadni a folyamatban levo gyogyitasbol.
+   *
+   * A gyogyitas harom masodperc alatt tortenik, tehat tickenkent egy
+   * TORT eletet ad. A HP viszont egesz szam (a HUD is azt mutatja),
+   * ezert a maradekot itt gyujtjuk, es csak a teljes eleteket adjuk at.
+   * E nelkul a kerekites minden tickben elnyelne a nyereseget, es a
+   * gyogyitas csendben nem csinalna semmit.
+   */
+  healLeft: number;
+  healAcc: number;
   /** A gepfegyver hoszintje es tuzeles-utemezese. */
   mg: MachinegunState;
   /**
@@ -259,6 +290,7 @@ export class Room {
     name?: string,
     weapon?: WeaponId,
     color?: CarColorId,
+    ability?: AbilityId,
   ): ServerPlayer {
     const spawn = this.allocateSpawn(null);
     const player: ServerPlayer = {
@@ -275,6 +307,12 @@ export class Room {
         [...this.players.values()].map((p) => p.color),
       ),
       protectedUntil: 0,
+      // A kepesseget is a SZERVER ellenorzi: ismeretlen ertek eseten
+      // az alapertelmezett.
+      ability: toAbilityId(ability),
+      abilityState: idleAbility(),
+      healLeft: 0,
+      healAcc: 0,
       lastDamagedAt: 0,
       pendingSpawnIndex: null,
       deathPosition: null,
@@ -570,6 +608,38 @@ export class Room {
    *
    * A megsemmisult jatekos kimarad: neki ugyis uj autoja lesz.
    */
+  /**
+   * A FOKOZATOS hatasu kepessegek lepese.
+   *
+   * Ma egyetlen ilyen van: a gyogyitas harom masodperc alatt adja
+   * vissza az eletet. Azonnali gyogyitassal a kepesseg egy "mentogomb"
+   * lenne -- igy viszont a tamado ki tudja lonni a gyogyulot.
+   */
+  stepAbilities(dt: number, now: number): void {
+    for (const player of this.players.values()) {
+      if (player.healLeft <= 0) continue;
+      // HALALKOR abbamarad: a gyogyulas nem folytatodik a halal utan.
+      if (player.deadSince !== null) {
+        player.healLeft = 0;
+        player.healAcc = 0;
+        continue;
+      }
+
+      const adhato = Math.min(player.healLeft, healPerMs() * dt * 1000);
+      player.healLeft -= adhato;
+      player.healAcc += adhato;
+
+      // Csak EGESZ eleteket adunk at: a HP egesz szam, a HUD is azt
+      // mutatja. A tort resz a kovetkezo tickig var.
+      const egesz = Math.floor(player.healAcc);
+      if (egesz > 0) {
+        player.healAcc -= egesz;
+        player.hp = Math.min(MAX_HP, player.hp + egesz);
+      }
+      void now;
+    }
+  }
+
   stepWheelRepair(dt: number, now: number): void {
     for (const player of this.players.values()) {
       if (player.deadSince !== null) continue;
@@ -632,6 +702,11 @@ export class Room {
     player.planKey = "";
     // Uj auto, uj esely: a kerekek is javulnak.
     player.wheels = healthyWheels();
+    // ...es a kepesseg is kesz all. A visszatoltes az ELETHEZ tartozik,
+    // nem viszi at magaval a halal.
+    player.abilityState = idleAbility();
+    player.healLeft = 0;
+    player.healAcc = 0;
     player.lastDamagedAt = 0;
     player.deadSince = null;
     // Uj auto, hideg cso: a halal elotti melegedes ne kovesse at.
@@ -790,6 +865,56 @@ export class Room {
    *
    * @returns sikerult-e
    */
+  /**
+   * Kepesseg-valasztas -- ugyanaz a szabaly, mint a fegyvernel.
+   *
+   * Elve nem valthato: menekules kozben nem lehet atvaltani arra, ami
+   * eppen jobban jonne.
+   */
+  setAbility(id: string, ability: AbilityId): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    const allowed = player.deadSince !== null || this.phase !== "playing";
+    if (!allowed) return false;
+
+    player.ability = toAbilityId(ability);
+    // UJ kepesseg, tiszta lap: a regi visszatoltese ne oroklodjon at.
+    player.abilityState = idleAbility();
+    return true;
+  }
+
+  /**
+   * A kepesseg elsutese. A szerver dont, nem a kliens.
+   *
+   * @returns sikerult-e (a hivo ebbol tudja, kell-e visszajelzes)
+   */
+  useAbility(id: string, now: number): boolean {
+    const player = this.players.get(id);
+    if (!player) return false;
+    // HALOTTAN nem: a kepesseg az eletben tart, nem feltamaszt.
+    //
+    // A MECCS FAZISAT viszont SZANDEKOSAN nem nezzuk. Eloszor csak
+    // "playing" alatt engedtem, es a jatekos egyedul probalva azt latta,
+    // hogy a Q egyszeruen nem csinal semmit -- magyarazat nelkul, mert
+    // a meccs ket jatekos nelkul el sem indul. A meccs elotti hasznalat
+    // amugy is kovetkezmeny nelkuli: ott senki nem sebez senkit, es az
+    // indulaskor mindenki ujraszuletik, ami a visszatoltest is nullazza.
+    if (player.deadSince !== null) return false;
+
+    const uj = activateAbility(player.ability, player.abilityState, now);
+    if (!uj) return false;
+    player.abilityState = uj;
+
+    // A GYOGYITAS nem azonnal tortenik, hanem az idotartama alatt
+    // fokozatosan (lasd stepAbilities). Itt csak a "meg ennyi jar"
+    // szamot allitjuk be.
+    if (player.ability === "heal") {
+      player.healLeft = ABILITIES.heal.heal;
+      player.healAcc = 0;
+    }
+    return true;
+  }
+
   setWeapon(id: string, weapon: WeaponId): boolean {
     const player = this.players.get(id);
     if (!player) return false;
@@ -1005,6 +1130,10 @@ export class Room {
         boostGrants: player.boostGrants,
         lives: player.lives,
         weapon: player.weapon,
+        ability: player.ability,
+        abilityActive: abilityActive(player.abilityState, now),
+        abilityCooldownMs: abilityCooldownLeft(player.abilityState, now),
+        abilityActiveMs: abilityActiveLeft(player.abilityState, now),
         heat: player.mg.heat,
         overheated: player.mg.overheated,
         protected: this.isProtected(player, now),
@@ -1022,6 +1151,16 @@ export class Room {
    * a vedelem csendben lyukas lenne.
    */
   private isProtected(player: ServerPlayer, now: number): boolean {
+    // A PAJZS ugyanezen a kapun jon be -- igy egyetlen sebzes-utvonal
+    // sem maradhat ki belole.
+    //
+    // KULON MEZOBEN, nem a protectedUntil-ban: a spawn-vedelmet a sajat
+    // loves torli ("aki lo, az mar nem menekul"). A pajzs viszont eppen
+    // azert van, hogy MOGOTTE lehessen harcolni -- kozos mezovel az
+    // elso sajat loves oltana ki.
+    if (player.ability === "shield" && abilityActive(player.abilityState, now)) {
+      return true;
+    }
     return now < player.protectedUntil;
   }
 

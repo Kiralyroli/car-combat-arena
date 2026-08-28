@@ -1,5 +1,5 @@
-import type { WeaponId } from "@cca/shared";
-import { WeaponPicker } from "./weaponPicker";
+import { DEFAULT_ABILITY, type AbilityId, type WeaponId } from "@cca/shared";
+import { AbilityPicker, WeaponPicker } from "./weaponPicker";
 
 /**
  * Fegyvervalasztas a halal-kepernyon.
@@ -16,11 +16,15 @@ import { WeaponPicker } from "./weaponPicker";
 export class RespawnWeaponPick {
   private readonly root: HTMLElement;
   private readonly picker: WeaponPicker;
+  private readonly abilityPicker: AbilityPicker;
   private readonly countdown: HTMLElement;
   private visible = false;
   private lastShownSecond = -1;
 
-  constructor(onSelect: (weapon: WeaponId) => void) {
+  constructor(
+    onSelect: (weapon: WeaponId) => void,
+    onAbility: (ability: AbilityId) => void,
+  ) {
     const root = document.getElementById("respawn-pick");
     if (!root) throw new Error("#respawn-pick nem talalhato");
     this.root = root;
@@ -28,6 +32,11 @@ export class RespawnWeaponPick {
     if (!countdown) throw new Error("#respawn-in nem talalhato");
     this.countdown = countdown;
     this.picker = new WeaponPicker("respawn-weapons", "cannon", onSelect);
+    this.abilityPicker = new AbilityPicker(
+      "respawn-abilities",
+      DEFAULT_ABILITY,
+      onAbility,
+    );
     this.root.hidden = true;
   }
 
@@ -36,7 +45,15 @@ export class RespawnWeaponPick {
    * @param weapon      A fegyver a SZERVER szerint.
    * @param remainingMs Mennyi van meg hatra a varakozasbol.
    */
-  update(dead: boolean, weapon: WeaponId, remainingMs = 0): void {
+  update(
+    dead: boolean,
+    weapon: WeaponId,
+    remainingMs = 0,
+    ability: AbilityId = DEFAULT_ABILITY,
+  ): void {
+    // A SZERVER szerinti allapot: ha elutasitotta a valtast, a valaszto
+    // is arra all vissza -- nincs ket forras ugyanarra az adatra.
+    this.abilityPicker.set(ability);
     if (dead !== this.visible) {
       this.visible = dead;
       this.root.hidden = !dead;

@@ -21,6 +21,7 @@ import {
   yawOf,
   ARCADE,
   type TracerSnapshot,
+  type AbilityId,
   type WeaponId,
 } from "@cca/shared";
 import { Aim } from "./aim";
@@ -327,6 +328,13 @@ async function main(): Promise<void> {
   });
 
   input.onAction((action) => {
+    if (action === "ability") {
+      // CSAK KERES: hogy elsul-e, azt a szerver donti el (visszatoltes,
+      // eletben letel). A visszajelzest a kovetkezo snapshot hozza, a
+      // HUD abbol rajzol.
+      net.useAbility();
+      return;
+    }
     if (action === "reset") {
       backend.reset();
       for (let i = 0; i < 4; i++) {
@@ -383,10 +391,11 @@ async function main(): Promise<void> {
     name: string,
     weapon?: WeaponId,
     color?: CarColorId,
+    ability?: AbilityId,
   ): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       pendingJoin = resolve;
-      net.join(roomCode, name, weapon, color);
+      net.join(roomCode, name, weapon, color, ability);
     });
   }
 
@@ -410,7 +419,10 @@ async function main(): Promise<void> {
   const tracerQueue = new DelayedQueue<TracerSnapshot>();
 
   /** Fegyvervalaszto a halal-kepernyon (ujraszuletesig hasznalhato). */
-  const respawnPick = new RespawnWeaponPick((weapon) => net.selectWeapon(weapon));
+  const respawnPick = new RespawnWeaponPick(
+    (weapon) => net.selectWeapon(weapon),
+    (ability) => net.selectAbility(ability),
+  );
 
   /** Mikor haltunk meg (lokalis ora) -- a visszaszamlalashoz. */
   let diedAt: number | null = null;
@@ -586,6 +598,7 @@ async function main(): Promise<void> {
           choice.name,
           choice.weapon,
           choice.color,
+          choice.ability,
         );
         if (failure === null) break;
         message = failure;
@@ -680,6 +693,7 @@ async function main(): Promise<void> {
       // Megsemmisult autonak nincs teste -- lasd lentebb.
       if (net.remotes.hpOf(id) === 0) continue;
       view.setRemoteProtected(id, net.remotes.isProtected(id));
+      view.setRemoteHealing(id, net.remotes.isHealing(id));
 
       // A szin a SZERVERE: minden kepkockaban ellenorizzuk, hogy a
       // kirajzolt auto egyezik-e vele. Igy barmelyik uton is erkezett
@@ -791,6 +805,10 @@ async function main(): Promise<void> {
 
     // Ujraszuletesi pajzs (a tavoli autoke a lentebbi ciklusban).
     view.setOwnProtected(net.ownProtected);
+    // ZOLD burok gyogyulas kozben: a jatekos igy latja, hogy a
+    // kepesseg tenylegesen dolgozik -- a HP-sav lassu emelkedese
+    // onmagaban konnyen eszrevetlen marad.
+    view.setOwnHealing(net.ownAbility === "heal" && net.ownAbilityActive);
 
     // --- Halozat: sajat allapot kuldese, tavoli autok interpolacioja ---
     // A sajat autot NEM a szervertol kapjuk vissza (hibrid authority,
@@ -1035,6 +1053,7 @@ async function main(): Promise<void> {
     }
     view.updateTracers(renderNow);
     view.updateShields(renderNow);
+    view.updateHealing(renderNow);
     view.updateSpawnChoices(renderNow);
 
     view.render();
@@ -1048,6 +1067,10 @@ async function main(): Promise<void> {
       net.ownWeapon,
       net.heat,
       net.overheated,
+      net.ownAbility,
+      net.ownAbilityActive,
+      net.ownAbilityCooldownMs,
+      net.ownAbilityActiveMs,
     );
 
     // A halal-kepernyo fegyvervalasztoja: csak amig varunk az
@@ -1064,6 +1087,7 @@ async function main(): Promise<void> {
       dead && (net.lives ?? 0) > 0,
       net.ownWeapon,
       diedAt === null ? 0 : Math.max(0, RESPAWN_DELAY_MS - (renderNow - diedAt)),
+      net.ownAbility,
     );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
     netStat.update(fps, net.ping);

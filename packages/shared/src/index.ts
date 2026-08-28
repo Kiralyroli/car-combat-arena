@@ -14,6 +14,7 @@
 
 export * from "./config";
 export * from "./arenaProps";
+export * from "./abilities";
 export * from "./arenaLayout";
 export * from "./carHitbox";
 export * from "./carHull";

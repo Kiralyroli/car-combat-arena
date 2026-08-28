@@ -15,6 +15,7 @@ const KEY_MAP: Record<string, string> = {
 };
 
 export type ActionKey =
+  | "ability"
   | "reset"
   | "repairWheels"
   | "fire"
@@ -24,6 +25,8 @@ const ACTION_MAP: Record<string, ActionKey> = {
   // A KeyR SZANDEKOSAN nincs itt: a reset nem egy koccintasra sul el,
   // hanem ot masodperces nyomva tartasra (lasd pollReset).
   KeyF: "fire",
+  // KEPESSEG: a fegyver melletti masodik valasztas (lasd abilities.ts).
+  KeyQ: "ability",
   Digit0: "repairWheels",
   Digit1: "breakWheel0",
   Digit2: "breakWheel1",

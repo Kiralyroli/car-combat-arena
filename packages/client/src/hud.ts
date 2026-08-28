@@ -1,4 +1,7 @@
 import {
+  ABILITIES,
+  DEFAULT_ABILITY,
+  type AbilityId,
   carColorHex,
   heatColor,
   OVERHEAT_FLASH_MS,
@@ -227,6 +230,11 @@ export class PlayerHud {
   private readonly weapon: HTMLElement;
   private readonly weaponName: HTMLElement;
   private readonly weaponState: HTMLElement;
+  private readonly ability: HTMLElement;
+  private readonly abilityName: HTMLElement;
+  private readonly abilityState: HTMLElement;
+  /** Az utolso kirajzolt kepesseg-allapot -- a folosleges DOM-iras ellen. */
+  private lastAbilityKey = "";
   private readonly tyres: HTMLElement;
 
   private tyreCells: HTMLElement[] = [];
@@ -274,6 +282,9 @@ export class PlayerHud {
     this.weapon = must("weapon");
     this.weaponName = must("weapon-name");
     this.weaponState = must("weapon-state");
+    this.ability = must("ability");
+    this.abilityName = must("ability-name");
+    this.abilityState = must("ability-state");
     this.tyres = must("tyres");
     // A lobby alatt REJTVE marad: ures HP- es boost-savokat mutatna,
     // ami a nev-beviteli parbeszed mogott csak zavaro.
@@ -281,6 +292,43 @@ export class PlayerHud {
 
   show(): void {
     this.root.hidden = false;
+  }
+
+  /**
+   * A KEPESSEG allapota.
+   *
+   * Harom allapot van, es mindharmat MASKENT kell mutatni: kesz,
+   * eppen fut, visszatoltodik. Egy kozos szam osszemosna a "most hat"
+   * es a "mindjart hasznalhato" esetet -- pedig a jatekos szamara ez a
+   * ketto ellentetes.
+   *
+   * Az adat a SZERVERTOL jon, nem helyi becsles: a kepesseg
+   * kimenetelet ugyis a szerver donti el, es egy kulon szamolt
+   * visszaszamlalo csendben elcsuszna tole.
+   */
+  private frissitKepesseg(
+    ability: AbilityId,
+    aktiv: boolean,
+    cooldownMs: number,
+    activeMs: number,
+  ): void {
+    const kesz = !aktiv && cooldownMs <= 0;
+    const kulcs = `${ability}|${aktiv}|${Math.ceil(activeMs / 100)}|${kesz ? 0 : Math.ceil(cooldownMs / 100)}`;
+    if (kulcs === this.lastAbilityKey) return;
+    this.lastAbilityKey = kulcs;
+
+    this.abilityName.textContent = ABILITIES[ability].nev.toUpperCase();
+    this.ability.classList.toggle("reloading", !kesz && !aktiv);
+    this.ability.classList.toggle("aktiv", aktiv);
+    // AKTIV allapotban a HATRALEVO idot mutatjuk, nem csak azt, hogy
+    // fut: egy pajzs, amirol nem tudni, mikor jar le, nem hasznalhato
+    // idozitesre -- pedig eppen az az ertelme.
+    this.abilityState.textContent = aktiv
+      ? `${(activeMs / 1000).toFixed(1)} s`
+      : kesz
+        ? "KESZ"
+        : `${(cooldownMs / 1000).toFixed(1)} s`;
+    this.abilityState.style.color = aktiv ? "#39d0ff" : "";
   }
 
   update(
@@ -296,7 +344,19 @@ export class PlayerHud {
     heat = 0,
     /** Lefulladt-e a fegyver (a SZERVER szerint). */
     overheated = false,
+    /** A valasztott kepesseg es allapota -- a SZERVER szerint. */
+    ability: AbilityId = DEFAULT_ABILITY,
+    abilityActive = false,
+    abilityCooldownMs = 0,
+    /** Mennyi van meg a HATASBOL (ms). */
+    abilityActiveMs = 0,
   ): void {
+    this.frissitKepesseg(
+      ability,
+      abilityActive,
+      abilityCooldownMs,
+      abilityActiveMs,
+    );
     // HP. Halozat nelkul nincs ertelmes erteke (a szerver dönti el).
     const hpPercent = hp === null ? 0 : Math.max(0, Math.min(100, hp));
     this.hpFill.style.width = `${hpPercent}%`;

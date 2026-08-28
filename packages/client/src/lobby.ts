@@ -1,4 +1,7 @@
 import {
+  DEFAULT_ABILITY,
+  toAbilityId,
+  type AbilityId,
   DEFAULT_CAR_COLOR,
   DEFAULT_WEAPON,
   MAX_NAME_LENGTH,
@@ -9,7 +12,7 @@ import {
   type CarColorId,
   type WeaponId,
 } from "@cca/shared";
-import { WeaponPicker } from "./weaponPicker";
+import { AbilityPicker, WeaponPicker } from "./weaponPicker";
 import { ColorPicker } from "./colorPicker";
 
 /**
@@ -28,6 +31,7 @@ import { ColorPicker } from "./colorPicker";
 
 const STORAGE_KEY = "cca.playerName";
 const WEAPON_STORAGE_KEY = "cca.weapon";
+const ABILITY_STORAGE_KEY = "cca.ability";
 const COLOR_STORAGE_KEY = "cca.color";
 
 /** Milyen surun kerjuk ujra a szoba-listat, amig a lobby nyitva van. */
@@ -38,6 +42,7 @@ export interface LobbyChoice {
   /** Undefined = uj szobat nyitunk. */
   roomCode?: string;
   weapon: WeaponId;
+  ability: AbilityId;
   color: CarColorId;
 }
 
@@ -50,6 +55,7 @@ export class Lobby {
   private readonly list: HTMLElement;
   private readonly error: HTMLElement;
   private readonly weapons: WeaponPicker;
+  private readonly abilities: AbilityPicker;
   private readonly colors: ColorPicker;
 
   private resolve: ((choice: LobbyChoice) => void) | null = null;
@@ -68,6 +74,11 @@ export class Lobby {
     // ne kelljen minden belepesnel ujra rakattintania.
     this.weapons = new WeaponPicker("weapon-pick", readStoredWeapon(), (weapon) =>
       storeWeapon(weapon),
+    );
+    this.abilities = new AbilityPicker(
+      "ability-pick",
+      readStoredAbility(),
+      (ability) => storeAbility(ability),
     );
     this.colors = new ColorPicker("color-pick", readStoredColor(), (color) =>
       storeColor(color),
@@ -102,6 +113,7 @@ export class Lobby {
   open(message?: string): Promise<LobbyChoice> {
     this.nameInput.value = readStoredName();
     this.weapons.set(readStoredWeapon());
+    this.abilities.set(readStoredAbility());
     this.colors.set(readStoredColor());
     this.error.hidden = message === undefined;
     this.error.textContent = message ?? "";
@@ -179,6 +191,7 @@ export class Lobby {
       name,
       roomCode,
       weapon: this.weapons.value,
+      ability: this.abilities.value,
       color: this.colors.value,
     });
     this.resolve = null;
@@ -262,6 +275,30 @@ function storeWeapon(weapon: WeaponId): void {
   } catch {
     // Privat mod vagy letiltott tarolas: a valasztas csak erre a
     // menetre ervenyes. Nem hiba, nem allitjuk meg.
+  }
+}
+
+/**
+ * A valasztott KEPESSEG megjegyzese -- ugyanugy, mint a fegyvere.
+ *
+ * Aki egyszer eldontotte, ne kelljen minden belepesnel ujra
+ * rakattintania.
+ */
+function readStoredAbility(): AbilityId {
+  try {
+    return toAbilityId(
+      localStorage.getItem(ABILITY_STORAGE_KEY) ?? DEFAULT_ABILITY,
+    );
+  } catch {
+    return DEFAULT_ABILITY;
+  }
+}
+
+function storeAbility(ability: AbilityId): void {
+  try {
+    localStorage.setItem(ABILITY_STORAGE_KEY, ability);
+  } catch {
+    // Privat mod vagy letiltott tarolas -- lasd storeWeapon.
   }
 }
 

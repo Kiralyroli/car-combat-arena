@@ -103,6 +103,27 @@ export class WsServer {
         }
         return;
 
+      case "selectAbility":
+        // Ugyanaz a szabaly, mint a fegyvernel: a szerver dönti el,
+        // hogy szabad-e eppen (lasd Room.setAbility).
+        if (conn.room && conn.playerId) {
+          conn.room.setAbility(conn.playerId, message.ability);
+        }
+        return;
+
+      case "useAbility":
+        // A kliens csak KERI; hogy elsul-e, azt a visszatoltes es az
+        // eletben letel donti el (lasd Room.useAbility).
+        if (conn.room && conn.playerId) {
+          // performance.now(), NEM Date.now(): a szoba minden idobelyege
+          // ebbol az orabol jon (gameLoop, tryFire, spawn-vedelem). A ket
+          // ora kulon jar, es a kevereskbol a visszatoltes egy
+          // idobelyeg-kulonbseg lenne -- merve 1 787 931 411 546 ms
+          // "hatralevo ido" jelent meg a HUD-on.
+          conn.room.useAbility(conn.playerId, performance.now());
+        }
+        return;
+
       case "chooseSpawn":
         // A jatekos maga valasztja meg az ujraszuletesi helyet. A szerver
         // ellenorzi, hogy varakozik-e egyaltalan, es hogy a pont szabad-e
@@ -188,6 +209,7 @@ export class WsServer {
       message.name,
       message.weapon,
       message.color,
+      message.ability,
     );
 
     conn.playerId = playerId;

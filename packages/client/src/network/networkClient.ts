@@ -1,5 +1,6 @@
 import {
   DEFAULT_CAR_COLOR,
+  DEFAULT_ABILITY,
   DEFAULT_WEAPON,
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
@@ -11,6 +12,7 @@ import {
   type RoomListing,
   type CarColorId,
   type TracerSnapshot,
+  type AbilityId,
   type WeaponId,
   type ServerMessage,
   type Transport,
@@ -91,6 +93,17 @@ export class NetworkClient {
    * mutassa, amivel tenylegesen jatszunk.
    */
   ownWeapon: WeaponId = DEFAULT_WEAPON;
+  /**
+   * A sajat KEPESSEG es allapota -- a SZERVER szerint.
+   *
+   * Nem tartunk rola kulon helyi allapotot: a HUD ebbol rajzol, es igy
+   * pontosan azt latja a jatekos, ami szerint a szerver dont.
+   */
+  ownAbility: AbilityId = DEFAULT_ABILITY;
+  ownAbilityActive = false;
+  ownAbilityCooldownMs = 0;
+  /** Mennyi van meg a hatasbol (ms) -- a HUD ezt mutatja. */
+  ownAbilityActiveMs = 0;
 
   /** A gepfegyver hoszintje (0..100) a szerver szerint. */
   heat = 0;
@@ -246,6 +259,7 @@ export class NetworkClient {
     name: string,
     weapon?: WeaponId,
     color?: CarColorId,
+    ability?: AbilityId,
   ): void {
     this.transport?.send({
       type: "join",
@@ -254,6 +268,7 @@ export class NetworkClient {
       name,
       weapon,
       color,
+      ability,
     });
   }
 
@@ -267,6 +282,27 @@ export class NetworkClient {
    */
   selectWeapon(weapon: WeaponId): void {
     this.transport?.send({ type: "selectWeapon", weapon });
+  }
+
+  /**
+   * Kepesseg-valasztas -- ugyanaz a szabaly, mint a fegyvernel.
+   *
+   * Nem tartunk rola helyi allapotot: a kovetkezo snapshot hozza vissza,
+   * amit a szerver elfogadott. Igy nincs ket forras ugyanarra az adatra.
+   */
+  selectAbility(ability: AbilityId): void {
+    this.transport?.send({ type: "selectAbility", ability });
+  }
+
+  /**
+   * A kepesseg elsutese -- KERES.
+   *
+   * Hogy tenylegesen elsult-e, azt a snapshotbol tudjuk meg (aktiv-e,
+   * mennyi a visszatoltes). A kliens nem dontheti el: mindket kepesseg
+   * a sebzes kimenetelet valtoztatja.
+   */
+  useAbility(): void {
+    this.transport?.send({ type: "useAbility" });
   }
 
   /**
@@ -396,6 +432,10 @@ export class NetworkClient {
           this.hp = own.hp;
           this.boostGrants = own.boostGrants;
           this.ownWeapon = own.weapon;
+          this.ownAbility = own.ability;
+          this.ownAbilityActive = own.abilityActive;
+          this.ownAbilityCooldownMs = own.abilityCooldownMs;
+          this.ownAbilityActiveMs = own.abilityActiveMs;
           this.heat = own.heat;
           this.overheated = own.overheated;
           this.ownProtected = own.protected;

@@ -55,6 +55,10 @@ function player(t: number): PlayerSnapshot {
     color: "blue",
     heat: 0,
   overheated: false,
+  ability: "shield",
+  abilityActive: false,
+  abilityCooldownMs: 0,
+  abilityActiveMs: 0,
   };
 }
 

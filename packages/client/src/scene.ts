@@ -10,6 +10,8 @@ import {
   SCENERY,
   PROP_MERETEK,
   ARENA,
+  DEFAULT_CAR_COLOR,
+  carColorHex,
   CAMERA,
   CAR_HULL_POINTS,
   CHASSIS,
@@ -803,7 +805,10 @@ export class SceneView {
 
   private readonly shields = new Map<
     string,
-    { mesh: THREE.Mesh; material: THREE.MeshBasicMaterial }
+    {
+      mesh: THREE.Mesh;
+      material: THREE.MeshBasicMaterial;
+    }
   >();
 
   /** A sajat autonk pajzsa; a kulcs SZANDEKOSAN nem lehet jatekos-id. */
@@ -824,7 +829,107 @@ export class SceneView {
     return this.shields.size;
   }
 
-  private setShield(key: string, parent: THREE.Object3D, active: boolean): void {
+  /**
+   * A GYOGYULAS jelzese: MAGA AZ AUTO villog enyhen zolden.
+   *
+   * NEM burok. Egy gomb az auto korul azt sugallja, hogy ved valami
+   * ellen -- a gyogyulas viszont eppen hogy NEM ved: kozben ugyanugy
+   * sebezheto a jatekos. A pajzs burok, a gyogyulas szinvaltas: a ketto
+   * igy ranezesre sem tevesztheto ossze.
+   */
+  private readonly healingCars = new Map<
+    string,
+    { anyagok: THREE.MeshStandardMaterial[]; alapSzin: number }
+  >();
+
+  private static readonly OWN_HEAL = "heal|own";
+
+  setOwnHealing(active: boolean): void {
+    this.setHealingTint(
+      SceneView.OWN_HEAL,
+      this.chassisMesh,
+      active,
+      // Ha meg nem kaptuk meg a szint (a snapshot elott), a modell
+      // eredeti szinehez terunk vissza -- nem valtozik semmi.
+      this.ownColorHex ?? carColorHex(DEFAULT_CAR_COLOR),
+    );
+  }
+
+  setRemoteHealing(id: string, active: boolean): void {
+    const car = this.remoteCars.get(id);
+    if (!car) return;
+    this.setHealingTint(`heal|${id}`, car.wrapper, active, car.colorHex);
+  }
+
+  /**
+   * A karosszeria anyagai egy autoban.
+   *
+   * A tintBody mar KLONOZTA oket autonkent, tehat nyugodtan
+   * modosithatjuk a szinuket: nem terjed at masik jatekosra.
+   */
+  private bodyMaterials(root: THREE.Object3D): THREE.MeshStandardMaterial[] {
+    const ki: THREE.MeshStandardMaterial[] = [];
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const anyag = mesh.material;
+      if (Array.isArray(anyag)) return;
+      const m = anyag as THREE.MeshStandardMaterial;
+      if (m.name.startsWith("Body")) ki.push(m);
+    });
+    return ki;
+  }
+
+  private setHealingTint(
+    key: string,
+    root: THREE.Object3D,
+    active: boolean,
+    alapSzin: number,
+  ): void {
+    const meglevo = this.healingCars.get(key);
+    if (!active) {
+      if (!meglevo) return;
+      // VISSZAALLITAS: a szint kozvetlenul irtuk, tehat a setOwnColor
+      // (ami valtozatlan szinnel azonnal visszater) nem allitana helyre.
+      for (const m of meglevo.anyagok) m.color.setHex(meglevo.alapSzin);
+      this.healingCars.delete(key);
+      return;
+    }
+    if (meglevo) return;
+    this.healingCars.set(key, { anyagok: this.bodyMaterials(root), alapSzin });
+  }
+
+  /**
+   * A gyogyulo autok szinenek lüktetese.
+   *
+   * ENYHE: a kocsi vegig a sajat szinen marad, csak zold fele huz. Egy
+   * teljesen zoldre valto auto elveszitene a jatekos sajat szinet, ami
+   * a harcban azonositasra kell.
+   */
+  private readonly healSzin = new THREE.Color(0x3fb950);
+  private readonly healTmp = new THREE.Color();
+
+  updateHealing(now: number): void {
+    for (const car of this.healingCars.values()) {
+      const arany = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(now / 90));
+      for (const m of car.anyagok) {
+        this.healTmp.setHex(car.alapSzin);
+        m.color.copy(this.healTmp.lerp(this.healSzin, arany));
+      }
+    }
+  }
+
+  /**
+   * A PAJZS burka: attetszo gomb az auto korul.
+   *
+   * A gyogyulas SZANDEKOSAN nem igy jelenik meg (lasd setHealingTint):
+   * egy burok azt sugallna, hogy ved valami ellen.
+   */
+  private setShield(
+    key: string,
+    parent: THREE.Object3D,
+    active: boolean,
+  ): void {
     const existing = this.shields.get(key);
     if (!active) {
       if (!existing) return;
@@ -839,9 +944,10 @@ export class SceneView {
       return;
     }
 
+    // A geometria EGYSEG-sugaru, es a meretet a mesh skalaja adja: igy
+    // egyetlen geometriat hasznal minden burok, meret fuggetlenul.
     if (!this.shieldGeometry) {
-      // Akkora, hogy az egesz autot befedje (a kocsi kb. 4.9 m hosszu).
-      this.shieldGeometry = new THREE.SphereGeometry(3, 20, 14);
+      this.shieldGeometry = new THREE.SphereGeometry(1, 20, 14);
     }
     const material = new THREE.MeshBasicMaterial({
       color: 0x6fd3ff,
@@ -851,6 +957,8 @@ export class SceneView {
       side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(this.shieldGeometry, material);
+    // A geometria egyseg-sugaru; a meret a skalabol jon.
+    mesh.scale.setScalar(3);
     mesh.position.y = CHASSIS.halfExtents.y;
     parent.add(mesh);
     this.shields.set(key, { mesh, material });
@@ -864,9 +972,11 @@ export class SceneView {
    * jelenetben.
    */
   updateShields(now: number): void {
-    const pulse = 0.14 + 0.07 * Math.sin(now / 120);
     for (const shield of this.shields.values()) {
-      shield.material.opacity = pulse;
+      // Az UTEM burkonkent kulon: a gyogyulas gyorsabban lüktet, mint a
+      // pajzs -- igy a ketto akkor is megkulonboztetheto, ha a jatekos
+      // eppen nem a szinre figyel.
+      shield.material.opacity = 0.14 + 0.07 * Math.sin(now / 120);
     }
   }
 
