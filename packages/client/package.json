@@ -33,6 +33,7 @@
     "check:map": "tsx scripts/check-map.ts",
     "check:hitbox": "tsx scripts/check-hitbox.ts",
     "check:trimesh": "tsx scripts/check-trimesh.ts",
+    "check:freelook-ui": "tsx scripts/check-freelook.ts",
     "kit-meret": "tsx scripts/kit-meret.ts",
     "auto-meret": "tsx scripts/auto-meret.ts",
     "utkozes-meret": "tsx scripts/utkozes-meret.ts"

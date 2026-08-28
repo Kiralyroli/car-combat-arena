@@ -31,6 +31,7 @@
     "check:audio": "tsx scripts/check-audio.ts",
     "check:layout": "tsx scripts/check-layout.ts",
     "check:raycast": "tsx scripts/check-raycast.ts",
+    "check:freelook": "tsx scripts/check-freelook.ts",
     "check:carbox": "tsx scripts/check-carbox.ts",
     "check:camera": "tsx scripts/check-camera.ts"
   },

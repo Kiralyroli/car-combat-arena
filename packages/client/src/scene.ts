@@ -2152,7 +2152,19 @@ export class SceneView {
     );
   }
 
-  updateCamera(chassis: Transform): void {
+  /**
+   * @param korulnezes A KORULNEZES szoge fokban (C gomb, lasd
+   *   freeLook.ts). A yaw a fuggoleges tengely koruli elfordulas, a
+   *   pitch az emeles. Alapesetben mindketto nulla, es a kamera ugy
+   *   viselkedik, mint eddig.
+   */
+  updateCamera(
+    chassis: Transform,
+    korulnezes: { yaw: number; pitch: number; aktiv?: boolean } = {
+      yaw: 0,
+      pitch: 0,
+    },
+  ): void {
     this.tmpQuat.set(...chassis.quaternion);
 
     // Az offsetet csak a fuggoleges tengely koruli forgatas erdekli,
@@ -2164,11 +2176,42 @@ export class SceneView {
       yaw,
     );
 
-    const desired = new THREE.Vector3(
+    const offset = new THREE.Vector3(
       CAMERA.offset.x,
       CAMERA.offset.y,
       CAMERA.offset.z,
-    )
+    );
+
+    // KORULNEZES: az offsetet elforgatjuk az auto korul.
+    //
+    // A KAPOTT SZOG a nezesirany valtozasa (jobbra nezni = pozitiv
+    // yaw), az offset viszont a kamera HELYE az autohoz kepest -- es a
+    // kamera az autora nez vissza. A ketto viszonya tengelyenkent MAS,
+    // ezert nem eleg egyseges elojellel dolgozni:
+    //
+    //  - VIZSZINTESEN forditott: a kamerat jobbra tolva onnan balra
+    //    lat, tehat a yaw-ot negalni kell.
+    //  - FUGGOLEGESEN nem: az emeles tengelye (offset.z, 0, -offset.x)
+    //    koruli pozitiv forgatas LEJJEBB viszi a kamerat, onnan pedig
+    //    FELFELE nez -- ami eppen a kivant irany.
+    //
+    // Az elso valtozatban mindketto negalva volt, es a fel-le nezes
+    // forditva mukodott.
+    //
+    // A sorrend szamit. Eloszor a FUGGOLEGES tengely korul (yaw), utana
+    // az igy kapott iranyra merolegesen emelunk (pitch). Forditva a
+    // fel-le nezes egy megdolt tengely korul tortenne, es a kep
+    // eldolne oldalra.
+    if (korulnezes.yaw !== 0 || korulnezes.pitch !== 0) {
+      const yawRad = (-korulnezes.yaw * Math.PI) / 180;
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawRad);
+      if (korulnezes.pitch !== 0) {
+        const tengely = new THREE.Vector3(offset.z, 0, -offset.x).normalize();
+        offset.applyAxisAngle(tengely, (korulnezes.pitch * Math.PI) / 180);
+      }
+    }
+
+    const desired = offset
       .applyQuaternion(flatQuat)
       .add(new THREE.Vector3(...chassis.position));
 
@@ -2188,7 +2231,18 @@ export class SceneView {
     );
     desired.set(szabad[0], szabad[1], szabad[2]);
 
-    this.camPos.lerp(desired, CAMERA.positionLerp);
+    // KORULNEZES kozben NINCS kovetesi simitas.
+    //
+    // A CAMERA.positionLerp kepkockankent kozelit a kivant helyhez,
+    // ami vezetes kozben kellemes -- korulnezeskor viszont a kep
+    // lathatoan lemarad az egertol. A jatekos a kepet koveti, nem a
+    // kezet, tehat ez azonnal zavaro. A kivant hely ilyenkor is az auto
+    // SIMITOTT allasabol jon, tehat nem lesz tole rangatos.
+    if (korulnezes.aktiv) {
+      this.camPos.copy(desired);
+    } else {
+      this.camPos.lerp(desired, CAMERA.positionLerp);
+    }
     const simitott = cameraClamp(
       [lookTarget.x, lookTarget.y, lookTarget.z],
       [this.camPos.x, this.camPos.y, this.camPos.z],
@@ -2389,6 +2443,11 @@ export class SceneView {
 
     this.camLook.lerp(new THREE.Vector3(0, 0, 0), PREVIEW_LERP);
     this.camera.lookAt(this.camLook);
+  }
+
+  /** A kamera fuggoleges latoszoge fokban (a korulnezes belepesehez). */
+  get cameraFov(): number {
+    return this.camera.fov;
   }
 
   render(): void {

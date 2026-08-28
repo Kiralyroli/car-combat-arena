@@ -100,7 +100,44 @@ export class Aim {
     ];
   }
 
+  /**
+   * KORULNEZES kozben a celkereszt egy ROGZITETT helyen all.
+   *
+   * A kamera oda fordul, amerre a celkereszt allt, es onnantol az eger
+   * a kamerat forgatja. Ha kozben a celkereszt is mozogna, a jatekos
+   * egyszerre nezne korbe es kalimpalna a fegyverrel. Rogzitve viszont
+   * a szabaly egyszeru: amerre nezel, arra celzol.
+   *
+   * NEM a kep kozepere: oda eppen a SAJAT AUTONK esik (a kamera ra
+   * nez), tehat kozepre kotve a sajat kocsinkat vennenk celba. A helyet
+   * a hivo szamolja a kamera geometriajabol (freeLookParkNdcY).
+   */
+  private parked = false;
+  /** Ahol a celkereszt allt belepes elott -- oda ter vissza. */
+  private mentettX = 0;
+  private mentettY = 0;
+
+  setParked(hely: { x: number; y: number } | null): void {
+    const parked = hely !== null;
+    if (parked === this.parked) return;
+    this.parked = parked;
+    if (hely) {
+      this.mentettX = this.x;
+      this.mentettY = this.y;
+      this.x = hely.x;
+      this.y = hely.y;
+      // A rogzitett celkereszt a PALYA folott van, akkor is, ha a
+      // kurzor eppen a HUD felett allt.
+      this.overField = true;
+    } else {
+      this.x = this.mentettX;
+      this.y = this.mentettY;
+    }
+    this.render();
+  }
+
   private onMouseMove = (e: MouseEvent): void => {
+    if (this.parked) return;
     this.x = e.clientX;
     this.y = e.clientY;
     this.overField = onGameSurface(e.target);

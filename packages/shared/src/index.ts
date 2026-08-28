@@ -21,6 +21,7 @@ export * from "./raycast";
 export * from "./math";
 export * from "./types";
 export * from "./wheelVisuals";
+export * from "./freeLook";
 export * from "./heatVisuals";
 export * from "./wheelDamage";
 export * from "./pickups";

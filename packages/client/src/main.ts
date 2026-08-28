@@ -24,6 +24,7 @@ import {
   type WeaponId,
 } from "@cca/shared";
 import { Aim } from "./aim";
+import { FreeLook, freeLookFromAim, freeLookParkNdcY } from "./freeLook";
 import { ControlsHelp } from "./controlsHelp";
 import {
   initDebugPanel,
@@ -105,6 +106,35 @@ async function main(): Promise<void> {
   const trimeshDb = backend.swapArenaToMeshes?.(view.arenaTrimeshes()) ?? 0;
   const input = new Input();
   const aim = new Aim();
+
+  // KORULNEZES: a C nyomva tartasa alatt az eger a kamerat forgatja.
+  //
+  // A celkereszt kozben a kep KOZEPEN all, a kamera pedig oda fordul,
+  // amerre a celkereszt allt -- a celzas tehat nem valtozik, csak a kep
+  // fordul ala.
+  const korulnezes = new FreeLook();
+  korulnezes.onValtozas((aktiv) =>
+    aim.setParked(
+      aktiv
+        ? {
+            x: window.innerWidth / 2,
+            // NEM a kep kozepe: oda a sajat autonk esik. A hely a kamera
+            // geometriajabol jon (lasd freeLookParkNdcY).
+            y:
+              ((1 - freeLookParkNdcY(view.cameraFov)) / 2) * window.innerHeight,
+          }
+        : null,
+    ),
+  );
+  korulnezes.setBelepesSzog(() => {
+    const [ndcX, ndcY] = aim.ndc();
+    return freeLookFromAim(
+      ndcX,
+      ndcY,
+      view.cameraFov,
+      window.innerWidth / Math.max(1, window.innerHeight),
+    );
+  });
 
   /**
    * Kiloves a celkereszt ala.
@@ -594,6 +624,9 @@ async function main(): Promise<void> {
     // a jatek attol meg menne -- csak dobozokkal (lasd check:trimesh).
     trimeshDb,
     boostTank,
+    // A korulnezes allapota merheto: enelkul csak a kamera helyebol
+    // lehetne visszakovetkeztetni, ami a simitas miatt bizonytalan.
+    korulnezes,
     view,
     net,
     stats: () => ({
@@ -617,6 +650,7 @@ async function main(): Promise<void> {
     const frameDt = Math.min((now - last) / 1000, 0.25);
     last = now;
     fps = fps * 0.9 + (1 / Math.max(frameDt, 1e-4)) * 0.1;
+    korulnezes.update(frameDt);
 
     // Az utkozes-joslat idozitese a MERT kesleltetesbol szarmazik
     // (lasd rapier.ts holdDurationMs) -- ezert kell a fizikanak
@@ -732,7 +766,11 @@ async function main(): Promise<void> {
       view.previewArena();
       view.showSpawnChoices(net.spawnOptions, net.pendingSpawnIndex);
     } else {
-      view.updateCamera(cameraTarget);
+      view.updateCamera(cameraTarget, {
+        yaw: korulnezes.yaw,
+        pitch: korulnezes.pitch,
+        aktiv: korulnezes.isActive,
+      });
       if (view.spawnChoiceCount > 0) view.clearSpawnChoices();
     }
 
