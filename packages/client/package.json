@@ -34,6 +34,7 @@
     "check:hitbox": "tsx scripts/check-hitbox.ts",
     "check:trimesh": "tsx scripts/check-trimesh.ts",
     "check:freelook-ui": "tsx scripts/check-freelook.ts",
+    "check:reset-hold": "tsx scripts/check-reset-hold.ts",
     "kit-meret": "tsx scripts/kit-meret.ts",
     "auto-meret": "tsx scripts/auto-meret.ts",
     "utkozes-meret": "tsx scripts/utkozes-meret.ts"

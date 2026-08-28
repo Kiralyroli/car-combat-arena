@@ -1,4 +1,4 @@
-import { ARCADE, FIXED_DT, type DriveInput } from "@cca/shared";
+import { ARCADE, FIXED_DT, RECOVERY, type DriveInput } from "@cca/shared";
 
 const KEY_MAP: Record<string, string> = {
   KeyW: "forward",
@@ -21,7 +21,8 @@ export type ActionKey =
   | `breakWheel${0 | 1 | 2 | 3}`;
 
 const ACTION_MAP: Record<string, ActionKey> = {
-  KeyR: "reset",
+  // A KeyR SZANDEKOSAN nincs itt: a reset nem egy koccintasra sul el,
+  // hanem ot masodperces nyomva tartasra (lasd pollReset).
   KeyF: "fire",
   Digit0: "repairWheels",
   Digit1: "breakWheel0",
@@ -68,6 +69,16 @@ export function isTextEntry(target: EventTarget | null): boolean {
 
 export class Input {
   private held = new Set<string>();
+  /**
+   * Mikor kezdtek nyomni az R-t (performance.now), vagy null.
+   *
+   * A reset NYOMVA TARTASRA sul el, nem lenyomasra: egy vegigfutó gomb
+   * veletlenul is elsutotte, es a jatekos elvesztette a felepitett
+   * helyzetet.
+   */
+  private resetSince: number | null = null;
+  /** Elsult-e mar ebben a lenyomasban (hogy ne ismetlodjon). */
+  private resetKesz = false;
   /** Simitott kormanyallas, hogy a billentyus vezetes ne legyen kapcsolgatos. */
   private steerValue = 0;
   private listeners: Array<(action: ActionKey) => void> = [];
@@ -87,6 +98,16 @@ export class Input {
     // Gepeles kozben a vezerles nem nyul a billentyukhoz (lasd isTextEntry).
     if (isTextEntry(e.target)) return;
 
+    // A RESET nyomva tartasra sul el. Az ismetlodo esemenyeket
+    // kihagyjuk: a kezdo idopont a LENYOMASE, nem az utolso ismetlese.
+    if (e.code === "KeyR") {
+      if (this.resetSince === null) {
+        this.resetSince = performance.now();
+        this.resetKesz = false;
+      }
+      e.preventDefault();
+    }
+
     const action = ACTION_MAP[e.code];
     if (action && !e.repeat) {
       for (const fn of this.listeners) fn(action);
@@ -104,18 +125,44 @@ export class Input {
    * is torolnie kell -- kulonben beragadna a gaz.
    */
   private onKeyUp = (e: KeyboardEvent): void => {
+    // ELENGEDVE a visszaszamlalas nullarol indul ujra: a reset SZANDEKOS
+    // legyen, ne osszegyujtott fel-fel masodpercekbol alljon ossze.
+    if (e.code === "KeyR") this.resetSince = null;
     const key = KEY_MAP[e.code];
     if (key) this.held.delete(key);
   };
 
   /** Mezobe kattintva se maradjon nyomva semmi. */
   private onFocusIn = (e: FocusEvent): void => {
-    if (isTextEntry(e.target)) this.held.clear();
+    if (isTextEntry(e.target)) {
+      this.held.clear();
+      this.resetSince = null;
+    }
   };
+
+  /**
+   * Mennyire telt le a reset nyomva tartasa (0..1).
+   *
+   * A fo ciklus hivja kepkockankent: itt sul el a reset, es innen jon a
+   * kijelzes is. Az IDOBOL szamol, nem kepkockakbol -- kulonben lassabb
+   * gepen tovabb tartana.
+   */
+  pollReset(now: number = performance.now()): number {
+    if (this.resetSince === null) return 0;
+    const arany = Math.min(1, (now - this.resetSince) / RECOVERY.holdMs);
+    if (arany >= 1 && !this.resetKesz) {
+      this.resetKesz = true;
+      for (const fn of this.listeners) fn("reset");
+    }
+    return arany;
+  }
 
   /** Fokuszvesztesnel ne ragadjon be a gaz. */
   private onBlur = (): void => {
     this.held.clear();
+    // Ablakot valtva a visszaszamlalas is alljon le: kulonben a jatekos
+    // visszaterve azonnal ujraindulna.
+    this.resetSince = null;
   };
 
   /**

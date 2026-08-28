@@ -278,6 +278,21 @@ export const RECOVERY = {
    * E nelkul a kocsi atlendulne a fuggolegesen es a masik oldalara
    * dolne -- a korrekcio ugyanis a forgast is oroksegul kapja.
    */
+  /**
+   * Meddig kell nyomva tartani az R-t az ujrainduláshoz (ms).
+   *
+   * MIERT NEM egy koccintasra: a reset a helyere teszi az autot es
+   * megjavitja a kerekeket -- vagyis egy elrontott helyzetbol azonnal
+   * kihoz. Egy vegigfutó gomb ezt VELETLENUL is elsutotte: a jatekos az
+   * R-hez nyult (a "reset" a legkozelebbi mento megoldas), es kozben
+   * elvesztette a felepitett helyzetet.
+   *
+   * Ot masodperc eleg hosszu ahhoz, hogy szandekos legyen, es eleg
+   * rovid ahhoz, hogy egy tenyleg beszorult jatekos kivarja. A
+   * visszaszamlalas latszik is (lasd #reset-hold), kulonben a jatekos
+   * nem tudna, hogy tortenik-e valami.
+   */
+  holdMs: 5000,
   spinDamping: 0.85,
   /**
    * Ez alatt a dolesszog (fok) alatt hagyja abba a korrekcio.

@@ -63,6 +63,7 @@
     "check:hitbox": "npm run check:hitbox --workspace @cca/client",
     "check:trimesh": "npm run check:trimesh --workspace @cca/client",
     "check:freelook-ui": "npm run check:freelook-ui --workspace @cca/client",
+    "check:reset-hold": "npm run check:reset-hold --workspace @cca/client",
     "kit-meret": "npm run kit-meret --workspace @cca/client",
     "auto-meret": "npm run auto-meret --workspace @cca/client",
     "utkozes-meret": "npm run utkozes-meret --workspace @cca/client"

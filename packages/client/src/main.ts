@@ -112,6 +112,14 @@ async function main(): Promise<void> {
   // A celkereszt kozben a kep KOZEPEN all, a kamera pedig oda fordul,
   // amerre a celkereszt allt -- a celzas tehat nem valtozik, csak a kep
   // fordul ala.
+  // A RESET visszaszamlalasa: ot masodperces nyomva tartas, lathatoan.
+  //
+  // A jelzo nelkul a jatekos elengedne a gombot, mert azt hinne, nem
+  // tortenik semmi -- egy ot masodperces varakozas visszajelzes nelkul
+  // torottnek tunik.
+  const resetJelzo = document.getElementById("reset-hold");
+  const resetSav = resetJelzo?.querySelector<HTMLElement>(".sav i") ?? null;
+
   const korulnezes = new FreeLook();
   korulnezes.onValtozas((aktiv) =>
     aim.setParked(
@@ -651,6 +659,13 @@ async function main(): Promise<void> {
     last = now;
     fps = fps * 0.9 + (1 / Math.max(frameDt, 1e-4)) * 0.1;
     korulnezes.update(frameDt);
+
+    // A reset ITT sul el, ha letelt az ido (lasd Input.pollReset).
+    const resetArany = input.pollReset(now);
+    if (resetJelzo) {
+      resetJelzo.hidden = resetArany <= 0;
+      if (resetSav) resetSav.style.width = `${Math.round(resetArany * 100)}%`;
+    }
 
     // Az utkozes-joslat idozitese a MERT kesleltetesbol szarmazik
     // (lasd rapier.ts holdDurationMs) -- ezert kell a fizikanak

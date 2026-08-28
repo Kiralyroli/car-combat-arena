@@ -806,6 +806,45 @@
         cursor: pointer;
       }
       #room-badge button:hover { color: #e6edf3; border-color: #6e7681; }
+      /*
+        RESET-VISSZASZAMLALAS. Ot masodpercig nyomni egy gombot
+        visszajelzes nelkul torottnek tunik: a jatekos elengedi, mert
+        azt hiszi, nem tortenik semmi.
+      */
+      #reset-hold {
+        position: fixed;
+        top: 96px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 16px 10px;
+        background: rgba(1, 4, 9, 0.78);
+        border: 1px solid #4d5866;
+        border-radius: 8px;
+        font: 12px/1.4 ui-monospace, monospace;
+        color: #d0d7de;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-align: center;
+        z-index: 25;
+        pointer-events: none;
+      }
+      #reset-hold[hidden] { display: none; }
+      #reset-hold .sav {
+        margin-top: 6px;
+        width: 180px;
+        height: 5px;
+        background: #21262d;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #reset-hold .sav i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: #d29922;
+        transition: none;
+      }
+
       #match-banner {
         position: fixed;
         top: 14px;
@@ -854,7 +893,7 @@
     <div id="hud" hidden></div>
     <div id="help" hidden>
       <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
-      <b>Space</b> kezifek &nbsp; <b>C</b> korulnezes &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> reset<br />
+      <b>Space</b> kezifek &nbsp; <b>C</b> korulnezes &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> (5 mp) ujraindulas<br />
       <b>1 2 3 4</b> kerek kiloves (FL FR RL RR, csak offline) &nbsp; <b>0</b> kerekek javitasa<br />
       <b>Ctrl+Shift+D</b> fejlesztoi mod ki/be &nbsp; (<b>?dev=1</b> az URL-ben ugyanez)
     </div>
@@ -1062,6 +1101,7 @@
         <span><kbd>Shift</kbd></span><span>boost</span>
         <span><kbd>Space</kbd></span><span>kézifék, drift</span>
         <span><kbd>C</kbd> nyomva</span><span>körülnézés az egérrel</span>
+        <span><kbd>R</kbd> 5 mp-ig</span><span>újraindulás (a helyünkre tesz, javít)</span>
         <span>egér</span><span>célzás</span>
         <span>bal gomb</span><span>tűz</span>
         <span><kbd>R</kbd></span><span>talpra állás</span>
@@ -1070,6 +1110,9 @@
       <div class="again">H — bezárja</div>
     </div>
 
+    <div id="reset-hold" hidden>
+      újraindulás<div class="sav"><i></i></div>
+    </div>
     <div id="match-banner" hidden></div>
     <div id="match-result" hidden></div>
 
