@@ -6,6 +6,12 @@
  * akkor rosszabb, mint ha nem lenne: a "rendben van" latszatat kelti
  * pont ott, ahol a lathatatlan falakat keressuk.
  *
+ * KULON figyeljuk, hogy a SZINEK a valos szerepet mutassak. Ez
+ * tenylegesen elromlott egyszer: amikor a belso epuletek fizikai teste
+ * es a loves is atallt haromszogekre, a dobozaikat a megjelenites
+ * tovabbra is ugyanugy rajzolta -- vagyis a hazugsagkereso eszkoz
+ * kezdett el hazudni.
+ *
  * A masik tet: a hitboxok a JATEKOSNAL sose maradjanak bekapcsolva.
  *
  * Futtatas: npm run check:hitbox
@@ -46,11 +52,12 @@ async function main(): Promise<void> {
     check("indulaskor a hitboxok nem latszanak", be === false, `hitboxesVisible = ${be}`);
   }
 
-  // --- Bekapcsolva: MINDEN utkozo doboz megjelenik ---
+  // --- Bekapcsolva: MINDEN doboz megjelenik, SZEREP SZERINTI szinnel ---
   //
-  // Nem "sok doboz", hanem PONTOSAN annyi, ahany utkozes van (a talaj
-  // kivetelevel). Ha kevesebb, akkor eppen a keresett lathatatlan fal
-  // maradna ki a kepbol.
+  // Nem "sok doboz", hanem PONTOSAN annyi, ahany doboz van (a talaj
+  // kivetelevel). A szin pedig azt mondja meg, hogy az a doboz MA MIT
+  // dont: a palyahatare a vezetest, a belso epuleteke mar csak a
+  // kamerat (a fizikajuk es a loves is haromszog-halo).
   {
     const eredmeny = (await page.evaluate(() => {
       const s = (window as any).__spike;
@@ -73,20 +80,39 @@ async function main(): Promise<void> {
         }
         if (!megvan) hianyzo.push(b.name);
       }
+      // A SZEREP a szinbol latszik: a palyahatar dobozai mas szinuek,
+      // mint azok, amiket mar csak a kamera hasznal.
+      const szinek = { hatar: 0, kamera: 0, egyeb: 0 };
+      for (const gy of csoport.children) {
+        const c = (gy as any).material?.color?.getHex?.();
+        if (c === 0x3fb950) szinek.hatar++;
+        else if (c === 0xd29922) szinek.kamera++;
+        else szinek.egyeb++;
+      }
       return {
         latszik: s.view.hitboxesVisible,
         gyerekek: csoport.children.length,
         utkozesek: dobozok.length,
         hianyzo,
+        szinek,
       };
     })) as {
       latszik: boolean;
       gyerekek: number;
       utkozesek: number;
       hianyzo: string[];
+      szinek: { hatar: number; kamera: number; egyeb: number };
     };
 
     check("bekapcsolva latszanak", eredmeny.latszik === true, "hitboxesVisible = true");
+    check(
+      "a szinek a valos szerepet mutatjak",
+      eredmeny.szinek.hatar > 0 &&
+        eredmeny.szinek.kamera > 0 &&
+        eredmeny.szinek.hatar + eredmeny.szinek.kamera === eredmeny.utkozesek,
+      `${eredmeny.szinek.hatar} fizikai doboz (hatar), ` +
+        `${eredmeny.szinek.kamera} csak-kamera doboz`,
+    );
     check(
       "minden utkozo doboz kap dratvazat",
       eredmeny.hianyzo.length === 0,
@@ -114,9 +140,23 @@ async function main(): Promise<void> {
   await sleep(1200);
   await page.keyboard.up("w");
   await page.keyboard.down("s");
-  await sleep(1200);
+  await sleep(900);
   await page.keyboard.up("s");
-  await sleep(1000);
+  // MEGVARJUK, amig tenylegesen megall.
+  //
+  // Fix varakozassal a meres ertelmetlen: az "S" megallas utan
+  // TOLATASBA valt, tehat az auto tovabb mozog, es az interpolalt hely
+  // egy kepkockaval le van maradva a fizikaitol. Merve igy 0,11 m
+  // elteres jott ki -- ami nem hiba, csak a mozgas.
+  let sebesseg = 99;
+  for (let i = 0; i < 40; i++) {
+    await sleep(250);
+    sebesseg = (await page.evaluate(() => {
+      const v = (window as any).__spike.backend.getVelocity();
+      return Math.hypot(v[0], v[1], v[2]);
+    })) as number;
+    if (sebesseg < 0.05) break;
+  }
   {
     const eredmeny = (await page.evaluate(() => {
       const s = (window as any).__spike;
@@ -143,10 +183,12 @@ async function main(): Promise<void> {
       eredmeny.elmozdult > 5,
       `${eredmeny.elmozdult.toFixed(1)} m-re a palya kozepetol`,
     );
+    // ALLO autonal az interpolalt es a fizikai hely egybeesik, tehat a
+    // turés szoros lehet -- egy tenyleges elcsuszas igy is kiderul.
     check(
       "a sajat hitbox az auton all",
-      eredmeny.tav >= 0 && eredmeny.tav < 0.1,
-      `${eredmeny.tav.toFixed(3)} m elteres a fizikai helytol`,
+      sebesseg < 0.05 && eredmeny.tav >= 0 && eredmeny.tav < 0.02,
+      `${eredmeny.tav.toFixed(3)} m elteres (az auto ${sebesseg.toFixed(3)} m/s-mal all)`,
     );
   }
 

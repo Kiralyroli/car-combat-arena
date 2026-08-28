@@ -1,9 +1,10 @@
 import {
-  ARENA,
   MACHINEGUN,
-  segmentBoxEntry,
+  raycastBVH,
   segmentCarEntry,
+  segmentCarEntryMesh,
 } from "@cca/shared";
+import { arenaBVH, autoBVH } from "./collisionMesh";
 
 /**
  * A gepfegyver AZONNALI talalatanak kiertekelese (hitscan).
@@ -35,14 +36,16 @@ export interface HitscanResult {
 }
 
 /**
- * Minden arena-elem megallitja a lovest -- a talajt es a falakat is
- * beleertve.
+ * Mi allitja meg a lovest: a palya HAROMSZOG-haloja.
  *
- * A raketanal a talaj es a falak kulon voltak kezelve (a rakéta felettuk
- * repul, illetve a palya hataran kifut). Itt viszont a nyomjelzo VEGET
- * kell megtalalni, es ahhoz mindenre szukseg van, aminek nekimehet.
+ * Korabban a tengely-parhuzamos dobozok. Azok viszont nem tudnak
+ * lyukasak lenni: egy nyilason nem lehetett atlonni, pedig a jatekos
+ * latta -- a celkereszt a nyilason volt, a loves megis elakadt. A
+ * haromszog-halo pontosan az, amit a jatekos lat (lasd collisionMesh).
+ *
+ * A talaj is benne van: enelkul a fold fele celzott loves a hatotav
+ * vegeig repulne, es a nyomjelzo a semmibe mutatna.
  */
-const BLOCKERS = ARENA;
 
 export function resolveHitscan(
   origin: readonly [number, number, number],
@@ -59,19 +62,13 @@ export function resolveHitscan(
   ];
 
   // 1. A legkozelebbi akadaly: ennel tovabb a loves nem juthat.
-  let blockAt = 1;
-  for (const box of BLOCKERS) {
-    const t = segmentBoxEntry(
-      from,
-      far,
-      [box.position.x, box.position.y, box.position.z],
-      [box.halfExtents.x, box.halfExtents.y, box.halfExtents.z],
-    );
-    // A 0 azt jelentene, hogy a csotorkolat MAR a dobozban van (pl. az
-    // auto eppen falhoz szorult). Ilyenkor ne nullazzuk le a lovest,
-    // kulonben a falnak tamaszkodva egyaltalan nem lehetne tuzelni.
-    if (t !== null && t > 1e-4 && t < blockAt) blockAt = t;
-  }
+  //
+  // A 0 kozeli talalatot kihagyjuk: az azt jelentene, hogy a csotorkolat
+  // MAR a geometriaban van (pl. az auto falhoz szorult). Ilyenkor ne
+  // nullazzuk le a lovest, kulonben a falnak tamaszkodva egyaltalan nem
+  // lehetne tuzelni.
+  const fal = raycastBVH(arenaBVH(), from, far);
+  const blockAt = fal !== null && fal > 1e-4 ? fal : 1;
 
   // 2. A legkozelebbi auto -- de csak az akadaly ELOTT.
   let hitId: string | null = null;
@@ -80,7 +77,15 @@ export function resolveHitscan(
     if (target.id === excludeId) continue;
     // A gepfegyver goly6ja pontszeru: nincs sugar-felfujas, mint a
     // raketanal. A talalathoz tenylegesen el kell talalni az autot.
-    const t = segmentCarEntry(from, far, target.position, target.rotation, 0);
+    //
+    // A jarmu HAROMSZOG-halojaval, ha megvan: a doboz-kozelites a kabin
+    // magassagaban jóval nagyobb az autonal. Ha a halo hianyzik (nem
+    // futott a generalas), a dobozokra esunk vissza -- inkabb bőkezű
+    // talalat, mint semmi.
+    const halo = autoBVH();
+    const t = halo
+      ? segmentCarEntryMesh(halo, from, far, target.position, target.rotation, 0)
+      : segmentCarEntry(from, far, target.position, target.rotation, 0);
     if (t !== null && t > 1e-4 && t < hitAt) {
       hitAt = t;
       hitId = target.id;

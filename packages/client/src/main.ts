@@ -94,6 +94,15 @@ async function main(): Promise<void> {
   await backend.init();
 
   const view = await SceneView.create();
+  // A palya dobozait lecsereljuk a modellek valodi haromszogeire.
+  //
+  // A dobozokkal a palya AZONNAL jatszhato (a modellek aszinkron
+  // erkeznek); ez a lepes utolag pontositja. Ha nincs modell (?dekor=0
+  // vagy sikertelen betoltes), a lista ures, es minden marad doboz.
+  //
+  // FIGYELEM: ez CSAK a vezetesre hat. A lovest a szerver donti el, az
+  // pedig tovabbra is a dobozokkal szamol.
+  const trimeshDb = backend.swapArenaToMeshes?.(view.arenaTrimeshes()) ?? 0;
   const input = new Input();
   const aim = new Aim();
 
@@ -580,6 +589,10 @@ async function main(): Promise<void> {
     // auto elmozdult-e, ami a renderelo sebessegetol fugg. A billentyu
     // utja a vezerlesig viszont fuggetlen ettol -- lasd check:ui-input.
     input,
+    // Hany epulet dobozait csereltuk le a modell haromszogeire. A csere
+    // csendben elmaradhatna (hianyzo modell, elcsuszott csoportnev), es
+    // a jatek attol meg menne -- csak dobozokkal (lasd check:trimesh).
+    trimeshDb,
     boostTank,
     view,
     net,

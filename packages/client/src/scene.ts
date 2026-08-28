@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
   WEAPON_MOUNT_HEIGHT,
@@ -10,7 +11,7 @@ import {
   PROP_MERETEK,
   ARENA,
   CAMERA,
-  CAR_BOXES,
+  CAR_HULL_POINTS,
   CHASSIS,
   DEFAULT_WEAPON,
   EXPLOSION_RADIUS,
@@ -1693,6 +1694,59 @@ export class SceneView {
    * A modell a TALPAN all, ezert a doboz aljara kell tenni, nem a
    * kozeppontjara.
    */
+  /**
+   * A kirakott epuletek EPULETENKENT -- a fizikanak.
+   *
+   * A doboz-kozelites autómagassagban jo, de a fizika ennel pontosabbat
+   * is tud: a modell sajat haromszogeit. Ehhez kell tudni, melyik
+   * modell melyik utkozo-csoportot valtja ki.
+   */
+  private propBodies = new Map<string, THREE.Object3D>();
+
+  /**
+   * A kirakott epuletek haromszogei VILAG-koordinatakban.
+   *
+   * A fizika ebbol epit haromszog-testet a dobozok helyett (lasd
+   * RapierBackend.swapArenaToMeshes). Vilagkoordinatakban adjuk at,
+   * mert igy a test az origoban all: nincs kulon eltolas vagy forgatas,
+   * ami elcsuszhatna a latvanytol.
+   */
+  arenaTrimeshes(): { csoport: string; vertices: Float32Array; indices: Uint32Array }[] {
+    const ki: { csoport: string; vertices: Float32Array; indices: Uint32Array }[] = [];
+    const pont = new THREE.Vector3();
+
+    for (const [csoport, gyoker] of this.propBodies) {
+      const csucsok: number[] = [];
+      const indexek: number[] = [];
+      gyoker.updateWorldMatrix(true, true);
+      gyoker.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.geometry?.attributes?.position) return;
+        const geo = mesh.geometry;
+        const poz = geo.attributes.position;
+        const eltolas = csucsok.length / 3;
+        for (let i = 0; i < poz.count; i++) {
+          pont.set(poz.getX(i), poz.getY(i), poz.getZ(i));
+          mesh.localToWorld(pont);
+          csucsok.push(pont.x, pont.y, pont.z);
+        }
+        const idx = geo.index;
+        if (idx) {
+          for (let i = 0; i < idx.count; i++) indexek.push(eltolas + idx.getX(i));
+        } else {
+          for (let i = 0; i < poz.count; i++) indexek.push(eltolas + i);
+        }
+      });
+      if (indexek.length === 0) continue;
+      ki.push({
+        csoport,
+        vertices: new Float32Array(csucsok),
+        indices: new Uint32Array(indexek),
+      });
+    }
+    return ki;
+  }
+
   private createProp(box: ArenaBox): THREE.Object3D | null {
     const sablon = box.prop ? this.propTemplates.get(box.prop) : undefined;
     if (!sablon) return null;
@@ -1737,6 +1791,11 @@ export class SceneView {
       this.scene.add(prop);
       // A celzas mostantol a MODELLRE vetit, nem a lecserelt dobozra.
       this.arenaMeshes.push(prop);
+      // A HATART kihagyjuk: annak dobozkent kell maradnia (lasd
+      // ArenaBox.tomor), tehat a haromszogeit sem adjuk at.
+      if (box.csoport !== undefined && box.tomor !== true) {
+        this.propBodies.set(box.csoport, prop);
+      }
     }
   }
 
@@ -1945,18 +2004,44 @@ export class SceneView {
   // --- Hitboxok (dev mod) ---
 
   /**
-   * Az UTKOZO dobozok kirajzolasa dratvazkent.
+   * Az UTKOZO TESTEK kirajzolasa dratvazkent.
    *
-   * MIERT KELL: a latvany es az utkozes KET KULON forrasbol jon (a
-   * modell, illetve az ArenaBox-ok), es a ketto eszrevetlenul
-   * elcsuszhat. A kovetkezmeny csendes: a jatekos nekimegy a semminek,
-   * vagy athajt azon, amit lat. Ezt ranezesre lehetetlen eszrevenni --
-   * hacsak nem latszik, hol van tenylegesen a fal.
+   * MIERT KELL: a latvany es az utkozes KULON forrasbol jon, es a ketto
+   * eszrevetlenul elcsuszhat. A kovetkezmeny csendes: a jatekos
+   * nekimegy a semminek, vagy athajt azon, amit lat.
    *
-   * A rejtett dobozokat is megmutatja: eppen azok a gyanusak.
+   * AMIT MUTAT, es amit NEM:
+   *
+   *  - a HAROMSZOG-TESTEK nincsenek kirajzolva. Nem is kell: azok
+   *    PONTOSAN a modellek, tehat a jatekos mar latja oket. (A belso
+   *    epuletek fizikai teste es minden loves ezekkel szamol.)
+   *  - ki van rajzolva minden, ami MEG DOBOZ, mert az elter a
+   *    latvanytol: a palyahatar epuletei (ott szandekosan doboz maradt,
+   *    kulonben a lyukas modelleken kihajtana az auto), es az autó
+   *    fizikai teste, ami konvex burok.
+   *
+   * A SZINEK szerepet jelolnek, nem stilust -- lasd lentebb.
    */
   private hitboxGroup: THREE.Group | null = null;
   private carHitboxes = new Map<string, THREE.Group>();
+
+  /**
+   * Szinek szerep szerint.
+   *
+   * Enelkul a kep ugyanolyan hazugsag lenne, mint amit keresunk: egy
+   * doboz, ami mar semmit nem dont, ugyanugy nezne ki, mint az, ami
+   * igen. (Ez tenylegesen igy volt egy ideig: a belso epuletek
+   * dobozait meg akkor is zolden rajzoltuk, amikor mar a
+   * haromszog-testuk dontott mindenrol.)
+   */
+  private static readonly HITBOX_SZIN = {
+    /** MEG DOBOZ: a vezetes ezzel utkozik (palyahatar, talaj). */
+    fizikaiDoboz: 0x3fb950,
+    /** CSAK a kamera hasznalja: se fizika, se loves nem szamol vele. */
+    csakKamera: 0xd29922,
+    /** Az AUTO fizikai teste: a modell konvex burka. */
+    autoBurok: 0x39d0ff,
+  };
 
   /** egy dratvaz-doboz a megadott fel-meretekkel. */
   private makeHitbox(
@@ -1986,14 +2071,20 @@ export class SceneView {
     if (!this.hitboxGroup) {
       if (!visible) return;
       this.hitboxGroup = new THREE.Group();
-      // ARENA: a fizika, a loves es minden meres EZEKKEL szamol.
       for (const box of ARENA) {
         if (box.name === "ground") continue;
+        // A BELSO epuletek dobozait a betoltes utan lecsereltuk a
+        // modell haromszogeire (lasd swapArenaToMeshes), a lovest pedig
+        // a szerver szamolja -- szinten haromszogekkel. Ezek a dobozok
+        // tehat mar CSAK a kamera behuzodasat vezerlik.
+        const csakKamera = box.tomor !== true;
         const lines = this.makeHitbox(
           box.halfExtents.x,
           box.halfExtents.y,
           box.halfExtents.z,
-          0x3fb950,
+          csakKamera
+            ? SceneView.HITBOX_SZIN.csakKamera
+            : SceneView.HITBOX_SZIN.fizikaiDoboz,
         );
         lines.position.set(box.position.x, box.position.y, box.position.z);
         if (box.rotation) {
@@ -2020,15 +2111,34 @@ export class SceneView {
     if (!this.hitboxGroup?.visible) return;
     let csoport = this.carHitboxes.get(id);
     if (!csoport) {
-      // A TALALAT-dobozok, nem egyetlen tegla: az auto felso feleben a
-      // teljes befoglalo haromszor akkora, mint maga a kocsi (lasd
-      // carHitbox.ts). Eppen az a lenyeg, hogy ez ranezesre latszodjon.
+      // A KONVEX BUROK: ez az auto fizikai teste (lasd carHull.ts).
+      //
+      // NEM a talalati dobozok: azok mar csak tartalek arra az esetre,
+      // ha a generalt haromszog-halo hianyozna. A talalatot a szerver a
+      // modell haromszogeivel szamolja -- vagyis pontosan azzal, amit a
+      // jatekos lat, tehat azt nincs mit kulon kirajzolni.
       csoport = new THREE.Group();
-      for (const b of CAR_BOXES) {
-        const doboz = this.makeHitbox(b.hx, b.hy, b.hz, 0x39d0ff);
-        doboz.position.set(b.dx, b.dy, b.dz);
-        csoport.add(doboz);
+      const pontok: THREE.Vector3[] = [];
+      for (let i = 0; i < CAR_HULL_POINTS.length; i += 3) {
+        pontok.push(
+          new THREE.Vector3(
+            CAR_HULL_POINTS[i],
+            CAR_HULL_POINTS[i + 1],
+            CAR_HULL_POINTS[i + 2],
+          ),
+        );
       }
+      const burokGeo = new ConvexGeometry(pontok);
+      const burok = new THREE.LineSegments(
+        new THREE.EdgesGeometry(burokGeo, 15),
+        new THREE.LineBasicMaterial({
+          color: SceneView.HITBOX_SZIN.autoBurok,
+          depthTest: false,
+        }),
+      );
+      burokGeo.dispose();
+      burok.renderOrder = 999;
+      csoport.add(burok);
       this.carHitboxes.set(id, csoport);
       this.hitboxGroup.add(csoport);
     }

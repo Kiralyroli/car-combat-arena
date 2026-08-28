@@ -332,6 +332,10 @@ export function layoutBoxes(layout: PropPlacement[] = LAYOUT): ArenaBox[] {
         propYaw: j === 0 ? yaw : undefined,
         propAt: j === 0 ? { x: p.x, z: p.z } : undefined,
         hidden: j > 0,
+        // Az egy epulethez tartozo dobozok kozos csoportot kapnak: a
+        // kliens ez alapjan csereli le mindet a modell haromszogeire.
+        csoport: `${p.prop}_${i}`,
+        tomor: p.tomor === true,
         name: talpak.length > 1 ? `${p.prop}_${i}_${j}` : `${p.prop}_${i}`,
         halfExtents: { x: szelesseg / 2, y: felMagas, z: melyseg / 2 },
         position: { x: p.x + dx, y: felMagas, z: p.z + dz },

@@ -279,6 +279,19 @@ export const RECOVERY = {
    * dolne -- a korrekcio ugyanis a forgast is oroksegul kapja.
    */
   spinDamping: 0.85,
+  /**
+   * Ez alatt a dolesszog (fok) alatt hagyja abba a korrekcio.
+   *
+   * KULON kuszob az inditastol, szandekosan. Egyetlen kuszobbel a
+   * korrekcio pontosan ott adja fel, ahol elindult -- es ha a kocsi ott
+   * megall, ugy is marad. Merve: oldalara dontve 50,8 fokon allt meg,
+   * ot fokkal az indito kuszob alatt. Az auto ilyenkor ket kereken
+   * tamaszkodik, es a jatekos nem tud elhajtani.
+   *
+   * Ot fok mar talpon van; a normal kanyar-doles (merve 11,4 fok) ezt
+   * nem erinti, mert azt a korrekcio EL SEM inditja.
+   */
+  stopAngleDeg: 5,
 };
 
 /** Statikus arena-elem: doboz. Ugyanebbol keszul a mesh es a collider. */
@@ -319,6 +332,24 @@ export interface ArenaBox {
    * szurke teglakent allna a palya kozepen, a szin belsejeben.
    */
   hidden?: boolean;
+  /**
+   * Melyik EPULETHEZ tartozik ez a doboz.
+   *
+   * Egy epulet tobb dobozbol all (a talajszinti alaprajza szerint). A
+   * kliens a modell betoltese utan lecsereli oket a modell valodi
+   * haromszogeire -- ahhoz kell tudni, MELYIK dobozok tartoznak
+   * egyutt.
+   */
+  csoport?: string;
+  /**
+   * TOMOR test: a doboz marad, nem cserelodik haromszogekre.
+   *
+   * A palyahataron allo epuleteknek ez kell. A modelljeik lyukasak
+   * (kapuk, ablakok, oszlopok kozotti resek), es egy haromszog-pontos
+   * hataron az auto egyszeruen kitalalna a palyarol. A hatar dolga nem
+   * a hitelesseg, hanem hogy ZARJON.
+   */
+  tomor?: boolean;
 }
 
 export const ARENA_HALF = 60;

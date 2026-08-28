@@ -16,8 +16,10 @@ import {
   CHASSIS,
   EXPLOSION_MAX_DAMAGE,
   explosionFalloff,
+  raycastBVH,
   type ClientState,
 } from "@cca/shared";
+import { arenaBVH } from "../src/simulation/collisionMesh";
 import { RocketSimulation } from "../src/simulation/rockets";
 
 let failures = 0;
@@ -173,16 +175,30 @@ function main(): void {
         eredmeny.robbanas,
         eredmeny.robbanas ? `van robbanas (${lada.name})` : `SEMMI (${lada.name})`,
       );
-      // A robbanas az akadaly KULSO oldalan legyen, ne a belsejeben --
-      // kulonben a jatekos megint nem lat semmit.
+      // A robbanas az akadaly LATHATO felszinen legyen, ne mogotte.
+      //
+      // A VISZONYITAS a modell elso haromszoge, nem a doboz szele: a
+      // loves mostantol a valodi alakkal utkozik, es a doboz ennel
+      // BŐKEZŰBB. Merve: a hataroló epulet doboza z = -60-nal kezdodik,
+      // a fala viszont csak -60,34 es -61,26 kozott -- vagyis a doboz
+      // egy meterrel a fal ELOTT allitotta meg a raketat.
+      //
+      // Ez tovabbra sem tautologia: azt zarja ki, hogy a raketa
+      // ATHALADJON a falon es mogotte robbanjon.
+      const honnan: [number, number, number] = [lada.position.x, 1.5, elotte];
+      const meddig: [number, number, number] = [lada.position.x, 1.5, elotte - 30];
+      const elsoTalalat = raycastBVH(arenaBVH(), honnan, meddig, 0);
+      const felszinZ =
+        elsoTalalat === null ? lada.position.z + lada.halfExtents.z : elotte - 30 * elsoTalalat;
+      // Fel meter rahagyas: a raketa sugara (0,6 m) miatt a becsapodas
+      // pontja kicsit a felszin elott is lehet.
       const kivul =
-        eredmeny.hol !== null &&
-        eredmeny.hol[2] >= lada.position.z + lada.halfExtents.z - 1e-6;
+        eredmeny.hol !== null && eredmeny.hol[2] >= felszinZ - 0.5;
       check(
         "a robbanas az akadaly LATHATO oldalan van",
         kivul,
         eredmeny.hol
-          ? `robbanas z = ${eredmeny.hol[2].toFixed(2)}, a lada szele ${(lada.position.z + lada.halfExtents.z).toFixed(2)}`
+          ? `robbanas z = ${eredmeny.hol[2].toFixed(2)}, a modell felszine ${felszinZ.toFixed(2)} (a doboz szele ${(lada.position.z + lada.halfExtents.z).toFixed(2)})`
           : "nem volt robbanas",
       );
     }

@@ -1,4 +1,5 @@
 import { CAR_BOXES } from "./carHitbox";
+import { raycastBVH, type BVH } from "./raycast";
 import { CHASSIS } from "./config";
 
 /**
@@ -162,6 +163,39 @@ export function segmentCarEntry(
     }
   }
   return legkozelebbi;
+}
+
+/**
+ * A szakasz elso talalata az auto HAROMSZOG-halojan.
+ *
+ * Ugyanaz, mint a segmentCarEntry, csak a doboz-kozelites helyett a
+ * modell valodi alakjaval. A halot a hivo adja (a szerveren all ossze),
+ * mert a kozos csomag nem tolt be modellt.
+ *
+ * A SUGARAT itt is atadjuk: a raketa nem pontszeru, es a surloasnak is
+ * talalatnak kell lennie -- kulonben a jarmu mellett elhalado raketa
+ * athaladna, ahelyett hogy felrobbanna.
+ */
+export function segmentCarEntryMesh(
+  bvh: BVH,
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  carPosition: readonly number[],
+  carRotation: readonly number[],
+  radius: number = ROCKET_RADIUS,
+): number | null {
+  // Az AUTO rendszerebe visszuk a szakaszt, nem a halot a vilagba: igy
+  // egyetlen fa eleg minden jatekoshoz, es a lag-kompenzacios
+  // visszatekeresnel sem kell ujraepiteni semmit.
+  const start = toLocal(
+    [from[0] - carPosition[0], from[1] - carPosition[1], from[2] - carPosition[2]],
+    carRotation,
+  );
+  const end = toLocal(
+    [to[0] - carPosition[0], to[1] - carPosition[1], to[2] - carPosition[2]],
+    carRotation,
+  );
+  return raycastBVH(bvh, start, end, radius);
 }
 
 /**

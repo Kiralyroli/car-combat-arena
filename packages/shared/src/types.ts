@@ -90,6 +90,23 @@ export interface VehicleBackend {
   /** Egy FIX lepeskozu fizikai lepes. */
   step(dt: number, input: DriveInput): void;
 
+  /**
+   * A palya dobozainak csereje a modellek HAROMSZOGEIRE.
+   *
+   * Opcionalis: a modellek aszinkron erkeznek, es lehet, hogy sosem
+   * (?dekor=0, vagy sikertelen betoltes). Olyankor a dobozok maradnak,
+   * es a palya jatszhato -- csak durvabb.
+   *
+   * A visszateresi ertek a tenylegesen lecserelt epuletek szama.
+   */
+  swapArenaToMeshes?(
+    meshek: readonly {
+      csoport: string;
+      vertices: Float32Array;
+      indices: Uint32Array;
+    }[],
+  ): number;
+
   getChassis(): Transform;
   /** Linearis sebesseg (m/s) vilagkoordinatakban -- a halozati snapshothoz. */
   getVelocity(): [number, number, number];

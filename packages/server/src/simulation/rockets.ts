@@ -11,10 +11,12 @@ import {
   muzzleWorldPosition,
   weaponPivot,
   rocketHitsCar,
-  segmentBoxEntry,
   type ClientState,
   type RocketSnapshot,
+  raycastBVH,
+  segmentCarEntryMesh,
 } from "@cca/shared";
+import { arenaBVH, arenaBVHTalajNelkul, autoBVH } from "./collisionMesh";
 
 /**
  * A szerver altal szimulalt rakétak egy szobaban (terv 4. lepcso 3.).
@@ -48,14 +50,6 @@ export interface Explosion {
 /** A palya hatarai a talaj-elembol -- nem masolt konstans. */
 const ARENA_LIMIT =
   ARENA.find((box) => box.name === "ground")?.halfExtents.x ?? 40;
-
-/**
- * Az akadalyok, amikbe a rakéta becsapodhat. A talaj es a falak kulon
- * kezelendok (a rakéta felettuk repul, illetve nekik utkozik).
- */
-const OBSTACLES = ARENA.filter(
-  (box) => box.name !== "ground" && !box.name.startsWith("wall_"),
-);
 
 export class RocketSimulation {
   private readonly rockets: Rocket[] = [];
@@ -161,23 +155,14 @@ export class RocketSimulation {
       ROCKET_SPAWN_OFFSET,
     );
 
-    let closest = 1;
-    for (const box of ARENA) {
-      const t = segmentBoxEntry(
-        muzzle,
-        wanted,
-        [box.position.x, box.position.y, box.position.z],
-        [
-          box.halfExtents.x + ROCKET_RADIUS,
-          box.halfExtents.y + ROCKET_RADIUS,
-          box.halfExtents.z + ROCKET_RADIUS,
-        ],
-      );
-      // A 0 azt jelentene, hogy a csotorkolat MAR a dobozban van. Olyankor
-      // nincs jobb hely a torkolatnal -- ugyanaz a megfontolas, mint a
-      // gepfegyver hitscanjenel.
-      if (t !== null && t < closest) closest = Math.max(0, t);
-    }
+    // A palya HAROMSZOG-halojaval, nem dobozokkal: igy a raketa is
+    // atfer a nyilasokon, ahogy a jatekos latja.
+    //
+    // A 0 azt jelentene, hogy a csotorkolat MAR a geometriaban van.
+    // Olyankor nincs jobb hely a torkolatnal -- ugyanaz a megfontolas,
+    // mint a gepfegyver hitscanjenel.
+    const utban = raycastBVH(arenaBVH(), muzzle, wanted, ROCKET_RADIUS);
+    const closest = utban !== null ? Math.max(0, utban) : 1;
 
     // Egy kicsivel a felulet elott: igy a raketa a szabadban szuletik,
     // es a kovetkezo lepesben a felulet LATHATO oldalan robban.
@@ -257,7 +242,7 @@ export class RocketSimulation {
 
       // Valodi (elforgatott) doboz, a teljes megtett szakaszra vizsgalva.
       if (
-        rocketHitsCar(from, to, target.state.position, target.state.rotation)
+        this.talaljaAutot(from, to, target.state.position, target.state.rotation)
       ) {
         return target.id;
       }
@@ -279,25 +264,34 @@ export class RocketSimulation {
    * latja -- pontosan ettol tunt el nyomtalanul a falhoz szorulva
    * leadott loves.
    */
+  /**
+   * Eltalalja-e a raketa az autot?
+   *
+   * A jarmu HAROMSZOG-halojaval, ha megvan -- a doboz-kozelites a kabin
+   * magassagaban jóval nagyobb az autonal, tehat a motorhaztetö FOLOTT
+   * elhalado raketa is talalatnak szamitana. Ha a halo hianyzik (nem
+   * futott a generalas), a dobozokra esunk vissza.
+   */
+  private talaljaAutot(
+    from: [number, number, number],
+    to: [number, number, number],
+    pozicio: readonly number[],
+    forgatas: readonly number[],
+  ): boolean {
+    const halo = autoBVH();
+    if (!halo) return rocketHitsCar(from, to, pozicio, forgatas);
+    return (
+      segmentCarEntryMesh(halo, from, to, pozicio, forgatas) !== null
+    );
+  }
+
   private obstacleEntry(
     from: [number, number, number],
     to: [number, number, number],
   ): number | null {
-    let closest: number | null = null;
-    for (const box of OBSTACLES) {
-      const t = segmentBoxEntry(
-        from,
-        to,
-        [box.position.x, box.position.y, box.position.z],
-        [
-          box.halfExtents.x + ROCKET_RADIUS,
-          box.halfExtents.y + ROCKET_RADIUS,
-          box.halfExtents.z + ROCKET_RADIUS,
-        ],
-      );
-      if (t !== null && (closest === null || t < closest)) closest = t;
-    }
-    return closest;
+    // TALAJ NELKULI fa: a talajt a hivo kulon kezeli (a becsapodas es a
+    // robbanas mas szabaly szerint szamol).
+    return raycastBVH(arenaBVHTalajNelkul(), from, to, ROCKET_RADIUS);
   }
 
 /**

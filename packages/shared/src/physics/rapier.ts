@@ -1,4 +1,5 @@
 import RAPIER from "@dimforge/rapier3d-compat";
+import { CAR_HULL_POINTS } from "../carHull";
 import {
   ARCADE,
   ARENA,
@@ -228,6 +229,9 @@ export class RapierBackend implements VehicleBackend {
   /** Mert halozati oda-vissza ut (ms) -- lasd setNetworkLatency. */
   private networkLatencyMs = 0;
 
+  /** Fut-e eppen a talpra allitas (lasd applyRighting hiszterezis). */
+  private righting = false;
+
   private damage: WheelDamage[] = WHEEL_LAYOUT.map(() => ({ ...HEALTHY_WHEEL }));
   private stepMsAvg = 0;
   private stepsLastFrame = 0;
@@ -247,6 +251,14 @@ export class RapierBackend implements VehicleBackend {
     this.buildArena(options?.arena ?? ARENA);
     this.buildVehicle();
   }
+
+  /**
+   * A palya testei EPULETENKENT -- a haromszog-cserehez.
+   *
+   * A modellek aszinkron erkeznek, tehat a palya eloszor dobozokbol
+   * epul fel (a jatek azonnal jatszhato), es a betoltes utan cserelunk.
+   */
+  private arenaBodies = new Map<string, RAPIER.RigidBody[]>();
 
   private buildArena(boxes: readonly ArenaBox[]): void {
     for (const box of boxes) {
@@ -268,7 +280,60 @@ export class RapierBackend implements VehicleBackend {
         .setFriction(1.0)
         .setCollisionGroups(COLLISION_ARENA);
       this.world.createCollider(colliderDesc, body);
+
+      if (box.csoport !== undefined && box.tomor !== true) {
+        const lista = this.arenaBodies.get(box.csoport) ?? [];
+        lista.push(body);
+        this.arenaBodies.set(box.csoport, lista);
+      }
     }
+  }
+
+  /**
+   * Egy epulet dobozainak lecserelese a MODELL HAROMSZOGEIRE.
+   *
+   * MIERT: a doboz-kozelites autómagassagban jo, de attol meg
+   * kozelites -- egy korlat kozott, egy lepcso alatt vagy egy hengeres
+   * tartaly sarkanal az auto olyan helyen akad meg, ahol a modell
+   * szerint elfer. A haromszog-test PONTOSAN a latvany.
+   *
+   * CSAK A VEZETESRE hat. A lovest a SZERVER donti el, az pedig
+   * tovabbra is a dobozokkal szamol (nem tolt be modellt). A ketto
+   * ezert elter: a haromszogek a dobozokon BELUL vannak, tehat lehet
+   * olyan hely, ahova be lehet allni, de ahonnan a sajat lovesunk egy
+   * doboznak utkozik. Ez tudatos csere -- lasd check:trimesh.
+   *
+   * A PALYAHATAR nem cserelodik (tomor): a hataroló epuletek modelljei
+   * lyukasak, es azokon az auto kihajtana a palyarol.
+   *
+   * Ha a modellek nem toltodnek be, a dobozok maradnak -- a palya
+   * jatszhato, csak durvabb.
+   */
+  swapArenaToMeshes(
+    meshek: readonly {
+      csoport: string;
+      vertices: Float32Array;
+      indices: Uint32Array;
+    }[],
+  ): number {
+    let cserelt = 0;
+    for (const m of meshek) {
+      const regi = this.arenaBodies.get(m.csoport);
+      if (!regi || m.indices.length === 0) continue;
+
+      const desc = RAPIER.ColliderDesc.trimesh(m.vertices, m.indices)
+        .setFriction(1.0)
+        .setCollisionGroups(COLLISION_ARENA);
+      // A csucsok VILAG-koordinatakban jonnek, tehat a test az origoban
+      // all -- nincs kulon eltolas vagy forgatas, ami elcsuszhatna.
+      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+      this.world.createCollider(desc, body);
+
+      for (const b of regi) this.world.removeRigidBody(b);
+      this.arenaBodies.set(m.csoport, [body]);
+      cserelt++;
+    }
+    return cserelt;
   }
 
   private buildVehicle(): void {
@@ -280,10 +345,29 @@ export class RapierBackend implements VehicleBackend {
       .setCanSleep(false);
     this.chassis = this.world.createRigidBody(bodyDesc);
 
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(
-      CHASSIS.halfExtents.x,
-      CHASSIS.halfExtents.y,
-      CHASSIS.halfExtents.z,
+  /**
+   * Az auto TESTE: a modell konvex burka, nem egy teglatest.
+   *
+   * A doboz a kabin magassagaban jóval nagyobb az autonal -- a
+   * motorhaztetö folotti levegovel egyutt utkozott. A burok a mert
+   * modellbol jon (carHull.ts, 309 csucs).
+   *
+   * MIERT BUROK es nem haromszog-halo: a Rapier -- mint minden ilyen
+   * motor -- dinamikus testnel konvex alakot var. A haromszog-halonak
+   * nincs "belseje", tehat a motor nem tudna, merre toljon ki egy
+   * athatolo testet. Egy szedan nagyjabol konvex, tehat a burok jol
+   * illik ra; ami kitoltodik, az a kerekjarat es az alja -- a
+   * vezetesben mindketto lenyegtelen.
+   *
+   * Ha a burok valamiert nem allna elo, marad a doboz.
+   */
+    const colliderDesc = (
+      RAPIER.ColliderDesc.convexHull(CAR_HULL_POINTS) ??
+      RAPIER.ColliderDesc.cuboid(
+        CHASSIS.halfExtents.x,
+        CHASSIS.halfExtents.y,
+        CHASSIS.halfExtents.z,
+      )
     )
       .setMass(CHASSIS.mass)
       // ALACSONY surlodas (0.4 -> 0.2). A karosszeria csak akkor er
@@ -514,7 +598,18 @@ export class RapierBackend implements VehicleBackend {
     // Szog az auto sajat "felfele" iranya es a valodi fuggoleges kozott.
     const tilt = Math.acos(clamp(upAxis.y, -1, 1));
     const start = (RECOVERY.startAngleDeg * Math.PI) / 180;
-    if (tilt <= start) return tilt;
+    const stop = (RECOVERY.stopAngleDeg * Math.PI) / 180;
+
+    // HISZTEREZIS: mas kuszob inditja es mas allitja le.
+    //
+    // Egyetlen kuszobbel a korrekcio pontosan ott adja fel, ahol
+    // elindult -- es ha a kocsi abban a helyzetben stabil, ugy is
+    // marad. Merve: oldalara dontve 50,8 fokon allt meg, ot fokkal az
+    // indito kuszob alatt, ket kereken tamaszkodva. Ha egyszer
+    // elkezdtuk, fejezzuk is be.
+    if (!this.righting && tilt > start) this.righting = true;
+    if (this.righting && tilt <= stop) this.righting = false;
+    if (!this.righting) return tilt;
 
     // A tengely, ami az auto "fel" iranyat a vilag "fel" iranyaba viszi.
     let axis = cross(upAxis, { x: 0, y: 1, z: 0 });
@@ -691,10 +786,14 @@ export class RapierBackend implements VehicleBackend {
       .setAngularDamping(0);
     const body = this.world.createRigidBody(bodyDesc);
 
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(
-      CHASSIS.halfExtents.x,
-      CHASSIS.halfExtents.y,
-      CHASSIS.halfExtents.z,
+    // Ugyanaz a burok, mint a sajat autonknak (lasd buildVehicle).
+    const colliderDesc = (
+      RAPIER.ColliderDesc.convexHull(CAR_HULL_POINTS) ??
+      RAPIER.ColliderDesc.cuboid(
+        CHASSIS.halfExtents.x,
+        CHASSIS.halfExtents.y,
+        CHASSIS.halfExtents.z,
+      )
     )
       // Ugyanaz a tomeg, mint a sajat autonknak -- igy az utkozes
       // lendulet-atadasa realis aranyu.

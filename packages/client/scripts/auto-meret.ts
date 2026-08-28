@@ -29,9 +29,12 @@
 import { writeFileSync } from "node:fs";
 import { CHASSIS } from "@cca/shared";
 import { chromium } from "playwright";
+import { Vector3 } from "three";
+import { ConvexHull } from "three/examples/jsm/math/ConvexHull.js";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 const KIMENET = "../../shared/src/carHitbox.ts";
+const KIMENET_BUROK = "../../shared/src/carHull.ts";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -98,6 +101,11 @@ async function main(): Promise<void> {
     // kerekre adott loves elszallna az auto alatt.
     const gyokerek = [...w.children, ...(v.wheelGroups ?? [])];
     const szeletek: Record<number, number[]> = {};
+    // A KONVEX BUROKHOZ: minden csucs, 1 cm-es racsra kerekitve. A
+    // kerekites nelkul tizezres nagysagrendu, nagyreszt egybeeso pontot
+    // vinnenk at a bongeszobol -- a burkot ugyis csak a szelso pontok
+    // hatarozzak meg.
+    const burokPontok = new Set<string>();
     for (const gyerek of gyokerek) {
       if (launcher !== null && gyerek === launcher) continue;
       gyerek.traverse((o: any) => {
@@ -121,6 +129,11 @@ async function main(): Promise<void> {
           const by1 = Math.max(t[0][1], t[1][1], t[2][1]);
           const bz0 = Math.min(t[0][2], t[1][2], t[2][2]);
           const bz1 = Math.max(t[0][2], t[1][2], t[2][2]);
+          for (const q of t) {
+            burokPontok.add(
+              [Math.round(q[0] * 100), Math.round(q[1] * 100), Math.round(q[2] * 100)].join(","),
+            );
+          }
           // A haromszog MINDEN altala erintett szeletbe beleszamit: egy
           // ferde tetolap kulonben csak a ket vegen jelenne meg.
           for (let s = Math.floor(by0 / h); s <= Math.floor(by1 / h); s++) {
@@ -134,12 +147,37 @@ async function main(): Promise<void> {
         }
       });
     }
-    return szeletek;
-  }, SZELET)) as Record<string, number[]>;
+    return { szeletek, burok: [...burokPontok] };
+  }, SZELET)) as { szeletek: Record<string, number[]>; burok: string[] };
 
   await browser.close();
 
-  const kulcsok = Object.keys(nyers)
+  // --- KONVEX BUROK ---
+  //
+  // A fizikai test eddig egyetlen teglatest volt. A Rapier dinamikus
+  // testnel nem fogad haromszog-halot (annak nincs "belseje", tehat a
+  // motor nem tudna, merre toljon ki) -- konvex alakot var. Egy szedan
+  // nagyjabol konvex, tehat a burok jóval kozelebb all a valodi
+  // karosszeriahoz, mint a doboz.
+  //
+  // A burkot ITT szamoljuk ki, nem futasidoben: igy a jatek indulasakor
+  // mar keszen van, es a szam a modellbol jon.
+  const pontok = nyers.burok.map((sor) => {
+    const [x, y, z] = sor.split(",").map(Number);
+    return new Vector3(x / 100, y / 100, z / 100);
+  });
+  const hull = new ConvexHull().setFromPoints(pontok);
+  const burokCsucsok = new Set<string>();
+  for (const lap of hull.faces) {
+    let el = lap.edge;
+    do {
+      const v = el.head().point;
+      burokCsucsok.add([v.x, v.y, v.z].map((n) => n.toFixed(4)).join(","));
+      el = el.next;
+    } while (el !== lap.edge);
+  }
+
+  const kulcsok = Object.keys(nyers.szeletek)
     .map(Number)
     .sort((a, b) => a - b);
   if (kulcsok.length === 0) {
@@ -150,7 +188,7 @@ async function main(): Promise<void> {
 
   const H = CHASSIS.halfExtents;
   const szeletek: Szelet[] = kulcsok.map((s) => {
-    const r = nyers[String(s)];
+    const r = nyers.szeletek[String(s)];
     return {
       y0: s * SZELET,
       y1: (s + 1) * SZELET,
@@ -278,6 +316,45 @@ ${sorok}
 `;
 
   writeFileSync(new URL(KIMENET, import.meta.url), tartalom, "utf8");
+
+  // --- A konvex burok fajlja ---
+  const bp = [...burokCsucsok].map((sor) => sor.split(",").map(Number));
+  const burokSorok: string[] = [];
+  for (let i = 0; i < bp.length; i += 3) {
+    const harmas = bp
+      .slice(i, i + 3)
+      .map((v) => v.map((n) => Number(n.toFixed(4))).join(", "))
+      .join(", ");
+    burokSorok.push("  " + harmas + ",");
+  }
+  const burokFejlec = [
+    "/**",
+    " * Az AUTO fizikai testenek KONVEX BURKA -- MERT ertekek.",
+    " *",
+    " * GENERALT FAJL -- ne szerkeszd kezzel. A",
+    " * packages/client/scripts/auto-meret.ts allitja elo a jarmu-modellbol",
+    " * (npm run auto-meret).",
+    " *",
+    " * MIERT: a fizikai test eddig egyetlen teglatest volt, ami a kabin",
+    " * magassagaban jóval nagyobb az autonal. Haromszog-halot dinamikus",
+    " * testre nem lehet hasznalni (annak nincs \"belseje\", tehat a motor",
+    " * nem tudna, merre toljon ki egy athatolo testet) -- a Rapier konvex",
+    " * alakot var. Egy szedan nagyjabol konvex, tehat a burok jol illik ra.",
+    " *",
+    ` * ${bp.length} csucs, a modell ${pontok.length} kimert pontjabol.`,
+    " *",
+    " * A koordinatak az auto sajat rendszereben ertendok, az origo a",
+    " * fizikai test kozeppontja -- ugyanaz, mint a carHitbox.ts-e.",
+    " */",
+    "",
+    "/** A burok csucsai, x/y/z harmasokban egymas utan. */",
+    "export const CAR_HULL_POINTS = new Float32Array([",
+  ].join("\n");
+  writeFileSync(
+    new URL(KIMENET_BUROK, import.meta.url),
+    burokFejlec + "\n" + burokSorok.join("\n") + "\n]);\n",
+    "utf8",
+  );
   console.log(`=== Az auto kimerve -> ${KIMENET}\n`);
   console.log("  y-tol   y-ig  szelesseg   hossz");
   for (const d of dobozok) {
@@ -289,6 +366,9 @@ ${sorok}
   console.log(
     `\n  ${dobozok.length} doboz, ${terfogat.toFixed(1)} m3 ` +
       `(a regi egyetlen doboz ${regi.toFixed(1)} m3 volt -- ${Math.round((100 * terfogat) / regi)}%)`,
+  );
+  console.log(
+    `  konvex burok: ${bp.length} csucs (${pontok.length} kimert pontbol)`,
   );
 }
 

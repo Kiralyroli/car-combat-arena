@@ -55,11 +55,15 @@
     "check:cannon": "npm run check:cannon --workspace @cca/client",
     "check:layout": "npm run check:layout --workspace @cca/shared",
     "check:carbox": "npm run check:carbox --workspace @cca/shared",
+    "check:raycast": "npm run check:raycast --workspace @cca/shared",
+    "check:shotmesh": "npm run check:shotmesh --workspace @cca/server",
     "check:map": "npm run check:map --workspace @cca/client",
     "check:camera": "npm run check:camera --workspace @cca/shared",
     "check:hitbox": "npm run check:hitbox --workspace @cca/client",
+    "check:trimesh": "npm run check:trimesh --workspace @cca/client",
     "kit-meret": "npm run kit-meret --workspace @cca/client",
-    "auto-meret": "npm run auto-meret --workspace @cca/client"
+    "auto-meret": "npm run auto-meret --workspace @cca/client",
+    "utkozes-meret": "npm run utkozes-meret --workspace @cca/client"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
