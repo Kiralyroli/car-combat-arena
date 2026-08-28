@@ -39,6 +39,34 @@ háromszögből álló objektumként; a játékban használt változat:
 
 Az eredmény 1,36 MB.
 
+### Ipari épületek — `packages/client/public/models/epuletek.glb`
+
+**„Industrial Buildings Set - Low poly models"** — készítette
+**Daniel Zhabotinsky** (@DanielZhabotinsky)
+
+- Forrás: <https://sketchfab.com/3d-models/industrial-buildings-set-low-poly-models-e0b0d0342be24e6c923319991a2a4d3d>
+- Licenc: [CC Attribution 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+**Módosítva.** Az eredetiben 49 objektum van, de valójában 30 épület: a
+falak, a homlokzat és a díszítmények külön objektumok ugyanahhoz az
+épülethez (más anyagot használnak). A játékban használt változat:
+
+- épületenként egybevonva, és mindegyik az **origóba állítva** — a
+  talpa a nulla szinten, vízszintesen középre —, hogy a pályán elég
+  legyen egy pozíció és egy elfordulás,
+- a Sketchfab-hierarchia (`Sketchfab_model` burok) eldobva, a
+  transzformációt megtartva: enélkül a belőle kiemelt épület eldőlne,
+- csak a **ténylegesen felhasznált 17 épület** került be (20 367
+  háromszög) — a többi textúrája is helyet foglalna a letöltésben,
+- a textúrák 2048×2048-ról 512×512-re, WEBP formátumban.
+
+Az eredmény 2,3 MB.
+
+**A méretek nem kézzel vannak beírva:** a modell saját határoló
+dobozából származnak (`packages/shared/src/arenaProps.ts`, generált
+fájl), és az ütköző dobozok is ebből épülnek. Így amit a játékos lát,
+és aminek nekimegy, ugyanaz.
+
 ## Hangok
 
 A hangok a `packages/client/public/audio/` alatt vannak. Mind valódi

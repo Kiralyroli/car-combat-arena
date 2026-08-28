@@ -5,6 +5,8 @@ import {
   SPAWN_POINTS,
   ARENA_HALF,
   type ArenaBox,
+  SCENERY,
+  PROP_MERETEK,
   ARENA,
   CAMERA,
   CHASSIS,
@@ -37,6 +39,9 @@ const VEHICLE_MODEL_URL = "/models/sedan.glb";
  * meretek ternek el (lasd WEAPON_MOUNTS). A forras es a feltuntetes a
  * CREDITS.md-ben.
  */
+/** Az ipari epuletek egy fajlban, epuletenkent egy csomoponttal. */
+const PROP_MODEL_URL = "/models/epuletek.glb";
+
 const WEAPON_MODEL_URLS: Record<WeaponId, string> = {
   cannon: "/models/flak.glb",
   machinegun: "/models/turret.glb",
@@ -169,6 +174,10 @@ export class SceneView {
   private remoteTemplate!: THREE.Object3D;
   /** Fegyverenkenti torony-sablon -- minden auto ebbol kap egy klont. */
   private weaponTemplates = {} as Record<WeaponId, THREE.Object3D>;
+  /** Epulet-sablonok nev szerint -- minden elhelyezes ezek klonja. */
+  private propTemplates = new Map<string, THREE.Object3D>();
+  /** A palya doboz-meshei nev szerint -- a modellre csereleshez. */
+  private arenaBoxMeshes = new Map<string, THREE.Mesh>();
   private remoteCars = new Map<string, RemoteCar>();
   /** A sajat autonk fegyvere (a tetőn). */
   private launcher!: { root: THREE.Group; tube: THREE.Object3D };
@@ -227,14 +236,22 @@ export class SceneView {
     // A hatter ELOSZOR sima szin -- ha a panorama betolt, az veszi at
     // (lasd loadSky). Ha nem tolt be, ez marad, es a jatek megy tovabb.
     this.scene.background = new THREE.Color(0xabb1c1);
-    this.scene.fog = new THREE.Fog(0xabb1c1, 70, 190);
+    // LATOTAVOLSAG.
+    //
+    // A kod korabban 70 m-nel kezdodott -- azzal a megfontolassal, hogy
+    // azon tul ugysem lehet eltalalni senkit. Csakhogy a palyat
+    // mostantol epuletek hatarolják, mogottuk pedig egy ipari negyed
+    // all: azt latni AKARJUK. A koddal igy csak a legtavolabbi hattert
+    // lagyitjuk, nem a jatekteret.
+    this.scene.fog = new THREE.Fog(0xabb1c1, 220, 700);
     if (dekoracioBe()) this.loadSky();
 
     this.camera = new THREE.PerspectiveCamera(
       62,
       Math.max(window.innerWidth, 1) / Math.max(window.innerHeight, 1),
       0.1,
-      500,
+      // A tavoli latkep (eromu, gyarepuletek) 300 m-en tul is all.
+      1200,
     );
 
     this.setupLights();
@@ -289,6 +306,20 @@ export class SceneView {
     const loaded = await Promise.all(
       weapons.map((w) => loader.loadAsync(WEAPON_MODEL_URLS[w])),
     );
+    // A DISZITES nelkuli modban (?dekor=0) az epuletek is kimaradnak.
+    //
+    // Az UTKOZO DOBOZOK ugyanazok maradnak -- a jatekmenet betu szerint
+    // azonos --, csak szurke teglakent latszanak. A teszteknek pont ez
+    // kell: 17 texturazott epulet a szoftveres rendereloben ujra annyira
+    // lelassitotta a lapot, hogy a rammeles-tesztek nem tudtak
+    // osszehozni az utkozest.
+    if (dekoracioBe()) {
+      this.buildOuterGround();
+      await this.loadProps(loader);
+      this.swapProps();
+      this.buildScenery();
+    }
+
     weapons.forEach((weapon, i) => {
       const url = WEAPON_MODEL_URLS[weapon];
       const base = loaded[i].scene.getObjectByName("Turret_Base");
@@ -395,7 +426,13 @@ export class SceneView {
 
   // --- Celzas ---
 
-  private readonly arenaMeshes: THREE.Mesh[] = [];
+  /**
+   * Amire a celzas vetit: a palya feluletei.
+   *
+   * Object3D es nem Mesh: a doboz-elemek meshek, az EPULETEK viszont
+   * tobb reszbol allo csomopontok (falak, homlokzat kulon anyaggal).
+   */
+  private readonly arenaMeshes: THREE.Object3D[] = [];
   /** Ujrahasznositott lista a celzas-sugarhoz -- ne allokaljunk lovesenkent. */
   private readonly aimTargets: THREE.Object3D[] = [];
   private readonly raycaster = new THREE.Raycaster();
@@ -1602,6 +1639,167 @@ export class SceneView {
     return mat;
   }
 
+/**
+   * Az EPULET-MODELLEK betoltese.
+   *
+   * Egy fajlban all mind a 17 epulet, mindegyik a sajat nevu
+   * csomopontkent, az origoba allitva (a talpa a nullan). A palya
+   * ebbol epul: minden elhelyezes egy KLON, tehat a geometria es az
+   * anyag kozos -- huszonket epulet is egyetlen keszlet memoriajaba fer.
+   *
+   * A betoltes NEM allithatja meg a jatekot: ha nem jon meg, a palya a
+   * szurke dobozaival marad jatszhato.
+   */
+  private async loadProps(loader: GLTFLoader): Promise<void> {
+    try {
+      const gltf = await loader.loadAsync(PROP_MODEL_URL);
+      // NEV SZERINT keresunk, nem a gyerekek kozott: az exportalo
+      // beleteheti a csomopontokat egy burokba (a Sketchfab-modelleknel
+      // igy is volt), es akkor a kozvetlen gyerekek kozott csak a burok
+      // allna.
+      gltf.scene.traverse((o) => {
+        const nev = o.name.replace(/.d+$/, "");
+        if (nev in PROP_MERETEK && !this.propTemplates.has(nev)) {
+          this.propTemplates.set(nev, o);
+        }
+      });
+    } catch (hiba) {
+      console.warn("Az epulet-modellek nem toltodtek be:", hiba);
+    }
+  }
+
+  /**
+   * Egy epulet-peldany a palyara.
+   *
+   * A modell a doboz HELYETT kerul ki, nem melle: a doboz merete a
+   * modellbol szarmazik (arenaProps.ts), tehat pontosan fedik egymast.
+   * A modell a TALPAN all, ezert a doboz aljara kell tenni, nem a
+   * kozeppontjara.
+   */
+  private createProp(box: ArenaBox): THREE.Object3D | null {
+    const sablon = box.prop ? this.propTemplates.get(box.prop) : undefined;
+    if (!sablon) return null;
+    const mesh = sablon.clone(true);
+    // A modell a TALPAN all, ezert a doboz aljara kerul. A vizszintes
+    // helyet a propAt adja meg, ha az elter a doboz kozeppontjatol
+    // (nyitott szin: az oszlopsorok oldalra tolva allnak).
+    mesh.position.set(
+      box.propAt?.x ?? box.position.x,
+      box.position.y - box.halfExtents.y,
+      box.propAt?.z ?? box.position.z,
+    );
+    mesh.rotation.y = ((box.propYaw ?? 0) * Math.PI) / 180;
+    this.enableShadows(mesh);
+    return mesh;
+  }
+
+  /**
+   * A szurke dobozok lecserelese a betoltott EPULET-MODELLEKRE.
+   *
+   * MIERT UTOLAG: a palya a konstruktorban felepul (a fizika es a
+   * celzas azonnal szamol vele), a modellek viszont aszinkron
+   * erkeznek. Igy a jatek nem var rajuk -- es ha a betoltes elbukik, a
+   * palya a dobozaival marad jatszhato, csak csunyabban.
+   */
+  private swapProps(): void {
+    for (const box of ARENA) {
+      if (!box.prop) continue;
+      const prop = this.createProp(box);
+      if (!prop) continue;
+
+      const regi = this.arenaBoxMeshes.get(box.name);
+      if (regi) {
+        this.scene.remove(regi);
+        const i = this.arenaMeshes.indexOf(regi);
+        if (i >= 0) this.arenaMeshes.splice(i, 1);
+        regi.geometry.dispose();
+        (regi.material as THREE.Material).dispose();
+        this.arenaBoxMeshes.delete(box.name);
+      }
+
+      this.scene.add(prop);
+      // A celzas mostantol a MODELLRE vetit, nem a lecserelt dobozra.
+      this.arenaMeshes.push(prop);
+    }
+  }
+
+  /**
+   * A palyan KIVULI latkep: epuletek a fal mogott, utkozes nelkul.
+   *
+   * Ezek sosem erhetok el, tehat nincs fizikai testuk, es a celzas sem
+   * vetit rajuk -- kulonben a falon TULRA lehetne celozni.
+   */
+  private buildScenery(): void {
+    for (const p of SCENERY) {
+      const sablon = this.propTemplates.get(p.prop);
+      if (!sablon) continue;
+      const mesh = sablon.clone(true);
+      mesh.position.set(p.x, 0, p.z);
+      mesh.rotation.y = ((p.yaw ?? 0) * Math.PI) / 180;
+      // Arnyekot nem vetnek: messze vannak, es a napunk arnyek-kameraja
+      // csak a palyat fedi le.
+      this.scene.add(mesh);
+    }
+  }
+
+/**
+   * KULSO TALAJ: homok a palyan tul is.
+   *
+   * A jatek talaja pontosan akkora, mint a palya (120 x 120 m) -- es ez
+   * NEM csak latvany: a raketa-hatar es a plauzibilitas-ellenorzes is
+   * ebbol a dobozbol szamol (lasd rockets.ts ARENA_LIMIT). Ezert nem
+   * lehet egyszeruen megnoveleni.
+   *
+   * A hataroló epuletek viszont a palyan KIVUL allnak, es a latkep meg
+   * tavolabb: alattuk es kozottuk a semmibe lehetett latni -- a jatekos
+   * ugy latta, hogy "az epuletek alatt hianyzik a homok".
+   *
+   * Ez a felulet CSAK LATVANY: nincs teste, nem celozhato, es a
+   * jatekmenetrol semmit nem mond. Kicsivel a palya talaja ALATT all,
+   * hogy a ketto ne villogjon egymason.
+   */
+  private buildOuterGround(): void {
+    const MERET = 900;
+    const geo = new THREE.PlaneGeometry(MERET, MERET);
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 1,
+      metalness: 0,
+    });
+
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      "/textures/homok-alap.webp",
+      (tex) => {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        // UGYANAZ a leptek, mint a palya talajan (8 meterenkent): igy a
+        // ketto hatara nem latszik.
+        tex.repeat.set(MERET / 8, MERET / 8);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = Math.min(
+          8,
+          this.renderer.capabilities.getMaxAnisotropy(),
+        );
+        mat.map = tex;
+        mat.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        mat.color.setHex(0x9c8f78);
+        mat.needsUpdate = true;
+      },
+    );
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = -0.05;
+    mesh.receiveShadow = true;
+    // SZANDEKOSAN nem kerul az arenaMeshes koze: a celzas ne vetithessen
+    // a palyan kivulre.
+    this.scene.add(mesh);
+  }
+
   private buildArena(): void {
     for (const box of ARENA) {
       const geo = new THREE.BoxGeometry(
@@ -1617,6 +1815,11 @@ export class SceneView {
               roughness: 0.9,
               metalness: 0.05,
             });
+      // A REJTETT dobozokat nem rajzoljuk: azokat egy masik elem
+      // modellje takarja. Diszites nelkuli modban viszont igen, mert ott
+      // egyaltalan nincs modell, es a puszta utkozes lathatatlan lenne.
+      if (box.hidden && dekoracioBe()) continue;
+
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(box.position.x, box.position.y, box.position.z);
       if (box.rotation) {
@@ -1628,93 +1831,21 @@ export class SceneView {
       // A celzas ezekre a felszinekre vetit (lasd aimPointAt) -- a
       // jelenet tobbi eleme (autok, rakétak, HP-savok) nem lehet celpont.
       this.arenaMeshes.push(mesh);
+      // Megjegyezzuk, hogy a modellek megerkezesekor le tudjuk cserelni
+      // (lasd swapProps) -- a betoltes aszinkron, a palya viszont mar
+      // itt kesz kell legyen.
+      this.arenaBoxMeshes.set(box.name, mesh);
     }
 
-    // Racs a talajon, hogy a sebesseg es a csuszas lathato legyen.
-    //
-    // A MERET A PALYABOL szarmazik, nem beegetve. Korabban egy nyers
-    // 80 allt itt: amikor a palya 120 m-re nott, a racs a regi
-    // meretben maradt, es a kulso savok csupasz felulettel latszottak.
-    const CELL = 2;
-    const size = ARENA_HALF * 2;
-    // A racs a HOMOK-TALAJON visszafogott.
+    // RACS NINCS.
     //
     // Sotet, semleges palyan a racs volt az egyetlen fogodzo a
-    // sebesseghez. A homok-textura ezt mar magatol megadja (8
-    // meterenkent ismetlodo mintazat), tehat a racsnak eleg halkan
-    // jelen lennie -- teljes erovel kockas papirnak latszana a homokon.
-    const grid = new THREE.GridHelper(size, size / CELL, 0x6b6152, 0x5c5348);
-    grid.position.y = 0.02;
-    const gridMat = grid.material as THREE.Material;
-    gridMat.transparent = true;
-    gridMat.opacity = 0.25;
-    this.scene.add(grid);
-
-    // Ugyanez a racs a FALAKON is.
-    //
-    // Nem diszites: a fal enelkul egyszinu felulet, amin a szem nem
-    // talal fogodzot -- kozeledve nem lehet megiteni a tavolsagot vagy
-    // a sajat sebesseget. A padlon pont ezert van racs.
-    for (const box of ARENA) {
-      if (!box.name.startsWith("wall_")) continue;
-      this.addWallGrid(box, CELL);
-    }
+    // sebesseghez es a tavolsaghoz. Azt a szerepet mostantol a
+    // homok-textura (8 meterenkent ismetlodo mintazat) es a korbe allo
+    // epuletek latjak el -- a racs mellettuk mar csak kockas papirnak
+    // latszott a homokon.
   }
 
-  /**
-   * Racs egy fal BELSO oldalara.
-   *
-   * A GridHelper vizszintes es negyzetes, ezert nem hasznalhato: a fal
-   * 120 x 4 m. Ez a valtozat a fal sajat mereteibol epiti a vonalakat.
-   */
-  private addWallGrid(box: ArenaBox, cell: number): void {
-    // A fal a vekonyabb tengelye menten "lapos": az adja a normalist.
-    const alongX = box.halfExtents.x > box.halfExtents.z;
-    const halfWidth = alongX ? box.halfExtents.x : box.halfExtents.z;
-    const halfHeight = box.halfExtents.y;
-    const thickness = alongX ? box.halfExtents.z : box.halfExtents.x;
-
-    const points: number[] = [];
-    // Fuggoleges vonalak.
-    for (let w = -halfWidth; w <= halfWidth + 1e-6; w += cell) {
-      points.push(w, -halfHeight, 0, w, halfHeight, 0);
-    }
-    // Vizszintesek.
-    for (let h = -halfHeight; h <= halfHeight + 1e-6; h += cell) {
-      points.push(-halfWidth, h, 0, halfWidth, h, 0);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(points, 3),
-    );
-    const lines = new THREE.LineSegments(
-      geometry,
-      new THREE.LineBasicMaterial({ color: 0x4a5568 }),
-    );
-
-    // A palya FELE nezo oldalra, egy hajszallal a felulet ele -- igy a
-    // vonalak nem tunnek el a falban (z-fighting).
-    const inward = 0.02;
-    if (alongX) {
-      const side = box.position.z < 0 ? 1 : -1;
-      lines.position.set(
-        box.position.x,
-        box.position.y,
-        box.position.z + side * (thickness + inward),
-      );
-    } else {
-      const side = box.position.x < 0 ? 1 : -1;
-      lines.rotation.y = Math.PI / 2;
-      lines.position.set(
-        box.position.x + side * (thickness + inward),
-        box.position.y,
-        box.position.z,
-      );
-    }
-    this.scene.add(lines);
-  }
 
   /** Poziciot lerp-el, forgast slerp-el, es az eredmenyt egy Object3D-re alkalmazza. */
   private applyInterpolated(

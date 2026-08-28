@@ -52,7 +52,9 @@
     "check:audio": "npm run check:audio --workspace @cca/shared",
     "check:sound": "npm run check:sound --workspace @cca/client",
     "check:pointblank": "npm run check:pointblank --workspace @cca/server",
-    "check:cannon": "npm run check:cannon --workspace @cca/client"
+    "check:cannon": "npm run check:cannon --workspace @cca/client",
+    "check:layout": "npm run check:layout --workspace @cca/shared",
+    "check:map": "npm run check:map --workspace @cca/client"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

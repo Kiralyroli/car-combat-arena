@@ -15,7 +15,7 @@
 import { ARENA, CHASSIS } from "@cca/shared";
 
 /** A sav kozepvonala (x). */
-export const LANE_X = -10;
+export const LANE_X = -12;
 
 /** A nekifuto auto helye a savban (z). */
 export const LANE_FAR_Z = 18;
@@ -36,16 +36,52 @@ export function laneIsClear(): boolean {
 
 /** Mi all a savban -- a hibauzenethez, hogy ne kelljen talalgatni. */
 export function blockersInLane(): string[] {
+  return blockersBetween(LANE_X, LANE_NEAR_Z, LANE_FAR_Z);
+}
+
+/** Mi all utban egy adott x-sav adott z-szakaszan. */
+function blockersBetween(x: number, z0: number, z1: number): string[] {
   const margin = CHASSIS.halfExtents.x + 0.5;
+  const also = Math.min(z0, z1);
+  const felso = Math.max(z0, z1);
   return ARENA.filter((box) => {
     if (box.position.y + box.halfExtents.y < 0.3) return false;
-    if (Math.abs(box.position.x - LANE_X) - box.halfExtents.x - margin >= 0) {
+    if (Math.abs(box.position.x - x) - box.halfExtents.x - margin >= 0) {
       return false;
     }
-    const z0 = box.position.z - box.halfExtents.z - CHASSIS.halfExtents.z;
-    const z1 = box.position.z + box.halfExtents.z + CHASSIS.halfExtents.z;
-    return z1 > LANE_NEAR_Z && z0 < LANE_FAR_Z;
+    const b0 = box.position.z - box.halfExtents.z - CHASSIS.halfExtents.z;
+    const b1 = box.position.z + box.halfExtents.z + CHASSIS.halfExtents.z;
+    return b1 > also && b0 < felso;
   }).map((box) => box.name);
+}
+
+/**
+ * LOALLASOK: ket pont egymassal szemben, kozottuk szabad lo-vonallal.
+ *
+ * A fegyver-tesztek korabban kezzel beirt koordinatakat hasznaltak
+ * (25, 20) es (25, 8). Amikor a palyara valodi epuletek kerultek, az
+ * egyik EPP egy nyitott rakodoszin oszlopsora moge esett: a celzas jo
+ * volt, a lovedek megis a szin gerendajaba csapodott, es a tesztek ugy
+ * bukottak, mintha a fegyver romlott volna el. Ezert vannak itt, egy
+ * helyen -- es ezert ellenorzi a lo-vonalat is a laneIsClear parja.
+ */
+export const SHOOT_X = -41;
+/** A lovo helye. */
+export const SHOOT_FAR_Z = 23;
+/** A celpont helye -- 12 m-re, ami a gepfegyver kenyelmes tavolsaga. */
+export const SHOOT_NEAR_Z = 11;
+
+/** Szabad-e a LO-VONAL a ket loallas kozott? */
+export function shootLineIsClear(): boolean {
+  return blockersBetween(SHOOT_X, SHOOT_NEAR_Z, SHOOT_FAR_Z).length === 0;
+}
+
+/** A loallasok leirasa a teszt-uzenetekhez. */
+export function shootLabel(): string {
+  const b = blockersBetween(SHOOT_X, SHOOT_NEAR_Z, SHOOT_FAR_Z);
+  return b.length === 0
+    ? `x=${SHOOT_X}, z ${SHOOT_NEAR_Z} -> ${SHOOT_FAR_Z}`
+    : `x=${SHOOT_X}: utban van ${b.join(", ")}`;
 }
 
 /** A sav leirasa a teszt-uzenetekhez. */

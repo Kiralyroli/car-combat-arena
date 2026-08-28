@@ -13,6 +13,8 @@
  */
 
 export * from "./config";
+export * from "./arenaProps";
+export * from "./arenaLayout";
 export * from "./math";
 export * from "./types";
 export * from "./wheelVisuals";

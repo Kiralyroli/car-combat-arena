@@ -213,10 +213,18 @@ async function main(): Promise<void> {
       lefulladas > elotte,
       `${lefulladas - elotte} hang`,
     );
+    // ESEMENY, nem allapot.
+    //
+    // Nem "pontosan egyet" varunk: a 7 masodperces sorozat alatt a
+    // fegyver lefullad (~2.6 mp), lehul a folytatasi szintig (~2.3 mp),
+    // ujra tuzel, es ujra lefulladhat -- ket esemeny teljesen szabalyos.
+    // Amit KI AKARUNK ZARNI, az a folyamatos sisterges: ha az allapotra
+    // szolna, tucatnyi hang indulna.
+    const esemenyek = lefulladas - elotte;
     check(
-      "de csak EGYSZER szol, nem vegig amig forro",
-      lefulladas - elotte === 1,
-      `${lefulladas - elotte} hang egy lefulladasra`,
+      "a lefulladas ESEMENY, nem folyamatos hang",
+      esemenyek >= 1 && esemenyek <= 3,
+      `${esemenyek} hang 7 masodperc alatt (folyamatosnal tucatnyi lenne)`,
     );
 
     // Es a hules alatt sem szol ujra magatol.

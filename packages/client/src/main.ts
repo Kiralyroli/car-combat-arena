@@ -4,6 +4,7 @@ import {
   FIXED_DT,
   HEALTHY_WHEEL,
   MAX_STEPS_PER_FRAME,
+  ARENA,
   ROCKET_COOLDOWN_MS,
   NEUTRAL_INPUT as NEUTRAL_DRIVE,
   RapierBackend,
@@ -562,6 +563,9 @@ async function main(): Promise<void> {
     aim,
     // A hang allapota szinten merheto (lasd check:sound).
     audio,
+    // A palya geometriaja: enelkul nem lehet megmerni, hogy minden
+    // utkozest takar-e valami lathato (lasd check:map).
+    ARENA,
     // A NYERS vezerles-allapot: enelkul csak azt lehet merni, hogy az
     // auto elmozdult-e, ami a renderelo sebessegetol fugg. A billentyu
     // utja a vezerlesig viszont fuggetlen ettol -- lasd check:ui-input.

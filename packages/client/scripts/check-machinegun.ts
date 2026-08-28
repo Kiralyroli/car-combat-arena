@@ -16,6 +16,13 @@
  *
  * Futtatas: npm run check:mg   (vagy: npm run check:mg -- --lag=200)
  */
+import {
+  SHOOT_FAR_Z,
+  SHOOT_NEAR_Z,
+  SHOOT_X,
+  shootLabel,
+  shootLineIsClear,
+} from "./arenaLane";
 import { OVERHEAT_FLASH_MS } from "@cca/shared";
 import { chromium, type Browser, type Page } from "playwright";
 
@@ -272,8 +279,14 @@ async function main(): Promise<void> {
 
   // Szabad sav: x = 25 mellett nincs akadaly. A a -Z iranyba nez
   // (reset utan), B 12 m-rel elotte.
-  await placeAt(A.page, 25, 20);
-  await placeAt(B.page, 25, 8);
+  check(
+    "a teszt lo-vonala szabad az arenaban",
+    shootLineIsClear(),
+    `${shootLabel()} -- e nelkul nem a fegyvert mernenk`,
+  );
+
+  await placeAt(A.page, SHOOT_X, SHOOT_FAR_Z);
+  await placeAt(B.page, SHOOT_X, SHOOT_NEAR_Z);
 
   // MEGVARJUK, amig a SZERVER MINDKET autot a helyen tudja.
   //
@@ -302,8 +315,8 @@ async function main(): Promise<void> {
     // elment a celpont mellett. Az ujraszinkron ennel jóval pontosabban
     // beall -- csak meg kell varni.
     const TURES_M = 0.4;
-    const bOk = b !== null && Math.hypot(b[0] - 25, b[2] - 8) < TURES_M;
-    const aOk = a !== null && Math.hypot(a[0] - 25, a[2] - 20) < TURES_M;
+    const bOk = b !== null && Math.hypot(b[0] - SHOOT_X, b[2] - SHOOT_NEAR_Z) < TURES_M;
+    const aOk = a !== null && Math.hypot(a[0] - SHOOT_X, a[2] - SHOOT_FAR_Z) < TURES_M;
     return { b, ok: bOk && aOk };
   };
 
@@ -319,7 +332,7 @@ async function main(): Promise<void> {
     "a szerver mindket autot a helyen tudja",
     ready,
     seen
-      ? `az ellenfel: (${seen[0].toFixed(1)}, ${seen[2].toFixed(1)}), vart: (25, 8)`
+      ? `az ellenfel: (${seen[0].toFixed(1)}, ${seen[2].toFixed(1)}), vart: (${SHOOT_X}, ${SHOOT_NEAR_Z})`
       : "nem lat tavoli autot",
   );
   if (!seen) {
@@ -510,12 +523,12 @@ async function main(): Promise<void> {
     // ilyenkor a REGI helyere lott, es ugy bukott, hogy "a gepfegyver
     // nem tudja kiloni az ellenfelet". Nem a fegyverrol szolt, hanem
     // arrol, hogy a celpont idokozben elkerult.
-    await placeAt(B.page, 25, 8);
+    await placeAt(B.page, SHOOT_X, SHOOT_NEAR_Z);
     let helyen = false;
     for (let i = 0; i < 25 && !helyen; i++) {
       await sleep(200);
       const b = await seenPosition(A.page);
-      helyen = b !== null && Math.hypot(b[0] - 25, b[2] - 8) < 0.4;
+      helyen = b !== null && Math.hypot(b[0] - SHOOT_X, b[2] - SHOOT_NEAR_Z) < 0.4;
     }
 
     const at = await seenPosition(A.page);

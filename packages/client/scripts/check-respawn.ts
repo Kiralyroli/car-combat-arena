@@ -13,6 +13,13 @@
  *
  * Futtatas: npm run check:respawn
  */
+import {
+  SHOOT_FAR_Z,
+  SHOOT_NEAR_Z,
+  SHOOT_X,
+  shootLabel,
+  shootLineIsClear,
+} from "./arenaLane";
 import { chromium, type Browser, type Page } from "playwright";
 import { ARENA_HALF } from "@cca/shared";
 
@@ -131,8 +138,14 @@ async function main(): Promise<void> {
   );
 
   // --- Felallas: szabad sav, egymas elott ---
-  await placeAt(A.page, 25, 20);
-  await placeAt(B.page, 25, 8);
+  check(
+    "a teszt lo-vonala szabad az arenaban",
+    shootLineIsClear(),
+    `${shootLabel()} -- e nelkul nem a kilovest mernenk`,
+  );
+
+  await placeAt(A.page, SHOOT_X, SHOOT_FAR_Z);
+  await placeAt(B.page, SHOOT_X, SHOOT_NEAR_Z);
 
   // Megvarjuk, amig a SZERVER mindket autot a helyen tudja: a teleportot
   // a plauzibilitas-ellenorzes eloszor elutasitja, es amig ez tart, a
@@ -142,13 +155,13 @@ async function main(): Promise<void> {
     await sleep(200);
     seen = await seenPosition(A.page);
     const mirror = await seenPosition(B.page);
-    const bOk = seen !== null && Math.hypot(seen[0] - 25, seen[2] - 8) < 1.2;
-    const aOk = mirror !== null && Math.hypot(mirror[0] - 25, mirror[2] - 20) < 1.2;
+    const bOk = seen !== null && Math.hypot(seen[0] - SHOOT_X, seen[2] - SHOOT_NEAR_Z) < 1.2;
+    const aOk = mirror !== null && Math.hypot(mirror[0] - SHOOT_X, mirror[2] - SHOOT_FAR_Z) < 1.2;
     if (bOk && aOk) break;
   }
   check(
     "a szerver mindket autot a helyen tudja",
-    seen !== null && Math.hypot(seen[0] - 25, seen[2] - 8) < 1.2,
+    seen !== null && Math.hypot(seen[0] - SHOOT_X, seen[2] - SHOOT_NEAR_Z) < 1.2,
     seen ? `az ellenfel: (${seen[0].toFixed(1)}, ${seen[2].toFixed(1)})` : "nem lat autot",
   );
 

@@ -282,6 +282,8 @@ export const RECOVERY = {
 };
 
 /** Statikus arena-elem: doboz. Ugyanebbol keszul a mesh es a collider. */
+import { layoutBoxes, perimeterPlacements } from "./arenaLayout";
+
 export interface ArenaBox {
   name: string;
   halfExtents: { x: number; y: number; z: number };
@@ -289,10 +291,37 @@ export interface ArenaBox {
   /** Euler forgatas radianban (XYZ sorrend). */
   rotation?: { x: number; y: number; z: number };
   color: number;
+  /**
+   * Melyik modellt rajzolja a kliens a doboz HELYETT (csak latvany).
+   *
+   * A fizika, a loves es minden meres tovabbra is a DOBOZZAL szamol --
+   * a modell csak annyit valtoztat, hogy a jatekos raktarat lat egy
+   * szurke tegla helyett. A ketto merete ezert nem csuszhat el: a doboz
+   * merete is a modellbol jon (arenaProps.ts).
+   */
+  prop?: string;
+  /** A modell elfordulasa fokban -- a doboz merete mar cserelve van. */
+  propYaw?: number;
+  /**
+   * Hova kerul a MODELL, ha nem a doboz kozeppontjaba.
+   *
+   * A nyitott rakodoszin ket oszlopsora ket kulon doboz, es egyik sincs
+   * az EPULET kozepen -- oldalra tolva allnak. A modellt ezert kulon
+   * kell elhelyezni, kulonben fel szelessegnyivel elcsuszik, es a masik
+   * oldal utkozese csupaszon marad: lathatatlan fal.
+   */
+  propAt?: { x: number; z: number };
+  /**
+   * Ne rajzoljuk ki dobozkent: egy MASIK elem modellje takarja.
+   *
+   * A nyitott rakodoszin ket oszlopsora ket kulon utkozo doboz, de EGY
+   * epulet -- a modell csak az egyikhez tartozik. A masik enelkul sima
+   * szurke teglakent allna a palya kozepen, a szin belsejeben.
+   */
+  hidden?: boolean;
 }
 
 export const ARENA_HALF = 60;
-const WALL_H = 2;
 
 export const ARENA: ArenaBox[] = [
   {
@@ -301,115 +330,28 @@ export const ARENA: ArenaBox[] = [
     position: { x: 0, y: -0.5, z: 0 },
     color: 0x3d4450,
   },
-  {
-    name: "wall_north",
-    halfExtents: { x: ARENA_HALF, y: WALL_H, z: 0.5 },
-    position: { x: 0, y: WALL_H, z: -ARENA_HALF },
-    color: 0x565f6e,
-  },
-  {
-    name: "wall_south",
-    halfExtents: { x: ARENA_HALF, y: WALL_H, z: 0.5 },
-    position: { x: 0, y: WALL_H, z: ARENA_HALF },
-    color: 0x565f6e,
-  },
-  {
-    name: "wall_east",
-    halfExtents: { x: 0.5, y: WALL_H, z: ARENA_HALF },
-    position: { x: ARENA_HALF, y: WALL_H, z: 0 },
-    color: 0x565f6e,
-  },
-  {
-    name: "wall_west",
-    halfExtents: { x: 0.5, y: WALL_H, z: ARENA_HALF },
-    position: { x: -ARENA_HALF, y: WALL_H, z: 0 },
-    color: 0x565f6e,
-  },
-  // Ugrato rampa
-  {
-    name: "ramp_main",
-    halfExtents: { x: 4, y: 0.3, z: 6 },
-    position: { x: 0, y: 1.1, z: -24 },
-    rotation: { x: -0.22, y: 0, z: 0 },
-    color: 0x8b5a2b,
-  },
-  // Ferde felulet oldalra dolesteszthez
-  {
-    name: "bank_left",
-    halfExtents: { x: 6, y: 0.3, z: 4 },
-    position: { x: -27, y: 1.3, z: 12 },
-    rotation: { x: 0, y: 0, z: 0.28 },
-    color: 0x8b5a2b,
-  },
-  // Akadalyok
-  { name: "crate_a", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 15, y: 1, z: 9 }, color: 0x6e7681 },
-  { name: "crate_b", halfExtents: { x: 1, y: 1, z: 1 }, position: { x: 19.5, y: 1, z: 9 }, color: 0x6e7681 },
-  { name: "crate_c", halfExtents: { x: 1, y: 2, z: 1 }, position: { x: 17.3, y: 2, z: 15 }, color: 0x6e7681 },
-  { name: "pillar", halfExtents: { x: 1.5, y: 3, z: 1.5 }, position: { x: -18, y: 3, z: -12 }, color: 0x6e7681 },
-
-  // --- Industrial Arena: fedezek (terv 9. fejezet) ---
+  // A FALAK es a sajat keszitesu terepelemek (rampa, bank) kikerultek.
   //
-  // A palya korabban tizenegy elembol allt, abbol ot a padlo es a
-  // negy fal. MERVE: a hosszu ratekintesek mindossze 14%-a volt
-  // takarva, es a nyolc spawn-pont kozotti vonalaknak szinten 14%-a
-  // -- 80 m-es arenaban, 70 m-es fegyverrel. Vagyis barhonnan
-  // barhova el lehetett latni es lőni.
+  // Helyettuk valodi epuletek allnak korbe (PERIMETER): a jatek MINDEN
+  // lathato eleme kesz modell, nem altalunk osszerakott doboz. A
+  // palyahatart tovabbra is a talaj merete adja (ARENA_HALF), amibol a
+  // raketa-hatar es a plauzibilitas-ellenorzes is szamol.
+  // --- IPARI EPULETEK ---
   //
-  // Az itteni elemek SZANDEKOSAN nincsenek elforgatva: a fedezek- es
-  // talalat-szamitas tengely-parhuzamos dobozokkal dolgozik
-  // (segmentBoxEntry), tehat egy elforgatott doboz maskepp takarna a
-  // kepen, mint a szamitasban. Az iranyt a felezo-meretek
-  // felcserelese adja.
-
-  // Konténerek: a fo fedezek. 6 x 2.6 x 2.4 m, a talajon allva.
-  { name: "container_w1", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 1.2, z: -7.5 }, color: 0x9a5b3d },
-  { name: "container_w2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 1.2, z: 3 }, color: 0x9a5b3d },
-  { name: "container_e1", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 22.5, y: 1.2, z: -9 }, color: 0x9a5b3d },
-  { name: "container_e2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 22.5, y: 1.2, z: 1.5 }, color: 0x9a5b3d },
-  { name: "container_n", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 0, y: 1.2, z: 25.5 }, color: 0x9a5b3d },
-  { name: "container_s", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -9, y: 1.2, z: -36 }, color: 0x9a5b3d },
-  // Egymasra rakott konténer: magassag-valtozatossag.
-  { name: "container_stack", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -22.5, y: 3.6, z: -7.5 }, color: 0x9a5b3d },
-
-  // Csovek: hosszu, keskeny takaras -- a nyilt szakaszokat tordelik.
-  { name: "pipe_ne", halfExtents: { x: 5, y: 0.9, z: 0.9 }, position: { x: 33, y: 0.9, z: 18 }, color: 0x5c6672 },
-  { name: "pipe_sw", halfExtents: { x: 0.9, y: 0.9, z: 5 }, position: { x: -45, y: 0.9, z: -18 }, color: 0x5c6672 },
-
-  // Gumihalmok: alacsonyabb, szorvanyos fedezek.
-  { name: "tyres_a", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 10.5, y: 0.9, z: -25.5 }, color: 0x2b2f36 },
-  { name: "tyres_b", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -30, y: 0.9, z: 24 }, color: 0x2b2f36 },
-  { name: "tyres_c", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 30, y: 0.9, z: -27 }, color: 0x2b2f36 },
-
-  // --- Kulso gyuru (a 120 m-es palyahoz) ---
+  // Itt korabban kezzel beirt szinezett dobozok alltak (ladak,
+  // kontenerek, gumihalmok). Azok helyet a valodi epulet-modellek
+  // vettek at: a helyuket az arenaLayout.ts irja le, a MERETUK pedig a
+  // modellbol jon (arenaProps.ts). Igy az utkozo doboz pontosan akkora,
+  // mint amit a jatekos lat -- kezzel beirt meretnel a ketto
+  // eszrevetlenul elcsuszna.
   //
-  // A palya 80-rol 120 m-re nott, es ugyanaz a fedezek 2.25-szoros
-  // teruleten hígult fel: a takaras 55%-rol 28%-ra esett. Ezek az
-  // elemek a kulso savokat toltik meg, ahol a spawn-gyuru (33-45 m)
-  // es a falak kozott korabban semmi nem volt.
-
-  { name: "container_ne1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 18, y: 1.2, z: 30 }, color: 0x9a5b3d },
-  { name: "container_ne2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 40, y: 1.2, z: 18 }, color: 0x9a5b3d },
-  { name: "container_nw1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -20, y: 1.2, z: 26 }, color: 0x9a5b3d },
-  { name: "container_nw2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -42, y: 1.2, z: 14 }, color: 0x9a5b3d },
-  { name: "container_se1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 24, y: 1.2, z: -25 }, color: 0x9a5b3d },
-  { name: "container_se2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: 42, y: 1.2, z: -14 }, color: 0x9a5b3d },
-  { name: "container_sw1", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -22, y: 1.2, z: -12 }, color: 0x9a5b3d },
-  { name: "container_sw2", halfExtents: { x: 1.3, y: 1.2, z: 3 }, position: { x: -44, y: 1.2, z: -22 }, color: 0x9a5b3d },
-  { name: "container_far_n", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: 14, y: 1.2, z: 48 }, color: 0x9a5b3d },
-  { name: "container_far_s", halfExtents: { x: 3, y: 1.2, z: 1.3 }, position: { x: -14, y: 1.2, z: -50 }, color: 0x9a5b3d },
-
-  { name: "pipe_n", halfExtents: { x: 6, y: 0.9, z: 0.9 }, position: { x: -34, y: 0.9, z: 44 }, color: 0x5c6672 },
-  { name: "pipe_s", halfExtents: { x: 6, y: 0.9, z: 0.9 }, position: { x: 30, y: 0.9, z: -46 }, color: 0x5c6672 },
-  { name: "pipe_e", halfExtents: { x: 0.9, y: 0.9, z: 6 }, position: { x: 48, y: 0.9, z: 36 }, color: 0x5c6672 },
-
-  { name: "crate_d", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: -8, y: 1.4, z: 34 }, color: 0x6e7681 },
-  { name: "crate_e", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: 6, y: 1.4, z: -34 }, color: 0x6e7681 },
-  { name: "crate_f", halfExtents: { x: 1.4, y: 1.4, z: 1.4 }, position: { x: -30, y: 1.4, z: 6 }, color: 0x6e7681 },
-
-  { name: "tyres_d", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 36, y: 0.9, z: 8 }, color: 0x2b2f36 },
-  { name: "tyres_e", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -36, y: 0.9, z: -6 }, color: 0x2b2f36 },
-  { name: "tyres_f", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: 2, y: 0.9, z: 26 }, color: 0x2b2f36 },
-  { name: "tyres_g", halfExtents: { x: 1.1, y: 0.9, z: 1.1 }, position: { x: -4, y: 0.9, z: -26 }, color: 0x2b2f36 },
+  // A rampa es a bank SZANDEKOSAN maradt: azok nem diszitesek, hanem
+  // vezetesi elemek (ugratas, dolt iv).
+  // A PALYAHATAR is epuletekbol all (lasd arenaLayout.ts
+  // perimeterPlacements): a belso lapjuk pontosan a hataron, a testuk
+  // kifele lóg. Igy nincs lathatatlan fal -- amibe utkozol, azt latod.
+  ...layoutBoxes(perimeterPlacements(ARENA_HALF)),
+  ...layoutBoxes(),
 ];
 
 /**
