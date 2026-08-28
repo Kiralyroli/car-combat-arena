@@ -26,6 +26,7 @@ export * from "./playerName";
 export * from "./combat";
 export * from "./rocket";
 export * from "./weapons";
+export * from "./cameraCollision";
 export * from "./audioMix";
 export * from "./spawn";
 export * from "./carColors";

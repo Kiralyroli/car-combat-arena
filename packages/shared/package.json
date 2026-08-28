@@ -29,7 +29,8 @@
     "check:match": "tsx scripts/check-match.ts",
     "check:names": "tsx scripts/check-names.ts",
     "check:audio": "tsx scripts/check-audio.ts",
-    "check:layout": "tsx scripts/check-layout.ts"
+    "check:layout": "tsx scripts/check-layout.ts",
+    "check:camera": "tsx scripts/check-camera.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0"

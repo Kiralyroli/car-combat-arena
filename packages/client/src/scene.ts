@@ -5,6 +5,7 @@ import {
   SPAWN_POINTS,
   ARENA_HALF,
   type ArenaBox,
+  cameraClamp,
   SCENERY,
   PROP_MERETEK,
   ARENA,
@@ -1939,11 +1940,30 @@ export class SceneView {
       .applyQuaternion(flatQuat)
       .add(new THREE.Vector3(...chassis.position));
 
-    this.camPos.lerp(desired, CAMERA.positionLerp);
-    this.camera.position.copy(this.camPos);
-
     const lookTarget = new THREE.Vector3(...chassis.position);
     lookTarget.y += CAMERA.lookAtHeight;
+
+    // A kamera ne kerulhessen falba (lasd cameraClamp).
+    //
+    // KETSZER szamolunk: eloszor a KIVANT helyre, hogy a simitas mar a
+    // behuzott pont fele tartson (kulonben a kamera lassan usznak be a
+    // falba), aztan a SIMITOTT helyre is, hogy egyetlen kepkockara se
+    // kerulhessen at a tuloldalra.
+    const szabad = cameraClamp(
+      [lookTarget.x, lookTarget.y, lookTarget.z],
+      [desired.x, desired.y, desired.z],
+      ARENA,
+    );
+    desired.set(szabad[0], szabad[1], szabad[2]);
+
+    this.camPos.lerp(desired, CAMERA.positionLerp);
+    const simitott = cameraClamp(
+      [lookTarget.x, lookTarget.y, lookTarget.z],
+      [this.camPos.x, this.camPos.y, this.camPos.z],
+      ARENA,
+    );
+    this.camera.position.set(simitott[0], simitott[1], simitott[2]);
+
     this.camLook.lerp(lookTarget, CAMERA.lookAtLerp);
     this.camera.lookAt(this.camLook);
   }
