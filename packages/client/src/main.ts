@@ -307,6 +307,11 @@ async function main(): Promise<void> {
   const hud = new Hud(backend.name, backend.version);
   const matchHud = new MatchHud();
   const playerHud = new PlayerHud();
+  // A HUD kamera-sora a korulnezes allapotat tukrozi (setCameraFree).
+  // Az induló allapot is innen megy ki: a sor kulonben a markupban
+  // beirt szoveget mutatna, ami egy kesobbi atnevezesnel elcsuszna.
+  korulnezes.onValtozas((aktiv) => playerHud.setCameraFree(aktiv));
+  playerHud.setCameraFree(korulnezes.isActive);
   const scoreboard = new Scoreboard();
   const netStat = new NetStat();
   // A peldanyositas maga koti be a H billentyut es a sugo-gombot; a

@@ -360,9 +360,61 @@
          igazitas miatt kell -- itt nem.
       */
       #player-hud .weapon .cap { width: auto; }
-      #player-hud .weapon { min-width: 168px; justify-content: space-between; }
+      /*
+         A NEV tolja jobbra az allapotot (margin-right: auto), nem a
+         space-between: a sor bal szelere bekerult a gomb-abra is, es
+         harom elemet a space-between szethuzna -- a nev a sor kozepen
+         lebegne, sotanckent minden sorban maskeppen (a "GEPFEGYVER" es
+         a "PAJZS" nem egyforma szeles).
+      */
+      #player-hud .weapon { min-width: 196px; }
+      #player-hud .weapon .cap { margin-right: auto; }
       #player-hud .weapon .state { font-size: 14px; color: #3fb950; }
       #player-hud .weapon.reloading .state { color: #d29922; }
+
+      /*
+         GOMB-ABRAK a sorok elejen: melyik gombbal sul el a sor.
+
+         Egy fix szelessegu doboz, hogy a harom sor neve egy vonalban
+         alljon, akkor is, ha az egyik abra eger, a masik betu.
+      */
+      #player-hud .weapon .hint {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        flex: none;
+        color: #8b949e;
+      }
+      #player-hud .weapon .hint .mouse { width: 13px; height: 18px; display: block; }
+      /* A kontur a kurzor szinet veszi fel, a kiemelt gomb a HUD sargajat. */
+      #player-hud .weapon .hint .mouse .test {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.2;
+      }
+      #player-hud .weapon .hint .mouse .gomb { fill: #e3b341; }
+      #player-hud .weapon .hint kbd {
+        display: inline-block;
+        min-width: 9px;
+        padding: 1px 5px;
+        background: #21262d;
+        border: 1px solid #4d5866;
+        border-radius: 3px;
+        color: #e6edf3;
+        font: inherit;
+        font-size: 11px;
+        text-align: center;
+      }
+
+      /*
+         KAMERA-SOR: a KOVETO allapot az alapertelmezes, ezert halvany --
+         ami mindig igaz, az ne vonja el a figyelmet. A SZABAD viszont
+         kapcsolt allapot, azt ki kell emelni.
+      */
+      #player-hud #camera .state { color: #8b949e; }
+      #player-hud #camera.szabad .state { color: #39d0ff; }
+      #player-hud #camera.szabad { border-color: #39d0ff; }
 
       /*
          LEFULLADAS: rovid piros villogas.
@@ -1018,7 +1070,7 @@
     <div id="hud" hidden></div>
     <div id="help" hidden>
       <b>W/S</b> gaz / fek &nbsp; <b>A/D</b> kormany &nbsp;
-      <b>Space</b> kezifek &nbsp; <b>Q</b> kepesseg &nbsp; <b>C</b> korulnezes &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> (5 mp) ujraindulas<br />
+      <b>Space</b> kezifek &nbsp; <b>Q</b> kepesseg &nbsp; <b>Kozepso egergomb</b> korulnezes (kapcsolo) &nbsp; <b>Shift</b> boost &nbsp; <b>Bal egergomb</b> / <b>F</b> raketa (egerrel celzol) &nbsp; <b>R</b> (5 mp) ujraindulas<br />
       <b>1 2 3 4</b> kerek kiloves (FL FR RL RR, csak offline) &nbsp; <b>0</b> kerekek javitasa<br />
       <b>Ctrl+Shift+D</b> fejlesztoi mod ki/be &nbsp; (<b>?dev=1</b> az URL-ben ugyanez)
     </div>
@@ -1286,7 +1338,7 @@
         <span><kbd>Shift</kbd></span><span>boost</span>
         <span><kbd>Space</kbd></span><span>kézifék, drift</span>
         <span><kbd>Q</kbd></span><span>képesség (pajzs / gyógyítás)</span>
-        <span><kbd>C</kbd> nyomva</span><span>körülnézés az egérrel</span>
+        <span>középső gomb</span><span>körülnézés az egérrel (be/ki kapcsol)</span>
         <span><kbd>R</kbd> 5 mp-ig</span><span>újraindulás (a helyünkre tesz, javít)</span>
         <span>egér</span><span>célzás</span>
         <span>bal gomb</span><span>tűz</span>
@@ -1325,8 +1377,29 @@
         <span class="unit">km/h</span>
       </div>
 
+      <!--
+        A JOBB ALSO SAV SORAI mind ugyanazt a mintat kovetik:
+
+          [ mivel hasznalom ]  NEV  ............  ALLAPOT
+
+        A bal oldali kis abra nelkul a sav csak azt mondja meg, MI van
+        keznel, azt nem, hogy MIVEL kell elsutni -- azt a jatekosnak a
+        sugobol kellett megjegyeznie. A HUD-on mindig ott van.
+
+        Az abrak `aria-hidden`-ek: a mellettuk allo szoveg maga a
+        tartalom, a kep csak megismetli.
+      -->
       <div class="stack right">
         <div class="weapon" id="weapon">
+          <span class="hint" aria-hidden="true">
+            <!-- Eger, a BAL gomb kiemelve. -->
+            <svg viewBox="0 0 16 22" class="mouse">
+              <clipPath id="mouse-bal"><rect x="1" y="1" width="14" height="20" rx="6.5" /></clipPath>
+              <rect x="1" y="1" width="8" height="8" class="gomb" clip-path="url(#mouse-bal)" />
+              <rect x="1" y="1" width="14" height="20" rx="6.5" class="test" />
+              <path d="M1 9 H15 M8 1 V9" class="test" />
+            </svg>
+          </span>
           <span class="cap" id="weapon-name">AGYU</span>
           <span class="state" id="weapon-state">KESZ</span>
         </div>
@@ -1336,8 +1409,27 @@
           "nem tortenik semmi" elmeny lenne.
         -->
         <div class="weapon" id="ability">
+          <span class="hint" aria-hidden="true"><kbd>Q</kbd></span>
           <span class="cap" id="ability-name">PAJZS</span>
           <span class="state" id="ability-state">KESZ</span>
+        </div>
+        <!--
+          KAMERA: a korulnezes KAPCSOLO, nem nyomva tartas -- tehat a
+          jatekos benne is FELEJTHETI magat. Egy kapcsolt allapotnak
+          latszania kell valahol, kulonben a "miert nem fordul a kamera
+          az autoval" kerdesre nincs valasz a kepernyon.
+        -->
+        <div class="weapon" id="camera">
+          <span class="hint" aria-hidden="true">
+            <!-- Ugyanaz az eger, a KOZEPSO gomb (gorgo) kiemelve. -->
+            <svg viewBox="0 0 16 22" class="mouse">
+              <rect x="1" y="1" width="14" height="20" rx="6.5" class="test" />
+              <path d="M1 9 H15" class="test" />
+              <rect x="6" y="2.5" width="4" height="6" rx="2" class="gomb" />
+            </svg>
+          </span>
+          <span class="cap">KAMERA</span>
+          <span class="state" id="camera-state">KÖVETŐ</span>
         </div>
         <div class="tyre-block">
           <span class="cap">GUMIK</span>

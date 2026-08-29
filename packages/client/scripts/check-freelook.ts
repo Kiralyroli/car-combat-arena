@@ -1,14 +1,15 @@
 /**
- * KORULNEZES a bongeszoben: a C gomb + eger tenyleg forgatja-e a kamerat.
+ * KORULNEZES a bongeszoben: a kozepso egergomb + eger tenyleg
+ * forgatja-e a kamerat.
  *
  * A szabalyt (szog a celkereszt helyebol es az egerbol) a
  * check:freelook meri, bongeszo nelkul. Itt az UTJA a merheto: eljut-e
- * a billentyu es az eger a kameraig, kozepre ugrik-e a celkereszt, es
- * all-e vissza minden elengedeskor.
+ * a kattintas es az eger a kameraig, kozepre ugrik-e a celkereszt, es
+ * all-e vissza minden kikapcsolaskor.
  *
  * Ez a lanc tobb helyen tud csendben elszakadni -- egy elmaradt
  * esemenykezelo, egy at nem adott parameter --, es a jatek attol meg
- * hibatlanul fut, csak a C nem csinal semmit.
+ * hibatlanul fut, csak a kozepso gomb nem csinal semmit.
  *
  * Futtatas: npm run check:freelook-ui
  */
@@ -17,6 +18,35 @@ import { chromium, type Page } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A korulnezes KAPCSOLASA: egy kattintas a kozepso egergombbal.
+ *
+ * Ugyanaz a mozdulat kapcsolja be es ki -- a teszt szandekosan
+ * ugyanezt az egy fuggvenyt hivja mindketszer, mert a jatekos is
+ * ugyanazt csinalja.
+ */
+async function kozepsoGomb(page: Page): Promise<void> {
+  await page.mouse.down({ button: "middle" });
+  await page.mouse.up({ button: "middle" });
+}
+
+/**
+ * A HUD kamera-sora: mit ir ki, es ki van-e emelve.
+ *
+ * A korulnezes KAPCSOLO, tehat benne is lehet felejteni magat -- a
+ * kepernyon latszania kell, hogy melyik modban all. Ez a lanc (modul ->
+ * main.ts -> HUD) kulon el tud szakadni ugy, hogy a kamera maga
+ * hibatlanul mukodik.
+ */
+async function kameraSor(
+  page: Page,
+): Promise<{ szoveg: string; kiemelve: boolean }> {
+  return (await page.evaluate(() => ({
+    szoveg: document.getElementById("camera-state")?.textContent ?? "",
+    kiemelve: !!document.getElementById("camera")?.classList.contains("szabad"),
+  }))) as { szoveg: string; kiemelve: boolean };
+}
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -121,7 +151,7 @@ async function main(): Promise<void> {
   )) as number;
   const parkY = ((1 - freeLookParkNdcY(fov)) / 2) * 720;
 
-  // --- A C NELKUL az eger nem forgat ---
+  // --- KAPCSOLO NELKUL az eger nem forgat ---
   //
   // Enelkul a teszt akkor is atmenne, ha a kamera barmilyen
   // egermozgasra fordulna -- vagyis a gomb szerepet nem mernenk.
@@ -130,7 +160,7 @@ async function main(): Promise<void> {
     await sleep(600);
     const most = await kameraIrany(page);
     check(
-      "a C nelkul az eger nem forgatja a kamerat",
+      "bekapcsolas nelkul az eger nem forgatja a kamerat",
       Math.abs(szogKulonbseg(most, kezdoIrany)) < 3,
       `${szogKulonbseg(most, kezdoIrany).toFixed(1)}° elfordulas`,
     );
@@ -140,7 +170,7 @@ async function main(): Promise<void> {
 
   // --- Belepeskor a celkereszt KOZEPRE ugrik ---
   {
-    await page.keyboard.down("c");
+    await kozepsoGomb(page);
     await sleep(300);
     const kozepen = await celkereszt(page);
     check(
@@ -163,6 +193,13 @@ async function main(): Promise<void> {
       "a celkereszt tenylegesen elmozdult",
       Math.abs(kozepen.x - kezdoKereszt.x) > 100,
       `${kezdoKereszt.x} -> ${kozepen.x}`,
+    );
+
+    const sor = await kameraSor(page);
+    check(
+      "a HUD kamera-sora SZABAD-ra valt es kiemelodik",
+      sor.szoveg === "SZABAD" && sor.kiemelve,
+      `"${sor.szoveg}", kiemelve: ${sor.kiemelve}`,
     );
   }
 
@@ -193,7 +230,7 @@ async function main(): Promise<void> {
     const utana = await kameraIrany(page);
     const d = szogKulonbseg(utana, elotte);
     check(
-      "C nyomva az eger tovabb forgatja a kamerat, jo iranyba",
+      "bekapcsolva az eger tovabb forgatja a kamerat, jo iranyba",
       d < -5,
       `${d.toFixed(1)}° tovabb jobbra (az egeret is jobbra huztuk)`,
     );
@@ -267,10 +304,10 @@ async function main(): Promise<void> {
       `${emelesUtana.toFixed(1)}° -> ${lefele.toFixed(1)}°`,
     );
 
-    await page.keyboard.up("c");
+    await kozepsoGomb(page);
   }
 
-  // --- Elengedve minden visszaall ---
+  // --- Kikapcsolva minden visszaall ---
   {
     // VARUNK, amig visszaall -- nem fix ideig.
     //
@@ -286,9 +323,18 @@ async function main(): Promise<void> {
       if (elteres < 5) break;
     }
     check(
-      "elengedve visszaall a kamera az auto moge",
+      "kikapcsolva visszaall a kamera az auto moge",
       elteres < 5,
       `${elteres.toFixed(1)}° elteres az alaphelyzettol`,
+    );
+
+    // UGYANAZ a gomb kapcsolta ki, mint be -- ha a masodik kattintas
+    // ujra belepne (vagy nem lepne ki), a HUD sora arulja el.
+    const sor = await kameraSor(page);
+    check(
+      "a HUD kamera-sora visszavalt KOVETO-re",
+      sor.szoveg === "KÖVETŐ" && !sor.kiemelve,
+      `"${sor.szoveg}", kiemelve: ${sor.kiemelve}`,
     );
 
     const emeles = await kameraEmeles(page);
@@ -310,7 +356,7 @@ async function main(): Promise<void> {
     await sleep(300);
     const mozgo = await celkereszt(page);
     check(
-      "elengedes utan a celkereszt megint kovet",
+      "kikapcsolas utan a celkereszt megint kovet",
       Math.abs(mozgo.x - 500) < 2,
       `(${mozgo.x}, ${mozgo.y})`,
     );

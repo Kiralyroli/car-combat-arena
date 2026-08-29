@@ -1,8 +1,14 @@
 /**
- * KORULNEZES: a C nyomva tartasa alatt az eger a kamerat forgatja.
+ * KORULNEZES: a KOZEPSO EGERGOMB kapcsolja at, az eger forgatja a kamerat.
  *
  * A szabaly a kozos csomagban van (freeLook.ts); itt az esemenyek es az
  * allapot.
+ *
+ * KAPCSOLO, NEM NYOMVA TARTAS. Korabban a C nyomva tartasa kellett
+ * hozza; a korulnezes viszont nem egy pillanatnyi mozdulat, hanem egy
+ * MOD, amiben a jatekos kanyarodik es lo is -- azalatt vegig egy
+ * lenyomott gombot tartani a masik kezzel folosleges teher volt. A
+ * kozepso gomb ezen kivul ott van a kez alatt, ahol amugy is celzunk.
  *
  * POINTER LOCK: belepeskor a bongeszo elkapja az egeret. Enelkul a
  * kurzor elobb-utobb a kepernyo szelenek utkozne, es a forgatas ott
@@ -19,6 +25,9 @@ import {
   freeLookFromAim,
   freeLookParkNdcY,
 } from "@cca/shared";
+
+/** A MouseEvent.button szamozasa: 0 bal, 1 kozepso, 2 jobb. */
+const KOZEPSO_GOMB = 1;
 
 export class FreeLook {
   private aktiv = false;
@@ -42,8 +51,12 @@ export class FreeLook {
     /** A palya vaszna -- ezen keri a bongeszotol az eger elkapasat. */
     private readonly elem: HTMLElement | null = document.querySelector("canvas"),
   ) {
-    window.addEventListener("keydown", this.onKeyDown);
-    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("mousedown", this.onMouseDown);
+    // A kozepso gomb bongeszo-alapertelmezese a GORGETO MOD (Windowson
+    // a korkoros nyil): az elnyomna a jatekot, ezert le kell tiltani.
+    // Ket helyen, mert a ket bongeszo-csalad mashol inditja: a Chrome
+    // az `auxclick`-nel, a tobbi a `mousedown`-nal.
+    window.addEventListener("auxclick", this.onAuxClick);
     window.addEventListener("mousemove", this.onMouseMove);
     window.addEventListener("blur", this.onBlur);
     // Ha a felhasznalo Esc-cel kilep a zarasbol, a mod is alljon le --
@@ -106,10 +119,19 @@ export class FreeLook {
     this.pitchFok = freeLookEase(this.pitchFok, 0, dt);
   }
 
-  private onKeyDown = (e: KeyboardEvent): void => {
-    if (e.code !== "KeyC" || e.repeat || this.aktiv) return;
-    const el = e.target as (HTMLElement & { type?: string }) | null;
-    if (el && (el.isContentEditable || el.tagName === "INPUT")) return;
+  private onMouseDown = (e: MouseEvent): void => {
+    if (e.button !== KOZEPSO_GOMB) return;
+    // A gorgeto mod itt is: Chromeban a mousedown megallitasa fogja meg.
+    e.preventDefault();
+
+    if (this.aktiv) {
+      this.kilep();
+      return;
+    }
+    // CSAK A PALYA FOLOTT lep be. A lobbyban es a paneleken (szobakod,
+    // fejlesztoi csuszkak) a kozepso gomb ne rantsa el a kamerat egy
+    // olyan jatekban, ami meg el sem indult.
+    if ((e.target as Element | null)?.tagName !== "CANVAS") return;
 
     this.aktiv = true;
     // A kamera ODA UGRIK, ahol a celkereszt allt. A simitas miatt nem
@@ -119,9 +141,8 @@ export class FreeLook {
     for (const fn of this.listeners) fn(true);
   };
 
-  private onKeyUp = (e: KeyboardEvent): void => {
-    if (e.code !== "KeyC") return;
-    this.kilep();
+  private onAuxClick = (e: MouseEvent): void => {
+    if (e.button === KOZEPSO_GOMB) e.preventDefault();
   };
 
   private onMouseMove = (e: MouseEvent): void => {

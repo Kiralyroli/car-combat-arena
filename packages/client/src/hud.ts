@@ -231,6 +231,9 @@ export class PlayerHud {
   private readonly weaponName: HTMLElement;
   private readonly weaponState: HTMLElement;
   private readonly ability: HTMLElement;
+  /** A kamera-mod sora es allapot-cimkeje (koveto / szabad). */
+  private readonly camera: HTMLElement;
+  private readonly cameraState: HTMLElement;
   private readonly abilityName: HTMLElement;
   private readonly abilityState: HTMLElement;
   /** Az utolso kirajzolt kepesseg-allapot -- a folosleges DOM-iras ellen. */
@@ -285,6 +288,8 @@ export class PlayerHud {
     this.ability = must("ability");
     this.abilityName = must("ability-name");
     this.abilityState = must("ability-state");
+    this.camera = must("camera");
+    this.cameraState = must("camera-state");
     this.tyres = must("tyres");
     // A lobby alatt REJTVE marad: ures HP- es boost-savokat mutatna,
     // ami a nev-beviteli parbeszed mogott csak zavaro.
@@ -292,6 +297,22 @@ export class PlayerHud {
 
   show(): void {
     this.root.hidden = false;
+  }
+
+  /**
+   * A KAMERA modjanak kijelzese.
+   *
+   * A korulnezes KAPCSOLO (kozepso egergomb), nem nyomva tartas --
+   * tehat a jatekos benne is felejtheti magat. Egy kapcsolt allapot,
+   * aminek nincs nyoma a kepernyon, ugy jelentkezik, hogy "elromlott a
+   * kamera": nem fordul az autoval, es nem derul ki, miert.
+   *
+   * Az allapot a FreeLook-tol jon (lasd main.ts), nem itt szamoljuk:
+   * egy sajat masolat elcsuszhatna tole.
+   */
+  setCameraFree(szabad: boolean): void {
+    this.camera.classList.toggle("szabad", szabad);
+    this.cameraState.textContent = szabad ? "SZABAD" : "KÖVETŐ";
   }
 
   /**
