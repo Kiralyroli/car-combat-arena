@@ -1,16 +1,18 @@
 import {
   ARENA,
+  DEFAULT_CAR,
   EXPLOSION_MAX_DAMAGE,
   EXPLOSION_RADIUS,
   explosionFalloff,
   ROCKET_DIRECT_DAMAGE,
   ROCKET_LIFETIME_MS,
   ROCKET_RADIUS,
-  ROCKET_SPAWN_OFFSET,
+  rocketSpawnOffsetFor,
   ROCKET_SPEED,
   muzzleWorldPosition,
   weaponPivot,
   rocketHitsCar,
+  type CarId,
   type ClientState,
   type RocketSnapshot,
   raycastBVH,
@@ -51,6 +53,19 @@ export interface Explosion {
 const ARENA_LIMIT =
   ARENA.find((box) => box.name === "ground")?.halfExtents.x ?? 40;
 
+/**
+ * Egy lehetseges celpont a raketanak.
+ *
+ * Az AUTOJA is kell: a talalati alak autonkent mas (a kocsik 3,7 es
+ * 5,8 m kozott vannak). Opcionalis, mert a raketa-tesztek egy resze
+ * csak a repulest meri -- ott a Sedan alakja a jo alapertelmezes.
+ */
+export interface RocketTarget {
+  id: string;
+  state: ClientState;
+  car?: CarId;
+}
+
 export class RocketSimulation {
   private readonly rockets: Rocket[] = [];
   private nextId = 1;
@@ -71,12 +86,14 @@ export class RocketSimulation {
     shooter: ClientState,
     target: [number, number, number],
     now: number,
+    /** A lovo autoja -- a fegyver a TETEJEN ul, az pedig autonkent mas. */
+    car: CarId = DEFAULT_CAR,
   ): Rocket | null {
     // Az IRANY a FEGYVER forgaspontja es a celzott pont kozott all elo
     // -- a kliens csak a celpontot adja. A forgaspont (nem az auto
     // kozeppontja) azert kell, mert a lovedek is onnan indul: kulonben a
     // ket egyenes parhuzamos lenne, es a raketa a celpont folott menne el.
-    const pivot = weaponPivot(shooter.position, shooter.rotation, "cannon");
+    const pivot = weaponPivot(shooter.position, shooter.rotation, "cannon", car);
     let dx = target[0] - pivot[0];
     let dy = target[1] - pivot[1];
     let dz = target[2] - pivot[2];
@@ -105,7 +122,7 @@ export class RocketSimulation {
     // lovedeket nem latott, es a robbanas is a falon BELUL tortent, ahol
     // szinten nem latszik. (Merve: z = -61.90, a fal -60-nal.) Ezert a
     // szuletesi pontot az elso akadalyig vagjuk vissza.
-    const spawn = this.safeSpawn(shooter, [dx, dy, dz]);
+    const spawn = this.safeSpawn(shooter, [dx, dy, dz], car);
 
     const rocket: Rocket = {
       id: this.nextId++,
@@ -140,19 +157,23 @@ export class RocketSimulation {
   private safeSpawn(
     shooter: ClientState,
     direction: [number, number, number],
+    car: CarId = DEFAULT_CAR,
   ): [number, number, number] {
     const muzzle = muzzleWorldPosition(
       shooter.position,
       shooter.rotation,
       direction,
       "cannon",
+      undefined,
+      car,
     );
     const wanted = muzzleWorldPosition(
       shooter.position,
       shooter.rotation,
       direction,
       "cannon",
-      ROCKET_SPAWN_OFFSET,
+      rocketSpawnOffsetFor(car),
+      car,
     );
 
     // A palya HAROMSZOG-halojaval, nem dobozokkal: igy a raketa is
@@ -183,7 +204,7 @@ export class RocketSimulation {
   step(
     dt: number,
     now: number,
-    targets: { id: string; state: ClientState }[],
+    targets: RocketTarget[],
   ): Explosion[] {
     const explosions: Explosion[] = [];
 
@@ -233,16 +254,22 @@ export class RocketSimulation {
     rocket: Rocket,
     from: [number, number, number],
     to: [number, number, number],
-    targets: { id: string; state: ClientState }[],
+    targets: RocketTarget[],
   ): string | null {
     for (const target of targets) {
       // A sajat rakétank nem talal el minket: kilovesnel az auto orra
       // elott szuletik, de egy eles kanyarban utolerhetne magat.
       if (target.id === rocket.ownerId) continue;
 
-      // Valodi (elforgatott) doboz, a teljes megtett szakaszra vizsgalva.
+      // A celpont SAJAT alakjaval, a teljes megtett szakaszra vizsgalva.
       if (
-        this.talaljaAutot(from, to, target.state.position, target.state.rotation)
+        this.talaljaAutot(
+          from,
+          to,
+          target.state.position,
+          target.state.rotation,
+          target.car,
+        )
       ) {
         return target.id;
       }
@@ -277,12 +304,13 @@ export class RocketSimulation {
     to: [number, number, number],
     pozicio: readonly number[],
     forgatas: readonly number[],
+    car?: CarId,
   ): boolean {
-    const halo = autoBVH();
-    if (!halo) return rocketHitsCar(from, to, pozicio, forgatas);
-    return (
-      segmentCarEntryMesh(halo, from, to, pozicio, forgatas) !== null
-    );
+    const halo = autoBVH(car);
+    if (!halo) {
+      return rocketHitsCar(from, to, pozicio, forgatas, ROCKET_RADIUS, car);
+    }
+    return segmentCarEntryMesh(halo, from, to, pozicio, forgatas) !== null;
   }
 
   private obstacleEntry(

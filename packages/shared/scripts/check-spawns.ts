@@ -11,13 +11,15 @@
  *
  * Futtatas: npm run check:spawns
  */
-import { ARENA, ARENA_HALF, CHASSIS, SPAWN_POINTS } from "../src/config";
+import { LARGEST_CAR_HALF } from "../src/carSizes";
+import { ARENA, ARENA_HALF, SPAWN_POINTS } from "../src/config";
 
 /**
  * Az auto vizszintes befoglalo sugara. A hosszabb tengellyel szamolunk
- * minden iranyban, mert a spawn utan a kocsi barmerre allhat.
+ * minden iranyban, mert a spawn utan a kocsi barmerre allhat -- es a
+ * LEGNAGYOBB kocsival, mert a hely mindenkinek kell.
  */
-const CAR_RADIUS = Math.max(CHASSIS.halfExtents.x, CHASSIS.halfExtents.z);
+const CAR_RADIUS = Math.max(LARGEST_CAR_HALF.x, LARGEST_CAR_HALF.z);
 
 /** Tovabbi rahagyas, hogy a spawn ne legyen "eppen csak" szabad. */
 const CLEARANCE = 0.5;

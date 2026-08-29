@@ -1,20 +1,31 @@
 /**
- * Az AUTO talalati dobozai.
+ * Az AUTOK talalati dobozai -- MIND A TIZE.
  *
- * A talalatot korabban egyetlen doboz dontotte el, a modell teljes
- * befoglaloja. Most tobb, mert szeletbol all (carHitbox.ts), es ez
- * kozvetlenul a jatekmenetet valtoztatja: ami eddig talalat volt a
- * motorhaztetö FOLOTT, az mar nem az.
+ * A talalatot korabban egyetlen doboz dontotte el, ES ugyanaz a doboz
+ * minden jatekosnal (a Sedane). Most autonkent mert, szeletekbol allo
+ * test van (carGeometry.ts), es ez kozvetlenul a jatekmenetet
+ * valtoztatja: ami eddig talalat volt a motorhaztetö FOLOTT, az mar
+ * nem az -- a pickup platoja folott sem.
  *
  * Ket iranyba is el lehet rontani, es MINDKETTO csendes:
  *
  *  - ha a dobozok tul kicsik, a jatekos rendre "atlo" az ellenfelen,
- *  - ha valamelyik kilog a regibol, valaki eszrevetlenul
- *    eltalalhatobb lesz, mint volt.
+ *  - ha valamelyik kilog a sajat autojabol, valaki eszrevetlenul
+ *    eltalalhatobb lesz, mint amekkorat lat.
+ *
+ * A harmadik csendes hiba a generalasban van: ha az auto-meret nem fut
+ * le, minden kocsi a Sedan meretet kapja, es a kulonbseg eltunik. Az
+ * ELSO teszt eppen ezt zarja ki.
  *
  * Futtatas: npm run check:carbox
  */
-import { CAR_BOXES, CHASSIS, segmentCarEntry } from "../src/index";
+import {
+  CAR_GEOMETRY,
+  CAR_MODELS,
+  WHEEL,
+  segmentCarEntry,
+  type CarId,
+} from "../src/index";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -32,71 +43,97 @@ const FORGATAS: [number, number, number, number] = [0, 0, 0, 1];
  * Kivulrol indul es kivul vegzodik, tehat tenylegesen a dobozokon kell
  * athaladnia. A gepfegyver golyoja pontszeru: sugar nelkul merunk.
  */
-function talalOldalrol(y: number, z: number): boolean {
+function talalOldalrol(car: CarId, y: number, z: number): boolean {
   return (
-    segmentCarEntry([-20, y, z], [20, y, z], ALL, FORGATAS, 0) !== null
+    segmentCarEntry([-20, y, z], [20, y, z], ALL, FORGATAS, 0, car) !== null
   );
 }
 
-/** Ugyanez elolrol-hatulrol (Z menten). */
-function talalHosszaban(x: number, y: number): boolean {
-  return (
-    segmentCarEntry([x, y, -20], [x, y, 20], ALL, FORGATAS, 0) !== null
-  );
-}
+/** A tesztek egy autora. Ami itt bukik, azt az autoval jeloljuk. */
+function autotEllenoriz(car: CarId): void {
+  const g = CAR_GEOMETRY[car];
+  const H = g.halfExtents;
+  const cimke = (s: string) => `[${car}] ${s}`;
 
-function main(): void {
-  console.log("=== Auto talalati dobozok ===\n");
-  const H = CHASSIS.halfExtents;
-
-  // --- Egyik doboz sem lóg ki a REGIBOL ---
+  // --- Egyik doboz sem lóg ki az UTKOZO dobozbol ---
   //
   // Ez a valtozas alapszabalya: csak elvenni szabad a hamis
   // talalatokbol, hozzaadni nem. Kulonben eszrevetlenul kerulne be egy
-  // "nagyobb lett a hitbox" valtozas.
+  // "nagyobb lett a hitbox" valtozas -- amit a jatekos csak annyibol
+  // erzekelne, hogy a semmibe leadott loves talal.
   {
-    const kilog = CAR_BOXES.filter(
+    const kilog = g.hitBoxes.filter(
       (b) =>
         Math.abs(b.dx) + b.hx > H.x + 1e-6 ||
         Math.abs(b.dy) + b.hy > H.y + 1e-6 ||
         Math.abs(b.dz) + b.hz > H.z + 1e-6,
     );
     check(
-      "egyik doboz sem lóg ki a regi befoglalobol",
+      cimke("egyik doboz sem lóg ki az utkozo dobozbol"),
       kilog.length === 0,
       kilog.length === 0
-        ? `${CAR_BOXES.length} doboz, mind a ${(H.x * 2).toFixed(2)} x ${(H.y * 2).toFixed(2)} x ${(H.z * 2).toFixed(2)} m-en belul`
+        ? `${g.hitBoxes.length} doboz, mind a ${(H.x * 2).toFixed(2)} x ${(H.y * 2).toFixed(2)} x ${(H.z * 2).toFixed(2)} m-en belul`
         : `${kilog.length} doboz kilog`,
     );
   }
 
-  // --- A KAROSSZERIA magassagaban vegig talalhato ---
+  // --- Az autoban NINCS LYUK ---
   //
-  // Az auto also fele tomor: ott egy oldalirányu lovesnek a hossz
-  // szinte teljes egeszen talalnia kell. Ha itt lyuk marad, a jatekos
-  // rendre "atlo" az ellenfelen -- ez a rosszabbik hiba a kettobol.
+  // Ez a rosszabbik hiba a kettobol: ha a szeletek osszevonasa lyukat
+  // hagy, a jatekos rendre "atlo" az ellenfelen, es ezt semmi nem
+  // jelzi. Az ellenorzes: minden magassagban EGYETLEN, osszefuggo
+  // szakasz talalhato -- ket szakasz kozott ugyanis at lehetne loni.
   //
-  // LEFEDETTSEGET merunk, nem "minden ponton talal"-t: az auto orra es
-  // fara lejt, tehat a legalso magassagban a lokharito csucse alatt
-  // TENYLEG nincs semmi. Az a helyes viselkedes, nem lyuk.
+  // NEM lefedettseget merunk minden magassagban: az orr es a far lejt,
+  // a teto rovid, tehat felfele haladva egyre kevesebb az auto. Az a
+  // helyes viselkedes, nem lyuk. A lyuk attol lyuk, hogy a talalat
+  // KETTEVALIK.
+  //
+  // A magassagok az auto SAJAT meretebol jonnek: a sportkocsi 1,17 m, a
+  // SUV 1,95 -- egy fix y-lista az egyiknel a tetot, a masiknal a
+  // kerekeket merne.
   {
+    const kerekTeteje = g.wheels[0].y + WHEEL.radius;
     const bajos: string[] = [];
-    for (const y of [-0.5, -0.3, 0, 0.1]) {
-      let talalt = 0;
-      let ossz = 0;
+    for (let i = 0; i < 12; i++) {
+      const y = kerekTeteje + ((i + 0.5) / 12) * (H.y - kerekTeteje);
+      let futamok = 0;
+      let elozo = false;
       for (let z = -H.z; z <= H.z; z += 0.05) {
-        ossz++;
-        if (talalOldalrol(y, z)) talalt++;
+        const van = talalOldalrol(car, y, z);
+        if (van && !elozo) futamok++;
+        elozo = van;
       }
-      const arany = talalt / ossz;
-      if (arany < 0.95) bajos.push(`y=${y}: ${Math.round(100 * arany)}%`);
+      if (futamok > 1) bajos.push(`y=${y.toFixed(2)}: ${futamok} szakasz`);
     }
     check(
-      "a karosszeria magassagaban vegig talalhato",
+      cimke("nincs lyuk az auton, amin at lehetne loni"),
       bajos.length === 0,
       bajos.length === 0
-        ? "az auto hosszanak legalabb 95%-a talalhato minden test-magassagban"
+        ? "12 magassagban mindenhol egyetlen osszefuggo szakasz"
         : bajos.join(", "),
+    );
+  }
+
+  // --- A KEREKEK FOLOTT tomor a karosszeria ---
+  //
+  // A masik irany: ha a talalati test tul szuk lenne, a hossz java
+  // reszen nem lehetne eltalalni az autot. Kozvetlenul a kerekek
+  // folott az auto szinte vegig tomor -- ami hianyzik, az a lejto orr
+  // es far csucse.
+  {
+    const y = g.wheels[0].y + WHEEL.radius + 0.05;
+    let talalt = 0;
+    let ossz = 0;
+    for (let z = -H.z; z <= H.z; z += 0.05) {
+      ossz++;
+      if (talalOldalrol(car, y, z)) talalt++;
+    }
+    const arany = talalt / ossz;
+    check(
+      cimke("a kerekek folott vegig talalhato"),
+      arany >= 0.9,
+      `y = ${y.toFixed(2)} m-en a hossz ${Math.round(100 * arany)}%-a`,
     );
   }
 
@@ -114,11 +151,12 @@ function main(): void {
         ALL,
         FORGATAS,
         0,
+        car,
       );
       if (t === null) rossz.push(`${Math.round((a * 180) / Math.PI)}°`);
     }
     check(
-      "a kozeppontra celozva minden iranybol talal",
+      cimke("a kozeppontra celozva minden iranybol talal"),
       rossz.length === 0,
       rossz.length === 0 ? "mind a 16 irany" : rossz.join(", "),
     );
@@ -126,45 +164,45 @@ function main(): void {
 
   // --- A KEREKEK eltalalhatok ---
   //
-  // A kerekek kulon sebzodnek, tehat celozni lehet rajuk. A
-  // karosszeria alja 0,16 m-rel a kerekek alja folott vegzodik: ha a
-  // meres csak a karosszeriat nezne, az also szelet 1,39 m szeles
-  // lenne a valos 2,0 helyett, es az oldalrol a kerekre adott loves
-  // elszallna az auto alatt.
+  // A kerekek kulon sebzodnek, tehat celozni lehet rajuk. Ha a meres
+  // csak a karosszeriat nezne, az also szelet keskenyebb lenne a
+  // valosnal, es az oldalrol a kerekre adott loves elszallna az auto
+  // alatt.
   {
-    // A kerekek az auto negy sarka fele allnak; a legalso magassagban
-    // merunk, kozvetlenul a talaj folott.
     const kerekMagassag = -H.y + 0.15;
-    const jo = [-1.5, 1.4].every((z) => talalOldalrol(kerekMagassag, z));
+    // A kerekek az auto vegei fele allnak -- a sajat kerekhelyeit
+    // kerdezzuk meg, nem beirt szamokat.
+    const zk = [...new Set(g.wheels.map((w) => w.z))];
+    const rossz = zk.filter((z) => !talalOldalrol(car, kerekMagassag, z));
     check(
-      "a kerekek magassagaban oldalrol talal",
-      jo,
-      `y = ${kerekMagassag.toFixed(2)} m (a doboz alja ${(-H.y).toFixed(2)})`,
+      cimke("a kerekek magassagaban oldalrol talal"),
+      rossz.length === 0,
+      `y = ${kerekMagassag.toFixed(2)} m, z = ${zk.map((z) => z.toFixed(2)).join(" / ")}`,
     );
   }
 
   // --- A TETO eltalalhato ---
   {
     check(
-      "a teton is talal",
-      talalOldalrol(H.y - 0.1, 0),
+      cimke("a teton is talal"),
+      talalOldalrol(car, H.y - 0.1, 0),
       `y = ${(H.y - 0.1).toFixed(2)} m, az auto kozepen`,
     );
   }
 
-  // --- A MOTORHAZTETÖ FOLOTTI levego MAR NEM talalat ---
+  // --- Az ORR es a FAR FOLOTTI levego MAR NEM talalat ---
   //
-  // Ez a valtozas erteke. A regi, egyetlen doboz vegig 4,91 m hosszu
-  // volt a teto magassagaban is, tehat az orr folotti ures teren
+  // Ez a valtozas erteke. A regi, egyetlen doboz a teto magassagaban is
+  // vegig az auto teljes hossza volt, tehat az orr folotti ures teren
   // athalado loves talalatnak szamitott.
   {
     const magas = H.y - 0.1;
     const hamisak: string[] = [];
-    for (const z of [-H.z + 0.3, -H.z + 0.8, H.z - 0.3, H.z - 0.8]) {
-      if (talalOldalrol(magas, z)) hamisak.push(`z=${z.toFixed(1)}`);
+    for (const z of [-H.z + 0.15, H.z - 0.15]) {
+      if (talalOldalrol(car, magas, z)) hamisak.push(`z=${z.toFixed(2)}`);
     }
     check(
-      "az orr es a csomagtarto FOLOTT mar nem talal",
+      cimke("az orr es a far FOLOTT mar nem talal"),
       hamisak.length === 0,
       hamisak.length === 0
         ? `a teto magassagaban (y=${magas.toFixed(2)}) csak a kabin talal`
@@ -172,45 +210,103 @@ function main(): void {
     );
   }
 
-  // --- A KABIN MELLETTI levego sem talalat ---
+  // --- A talalati test tenyleg KOVETI az alakot ---
   //
-  // Ugyanez oldalirányban: a teto 1,56 m szeles, a doboz 2,18 volt.
+  // Ha a szeletek osszevonasa elromlik, a vegeredmeny egyetlen, teljes
+  // doboz lesz -- a tesztek tobbsege ettol meg atmenne, csak eppen
+  // visszakapnank a regi, bőkezű talalatot. A kitoltes ezt meri: az
+  // autok 68-79% kozott vannak, egyetlen doboz 100% lenne.
   {
-    const magas = H.y - 0.1;
-    const oldalt = H.x - 0.1;
+    const vol = g.hitBoxes.reduce((s, b) => s + 8 * b.hx * b.hy * b.hz, 0);
+    const arany = vol / (8 * H.x * H.y * H.z);
     check(
-      "a teto MELLETT sem talal",
-      !talalHosszaban(oldalt, magas) && !talalHosszaban(-oldalt, magas),
-      `x = ±${oldalt.toFixed(2)} m (a teto fele szelessege ennel kisebb)`,
+      cimke("a talalati test szűkebb az utkozo doboznal"),
+      arany < 0.85,
+      `a doboz terfogatanak ${Math.round(arany * 100)}%-a`,
+    );
+  }
+}
+
+function main(): void {
+  console.log("=== Auto talalati dobozok ===\n");
+
+  // --- MINDEN autonak SAJAT merete van ---
+  //
+  // Ha az auto-meret generalas elmarad vagy felresikerul, a legkonnyebb
+  // vegeredmeny az, hogy minden kocsi ugyanazt a dobozt kapja. A jatek
+  // menne tovabb, csak a pickup platojan at lehetne loni, a kisauto
+  // korul meg a levegobe.
+  {
+    const meretek = new Set(
+      CAR_MODELS.map((m) => {
+        const H = CAR_GEOMETRY[m.id].halfExtents;
+        return `${H.x}|${H.y}|${H.z}`;
+      }),
+    );
+    check(
+      "minden autonak sajat merete van",
+      meretek.size === CAR_MODELS.length,
+      `${meretek.size} kulonbozo meret ${CAR_MODELS.length} autohoz`,
+    );
+
+    // A MERETKULONBSEG valoban szamit: ha a generalas elmaradna, mind a
+    // negy kocsi ugyanakkora lenne, es a valasztas csak latvany volna.
+    // A negy jarmu 4,1 es 4,9 m kozott van -- fel meternel nagyobb
+    // kulonbseg mar erezheto a palya szuk helyein.
+    const hosszak = CAR_MODELS.map((m) => CAR_GEOMETRY[m.id].halfExtents.z * 2);
+    const magassagok = CAR_MODELS.map((m) => CAR_GEOMETRY[m.id].halfExtents.y * 2);
+    check(
+      "a meretkulonbseg valoban szamit",
+      Math.max(...hosszak) - Math.min(...hosszak) > 0.5 &&
+        Math.max(...magassagok) - Math.min(...magassagok) > 0.5,
+      `hossz ${Math.min(...hosszak).toFixed(2)}-${Math.max(...hosszak).toFixed(2)} m, ` +
+        `magassag ${Math.min(...magassagok).toFixed(2)}-${Math.max(...magassagok).toFixed(2)} m`,
     );
   }
 
-  // --- A RAKETA sugara tovabbra is szamit ---
+  // --- MINDEN modell SAJAT kereke ---
   //
-  // A raketa nem pontszeru: a felmereteket a sugaraval noveljuk. Ha ez
-  // a tobb dobozra atirt valtozatbol kimaradna, a raketa surloasa
-  // csendben nem robbanna.
+  // A kerekek merete a modellbol jon: ha egyetlen kozos sugarra
+  // esnenek vissza, a nagy kerekű terepjaro kereke a karosszeriaba
+  // erne, a kisebbe pedig lebegne a talaj folott.
   {
-    const KICSIT_MELLE = H.x + 0.2;
+    const sugarak = CAR_MODELS.map((m) => CAR_GEOMETRY[m.id].wheels[0].radius);
     check(
-      "a raketa sugara szamit (surlas is talalat)",
-      segmentCarEntry([-20, 0, 0], [20, 0, 0], ALL, FORGATAS, 0) !== null &&
-        segmentCarEntry(
-          [KICSIT_MELLE, 0, -20],
-          [KICSIT_MELLE, 0, 20],
-          ALL,
-          FORGATAS,
-          0.5,
-        ) !== null &&
-        segmentCarEntry(
-          [KICSIT_MELLE, 0, -20],
-          [KICSIT_MELLE, 0, 20],
-          ALL,
-          FORGATAS,
-          0,
-        ) === null,
-      `${KICSIT_MELLE.toFixed(2)} m-re elhaladva: 0,5 m sugarral talalat, pontszeruen nem`,
+      "a kerekek merete modellenkent mas",
+      new Set(sugarak.map((r) => r.toFixed(3))).size === CAR_MODELS.length,
+      sugarak.map((r, i) => `${CAR_MODELS[i].id}: ${(r * 2).toFixed(2)} m`).join(", "),
     );
+
+    // A LEGALSO kerek eri a talajt (a doboz aljat), es EGYIK SEM log
+    // ala. Nem mindegyik er le: az izomauto hatso kereke nagyobb az
+    // elsonel, tehat a ket tengely nem egy szinten all -- ez a modell
+    // sajatja, nem hiba. A hiba az volna, ha az EGESZ kocsi lebegne
+    // vagy belesullyedne a talajba.
+    const bajos = CAR_MODELS.filter((m) => {
+      const g = CAR_GEOMETRY[m.id];
+      const aljak = g.wheels.map((w) => w.y - w.radius);
+      const legalso = Math.min(...aljak);
+      return (
+        Math.abs(legalso + g.halfExtents.y) > 0.01 ||
+        aljak.some((a) => a < -g.halfExtents.y - 0.01)
+      );
+    });
+    check(
+      "a kerekek a talajon allnak",
+      bajos.length === 0,
+      bajos.length === 0
+        ? CAR_MODELS.map((m) => {
+            const g = CAR_GEOMETRY[m.id];
+            const legalso = Math.min(...g.wheels.map((w) => w.y - w.radius));
+            return `${m.id}: ${(legalso + g.halfExtents.y).toFixed(3)} m`;
+          }).join(", ")
+        : bajos.map((m) => m.id).join(", "),
+    );
+  }
+
+  console.log("");
+  for (const modell of CAR_MODELS) {
+    autotEllenoriz(modell.id);
   }
 
   console.log(

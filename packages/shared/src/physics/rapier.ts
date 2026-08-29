@@ -1,5 +1,10 @@
 import RAPIER from "@dimforge/rapier3d-compat";
-import { CAR_HULL_POINTS } from "../carHull";
+import {
+  CAR_GEOMETRY,
+  DEFAULT_CAR,
+  type CarGeometry,
+  type CarId,
+} from "../index";
 import {
   ARCADE,
   ARENA,
@@ -161,6 +166,8 @@ const REMOTE_COLLISION_DEVIATION = 0.02;
 /** Egy tavoli auto teste es a lokalis utkozes-joslat allapota. */
 interface RemoteBody {
   body: RAPIER.RigidBody;
+  /** Melyik autoval epult -- a meretet ez donti el. */
+  car: CarId;
   /**
    * Hova kerult volna a test PUSZTAN a beallitott sebessegtol. Ha a
    * fizikai lepes utan ettol erdemben eltert, kulso ero (utkozes) erte.
@@ -231,6 +238,21 @@ export class RapierBackend implements VehicleBackend {
 
   /** Fut-e eppen a talpra allitas (lasd applyRighting hiszterezis). */
   private righting = false;
+
+  /**
+   * A SAJAT autonk mert geometriaja.
+   *
+   * Autonkent mas: a pickup hosszabb, a kisauto rovidebb. A test
+   * merete, a burok es a kerekhelyek MIND innen jonnek -- kulonben egy
+   * hosszabb kocsi kilogna a testebol, es a kerekei sem a
+   * kerekjaratban allnanak.
+   *
+   * Az alapertelmezettel indul: a valasztott auto csak a belepes utan
+   * derul ki (lasd setCar).
+   */
+  private geometria: CarGeometry = CAR_GEOMETRY[DEFAULT_CAR];
+  /** A sajat auto utkozo-alakzata -- csereenél el kell tavolitani. */
+  private chassisCollider: RAPIER.Collider | null = null;
 
   private damage: WheelDamage[] = WHEEL_LAYOUT.map(() => ({ ...HEALTHY_WHEEL }));
   private stepMsAvg = 0;
@@ -350,7 +372,7 @@ export class RapierBackend implements VehicleBackend {
    *
    * A doboz a kabin magassagaban jóval nagyobb az autonal -- a
    * motorhaztetö folotti levegovel egyutt utkozott. A burok a mert
-   * modellbol jon (carHull.ts, 309 csucs).
+   * modellbol jon, AUTONKENT (carGeometry.ts).
    *
    * MIERT BUROK es nem haromszog-halo: a Rapier -- mint minden ilyen
    * motor -- dinamikus testnel konvex alakot var. A haromszog-halonak
@@ -361,12 +383,32 @@ export class RapierBackend implements VehicleBackend {
    *
    * Ha a burok valamiert nem allna elo, marad a doboz.
    */
-    const colliderDesc = (
-      RAPIER.ColliderDesc.convexHull(CAR_HULL_POINTS) ??
+    this.chassisCollider = this.world.createCollider(
+      RapierBackend.sajatCollider(this.geometria),
+      this.chassis,
+    );
+
+    // Egyetlen sugarat hozunk letre es hasznaljuk ujra: 4 kerek * 60 Hz
+    // felesleges szemetet jelentene lepesenkent.
+    this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+  }
+
+  /**
+   * A SAJAT autonk karosszeria-collidere.
+   *
+   * Egy helyen, mert KETSZER kell: a test felepiteseknel es akkor is,
+   * amikor a szervertol megjon a valasztott auto (setCar). Ha a ketto
+   * elcsuszna, a jatekos a belepes elott mas alakkal utkozne, mint
+   * utana -- eppen az a fajta csendes elteres, ami ellen a mert
+   * geometria keszult.
+   */
+  private static sajatCollider(geo: CarGeometry): RAPIER.ColliderDesc {
+    return (
+      RAPIER.ColliderDesc.convexHull(geo.hull) ??
       RAPIER.ColliderDesc.cuboid(
-        CHASSIS.halfExtents.x,
-        CHASSIS.halfExtents.y,
-        CHASSIS.halfExtents.z,
+        geo.halfExtents.x,
+        geo.halfExtents.y,
+        geo.halfExtents.z,
       )
     )
       .setMass(CHASSIS.mass)
@@ -378,11 +420,6 @@ export class RapierBackend implements VehicleBackend {
       .setFriction(0.2)
       .setRestitution(0.15)
       .setCollisionGroups(COLLISION_LOCAL);
-    this.world.createCollider(colliderDesc, this.chassis);
-
-    // Egyetlen sugarat hozunk letre es hasznaljuk ujra: 4 kerek * 60 Hz
-    // felesleges szemetet jelentene lepesenkent.
-    this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
   }
 
   setWheelDamage(index: number, damage: WheelDamage): void {
@@ -533,13 +570,18 @@ export class RapierBackend implements VehicleBackend {
         continue;
       }
 
-      const offset = rotateVec(quat, WHEEL_LAYOUT[i].position);
+      const offset = rotateVec(quat, this.geometria.wheels[i]);
       const origin = {
         x: p.x + offset.x,
         y: p.y + offset.y,
         z: p.z + offset.z,
       };
-      const radius = wheelRadiusFor(this.damage[i]);
+      // A SAJAT kerek sugara: a negy kocsi kereke 0,72 es 0,92 m
+      // kozott van, es ebbol jon a felfuggesztes tapadasi pontja.
+      const radius = wheelRadiusFor(
+        this.damage[i],
+        this.geometria.wheels[i].radius,
+      );
 
       this.ray.origin = origin;
       this.ray.dir = down;
@@ -674,7 +716,10 @@ export class RapierBackend implements VehicleBackend {
 
     for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
       if (this.damage[i].broken) continue;
-      const radius = Math.max(0.05, wheelRadiusFor(this.damage[i]));
+      const radius = Math.max(
+        0.05,
+        wheelRadiusFor(this.damage[i], this.geometria.wheels[i].radius),
+      );
       this.wheelRoll[i] += (forwardSpeed * dt) / radius;
     }
   }
@@ -705,15 +750,18 @@ export class RapierBackend implements VehicleBackend {
     const out: WheelReadout[] = [];
 
     for (let i = 0; i < WHEEL_LAYOUT.length; i++) {
+      // A kerek SZEREPE (kormanyzott / hajtott) allando, a HELYE
+      // viszont autonkent mas.
       const layout = WHEEL_LAYOUT[i];
+      const hely = this.geometria.wheels[i];
       const contact = this.contacts[i];
       const damage = this.damage[i];
-      const radius = wheelRadiusFor(damage);
+      const radius = wheelRadiusFor(damage, hely.radius);
       const suspLen = contact.suspensionLength;
 
       // A kerek kozeppontja: a csatlakozasi pontbol a felfuggesztes
       // iranyaba, a rugo AKTUALIS hossza szerint.
-      const offset = rotateVec(chassisQuat, layout.position);
+      const offset = rotateVec(chassisQuat, hely);
       const cx = p.x + offset.x + dirWorld.x * suspLen;
       const cy = p.y + offset.y + dirWorld.y * suspLen;
       const cz = p.z + offset.z + dirWorld.z * suspLen;
@@ -774,7 +822,31 @@ export class RapierBackend implements VehicleBackend {
    * lendületét a kovetkezo lepesben ugyis visszakapja a halozatrol,
    * tehat az o mozgasa tovabbra is a tulajdonosanal dol el (terv 15.4).
    */
-  addRemoteBody(id: string): void {
+  /**
+   * A SAJAT autonk cseréje.
+   *
+   * A valasztott auto csak a belepes utan derul ki (a szerver osztja
+   * ki), a fizikai test viszont mar korabban felepul. Ez a fuggveny
+   * epiti ujra a testet a helyes merettel -- a pozicio es a sebesseg
+   * megmarad, tehat a jatekos szamara nem tortenik ugras.
+   */
+  setCar(car: CarId): void {
+    const uj = CAR_GEOMETRY[car];
+    if (!uj || uj === this.geometria) return;
+    this.geometria = uj;
+    if (!this.chassis) return;
+
+    if (this.chassisCollider) {
+      this.world.removeCollider(this.chassisCollider, true);
+      this.chassisCollider = null;
+    }
+    this.chassisCollider = this.world.createCollider(
+      RapierBackend.sajatCollider(uj),
+      this.chassis,
+    );
+  }
+
+  addRemoteBody(id: string, car?: CarId): void {
     if (this.remoteBodies.has(id)) return;
 
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
@@ -787,12 +859,13 @@ export class RapierBackend implements VehicleBackend {
     const body = this.world.createRigidBody(bodyDesc);
 
     // Ugyanaz a burok, mint a sajat autonknak (lasd buildVehicle).
+    const geo = CAR_GEOMETRY[car ?? DEFAULT_CAR];
     const colliderDesc = (
-      RAPIER.ColliderDesc.convexHull(CAR_HULL_POINTS) ??
+      RAPIER.ColliderDesc.convexHull(geo.hull) ??
       RAPIER.ColliderDesc.cuboid(
-        CHASSIS.halfExtents.x,
-        CHASSIS.halfExtents.y,
-        CHASSIS.halfExtents.z,
+        geo.halfExtents.x,
+        geo.halfExtents.y,
+        geo.halfExtents.z,
       )
     )
       // Ugyanaz a tomeg, mint a sajat autonknak -- igy az utkozes
@@ -805,10 +878,21 @@ export class RapierBackend implements VehicleBackend {
 
     this.remoteBodies.set(id, {
       body,
+      car: car ?? DEFAULT_CAR,
       expected: null,
       holdUntil: 0,
       holdStartedAt: 0,
     });
+  }
+
+  /**
+   * Melyik autoval epult egy tavoli test -- a TESZTEKNEK.
+   *
+   * Kivulrol kulonben nem lehetne megnezni, hogy a valasztott auto
+   * merete tenyleg atjutott-e a halozaton egeszen a fizikaig.
+   */
+  remoteCarOf(id: string): CarId | null {
+    return this.remoteBodies.get(id)?.car ?? null;
   }
 
   applyExplosion(

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
-  WEAPON_MOUNT_HEIGHT,
+  weaponMountHeight,
   SPAWN_POINTS,
   ARENA_HALF,
   type ArenaBox,
@@ -10,11 +10,14 @@ import {
   SCENERY,
   PROP_MERETEK,
   ARENA,
-  DEFAULT_CAR_COLOR,
-  carColorHex,
   CAMERA,
-  CAR_HULL_POINTS,
-  CHASSIS,
+  CAR_GEOMETRY,
+  CAR_MODELS,
+  CAR_SKIN_TEXTURES,
+  SKIN_URL,
+  cameraScaleFor,
+  DEFAULT_CAR,
+  type CarId,
   DEFAULT_WEAPON,
   EXPLOSION_RADIUS,
   PICKUP_HEIGHT,
@@ -31,8 +34,17 @@ import {
   type WheelReadout,
 } from "@cca/shared";
 
-/** A jarmu-modell utvonala. Lasd EREDMENYEK.md: Sedan (generic-passenger-car-pack). */
-const VEHICLE_MODEL_URL = "/models/sedan.glb";
+/**
+ * A valaszthato jarmuvek: karosszeriak ES a SAJAT kerekeik.
+ *
+ * MINDEN modell a sajat kerekevel jar. Korabban egyetlen kozos kerek
+ * volt, de a negy kocsi kereke 0,7 es 0,9 m kozott
+ * van, es a mintazatuk is mas -- egy kozos kerek alol az egyiknel
+ * kilogott volna a kerekjarat, a masiknal beleert volna a sarvedobe.
+ *
+ * A fajlt a tools/autok-export.py allitja elo (npm run autok-export).
+ */
+const CAR_MODELS_URL = "/models/autok.glb";
 
 /**
  * A tetőn ülő fegyverek modelljei -- FEGYVERENKENT MAS.
@@ -77,22 +89,51 @@ function dekoracioBe(): boolean {
   }
 }
 
-const WHEEL_NODE_NAMES = ["Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR"] as const;
-
-/** Milyen magasan lebegjen a HP-sav az auto kozeppontja felett (m). */
-const HP_BAR_HEIGHT = CHASSIS.halfExtents.y + 1.4;
-
-/** A nevtabla a HP-sav FOLE kerul, hogy a ketto ne fedje egymast. */
-const NAME_TAG_HEIGHT = HP_BAR_HEIGHT + 0.7;
+/**
+ * A kerekek sorrendje -- MINDENHOL ez (fizika, halozat, latvany).
+ *
+ * A modellben "<Auto>_wheel_FL" nevu node-ok allnak; a sorrend a
+ * WHEEL_LAYOUT-eval egyezik, mert a fizika ebben a sorrendben adja
+ * vissza a kerekek allapotat.
+ */
+const WHEEL_KEYS = ["FL", "FR", "RL", "RR"] as const;
 
 /**
- * A fegyver meretei a KOZOS forrasbol jonnek (WEAPON_MOUNT_HEIGHT).
+ * Milyen magasan lebegjen a HP-sav az auto TETEJE felett (m).
+ *
+ * A teto folott merve, nem a kozeppont folott: a kocsik magassaga 1,17
+ * es 1,98 m kozott van, tehat egyetlen kozeppont-feletti ertek a magas
+ * autoknal beleernene a tetobe.
+ */
+const HP_BAR_CLEARANCE = 1.4;
+
+/** A nevtabla a HP-sav FOLE kerul, hogy a ketto ne fedje egymast. */
+const NAME_TAG_CLEARANCE = HP_BAR_CLEARANCE + 0.7;
+
+function hpBarHeight(carId: CarId): number {
+  return CAR_GEOMETRY[carId].halfExtents.y + HP_BAR_CLEARANCE;
+}
+
+function nameTagHeight(carId: CarId): number {
+  return CAR_GEOMETRY[carId].halfExtents.y + NAME_TAG_CLEARANCE;
+}
+
+/**
+ * A fegyver meretei a KOZOS forrasbol jonnek (weaponMountHeight).
  *
  * Korabban itt sajat szamok alltak, a loves kiindulopontja pedig
  * mashonnan szamolodott -- ezert jott a loves a lokharito magassagabol
  * a tetőn ülő cso helyett. Egy forras, ket felhasznalo.
  */
-const LAUNCHER_HEIGHT = WEAPON_MOUNT_HEIGHT;
+/**
+ * A fegyver talpanak magassaga -- AUTONKENT.
+ *
+ * A kocsik 1,17 es 1,98 m kozott vannak: egyetlen, rogzitett
+ * magassaggal a torony a SUV tetejebe sullyedne, a sportkocsi folott
+ * pedig a levegoben allna. Ugyanezt a szamot hasznalja a LOVES
+ * kiindulopontja is (weaponPivot), tehat a ketto nem tud elcsuszni.
+ */
+const LAUNCHER_HEIGHT = (car: CarId): number => weaponMountHeight(car);
 
 /**
  * Egy tavoli (halozati) jatekos autoja.
@@ -118,12 +159,20 @@ interface RemoteCar {
   /** A fizikai chassis-transzformot ez kapja. */
   wrapper: THREE.Object3D;
   /**
-   * A karosszeria jelenlegi szine.
+   * Melyik karosszeria van eppen az auton.
    *
-   * Azert taroljuk, hogy a kepkockankenti igazitas (setRemoteColor)
-   * felesleges anyag-klonozas nelkul tudjon nemleges valaszt adni.
+   * Azert taroljuk, hogy a kepkockankenti igazitas (setRemoteCar)
+   * felesleges modell-klonozas nelkul tudjon nemleges valaszt adni.
    */
-  colorHex: number;
+  carId: CarId;
+  /**
+   * Melyik FESTES van rajta.
+   *
+   * A geometria a modellhez tartozik, a festes csak texturakat cserel
+   * -- ezert a ketto kulon valtozhat: skin-valtaskor nem kell
+   * ujraepiteni a kocsit.
+   */
+  skin: string;
   /** Kerek-node-ok FL, FR, RL, RR sorrendben (= WHEEL_LAYOUT). */
   wheels: THREE.Object3D[];
   /** Kerekenkent a szinezendo mesh -- sajat anyag-peldannyal. */
@@ -171,12 +220,6 @@ export class SceneView {
   private wheelTintMeshes: THREE.Mesh[] = [];
   private wheelGroups: THREE.Object3D[] = [];
 
-  /**
-   * Osszeszerelt auto-modell, amibol a tavoli jatekosok autoi klonozodnak.
-   * A klonok kozos geometriat es (a karosszeria-szin kivetelevel) kozos
-   * anyagokat hasznalnak, tehat olcsok.
-   */
-  private remoteTemplate!: THREE.Object3D;
   /** Fegyverenkenti torony-sablon -- minden auto ebbol kap egy klont. */
   private weaponTemplates = {} as Record<WeaponId, THREE.Object3D>;
   /** Epulet-sablonok nev szerint -- minden elhelyezes ezek klonja. */
@@ -285,23 +328,38 @@ export class SceneView {
    */
   private async loadVehicleModel(): Promise<void> {
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(VEHICLE_MODEL_URL);
-    gltf.scene.updateMatrixWorld(true);
-    this.normalizeMaterials(gltf.scene);
 
-    const body = gltf.scene.getObjectByName("Body");
-    if (!body) {
-      throw new Error(`"Body" node nem talalhato a modellben: ${VEHICLE_MODEL_URL}`);
+    // A JARMUVEK: karosszeria + negy sajat kerek modellenkent.
+    //
+    // Egyetlen fajlbol jon mind: a geometriat a skinek osztjak (egy
+    // forma negy festese ezert alig kerul tobbe, mint egy), es a
+    // kerekek is itt vannak, autonkent kulon.
+    const autok = await loader.loadAsync(CAR_MODELS_URL);
+    autok.scene.updateMatrixWorld(true);
+    this.normalizeMaterials(autok.scene);
+
+    for (const modell of CAR_MODELS) {
+      const test = autok.scene.getObjectByName(modell.id);
+      if (!test) {
+        throw new Error(
+          `"${modell.id}" karosszeria nem talalhato: ${CAR_MODELS_URL}`,
+        );
+      }
+      this.enableShadows(test);
+      this.carTemplates.set(modell.id, test);
+
+      const kerekek: THREE.Object3D[] = [];
+      for (const kulcs of WHEEL_KEYS) {
+        const nev = `${modell.id}_wheel_${kulcs}`;
+        const kerek = autok.scene.getObjectByName(nev);
+        if (!kerek) {
+          throw new Error(`"${nev}" kerek nem talalhato: ${CAR_MODELS_URL}`);
+        }
+        this.enableShadows(kerek);
+        kerekek.push(kerek);
+      }
+      this.carWheelTemplates.set(modell.id, kerekek);
     }
-    this.splitTaillights(body);
-    this.enableShadows(body);
-
-    // A sablon a taillight-bontas UTAN keszul (hogy a tavoli autoknak is
-    // piros legyen a hatso lampajuk), de MIELOTT a lokalis auto node-jait
-    // kiemeljuk a jelenetbol -- ekkor meg egyben van a teljes auto.
-    // A clone(true) megosztja a geometriakat es anyagokat, csak az
-    // objektum-grafot masolja, tehat olcso.
-    this.remoteTemplate = gltf.scene.clone(true);
 
     // MINDKET fegyver modelljet ugyanitt toltjuk be: mire az elso auto
     // felepul, keszen kell allniuk, kulonben fegyver nelkuli autok
@@ -334,43 +392,72 @@ export class SceneView {
       this.weaponTemplates[weapon] = base;
     });
 
-    // Wrapper: a fizika ezt mozgatja/forgatja. A Body sajat origoja a
-    // modellben talajszinten van, a fizika viszont a doboz KOZEPPONTJAT
-    // szamolja -- ezert a Body -halfExtents.y lokalis eltolassal kerul
-    // a wrapperbe.
+    // Wrapper: a fizika ezt mozgatja/forgatja. A karosszeria sajat
+    // origoja a modellben talajszinten van, a fizika viszont a doboz
+    // KOZEPPONTJAT szamolja -- ezert a test -halfExtents.y lokalis
+    // eltolassal kerul a wrapperbe.
     const chassisWrapper = new THREE.Group();
-    body.position.y -= CHASSIS.halfExtents.y;
-    chassisWrapper.add(body);
+    this.scene.add(chassisWrapper);
+    this.chassisMesh = chassisWrapper;
 
     // Fegyver a tetőre. A jarmu GYEREKE, tehat egyutt mozog es dol
     // vele -- csak a celzas-irany szamolodik le rola (lasd aimLauncher).
     this.launcher = this.createLauncher(this.ownWeapon);
-    this.launcher.root.position.y = LAUNCHER_HEIGHT;
     chassisWrapper.add(this.launcher.root);
 
-    this.scene.add(chassisWrapper);
-    this.chassisMesh = chassisWrapper;
+    // A SAJAT autonk felepitese az alapertelmezett kocsival. A
+    // vegleges autot a szerver osztja ki belepeskor -- akkor ez a
+    // fuggveny epiti ujra (lasd setOwnCar).
+    this.buildOwnCar(DEFAULT_CAR);
+  }
 
-    for (const name of WHEEL_NODE_NAMES) {
-      const wheelNode = gltf.scene.getObjectByName(name);
-      if (!wheelNode) {
-        throw new Error(`"${name}" node nem talalhato a modellben: ${VEHICLE_MODEL_URL}`);
-      }
-      this.enableShadows(wheelNode);
-      // A serules-tinthez kell egy konkret Mesh referencia -- a kerek
-      // node maga vagy mesh, vagy egy azt tartalmazo csoport.
-      const tintMesh = this.findFirstMesh(wheelNode);
-      if (!tintMesh) {
-        throw new Error(`"${name}" node nem tartalmaz mesh-t: ${VEHICLE_MODEL_URL}`);
-      }
-      // Sajat, a tobbi kerekkel meg nem osztott anyag-peldany kell,
-      // kulonben egy kerek serules-szine az osszes tobbit is befestene.
-      tintMesh.material = (tintMesh.material as THREE.MeshStandardMaterial).clone();
+  /**
+   * A SAJAT autonk felepitese (vagy ujraepitese) egy modellbol.
+   *
+   * MINDEN modell a sajat kerekevel jar: a kerekek nem a karosszeria
+   * gyerekei, hanem kulon allnak a jelenetben -- a fizika egyenkent
+   * mozgatja oket (lasd syncVehicle), es a felfuggesztes rugozasa is
+   * rajtuk latszik.
+   */
+  private buildOwnCar(carId: CarId): void {
+    const test = this.carTemplates.get(carId);
+    const kerekek = this.carWheelTemplates.get(carId);
+    if (!test || !kerekek) return;
 
-      this.scene.add(wheelNode);
-      this.wheelGroups.push(wheelNode);
-      this.wheelTintMeshes.push(tintMesh);
+    // A REGIT kivesszuk: a karosszeria a wrapperbol, a kerekek a
+    // jelenetbol. A geometriakat NEM szabaditjuk fel -- a sablonnal
+    // osztoznak rajtuk (clone(true) csak a graf-ot masolja).
+    const regiTest = this.chassisMesh.getObjectByName("Body");
+    if (regiTest) regiTest.removeFromParent();
+    for (const kerek of this.wheelGroups) kerek.removeFromParent();
+    this.wheelGroups = [];
+    this.wheelTintMeshes = [];
+
+    const ujTest = test.clone(true);
+    ujTest.name = "Body";
+    ujTest.position.set(0, SceneView.talajEltolas(carId), 0);
+    ujTest.quaternion.identity();
+    this.chassisMesh.add(ujTest);
+
+    for (const sablon of kerekek) {
+      const kerek = sablon.clone(true);
+      // A KEREK a jelenetben all, nem a wrapperben: a fizika sajat
+      // vilag-poziciot ad neki minden kepkockaban.
+      this.scene.add(kerek);
+      this.wheelGroups.push(kerek);
+
+      // A serules-tinthez kell egy konkret Mesh referencia, SAJAT
+      // anyag-peldannyal: kulonben egy kerek serules-szine az osszes
+      // tobbit -- sot a tobbi auto kerekeit is -- befestene.
+      const mesh = this.findFirstMesh(kerek);
+      if (!mesh) {
+        throw new Error(`A(z) ${carId} kereke nem tartalmaz mesh-t`);
+      }
+      mesh.material = (mesh.material as THREE.MeshStandardMaterial).clone();
+      this.wheelTintMeshes.push(mesh);
     }
+
+    this.launcher.root.position.y = LAUNCHER_HEIGHT(carId);
   }
 
   // --- Rakétaveto (a tetőn) ---
@@ -845,20 +932,13 @@ export class SceneView {
   private static readonly OWN_HEAL = "heal|own";
 
   setOwnHealing(active: boolean): void {
-    this.setHealingTint(
-      SceneView.OWN_HEAL,
-      this.chassisMesh,
-      active,
-      // Ha meg nem kaptuk meg a szint (a snapshot elott), a modell
-      // eredeti szinehez terunk vissza -- nem valtozik semmi.
-      this.ownColorHex ?? carColorHex(DEFAULT_CAR_COLOR),
-    );
+    this.setHealingTint(SceneView.OWN_HEAL, this.chassisMesh, active);
   }
 
   setRemoteHealing(id: string, active: boolean): void {
     const car = this.remoteCars.get(id);
     if (!car) return;
-    this.setHealingTint(`heal|${id}`, car.wrapper, active, car.colorHex);
+    this.setHealingTint(`heal|${id}`, car.wrapper, active);
   }
 
   /**
@@ -880,17 +960,27 @@ export class SceneView {
     return ki;
   }
 
+  /**
+   * ALAPSZIN a gyogyulas-szinezeshez: FEHER.
+   *
+   * A karosszeriat mostantol a sajat texturaja adja, es a
+   * MeshStandardMaterial szine a texturaval SZORZODIK. Feher szinnel
+   * tehat a textura valtozatlanul latszik, zold fele huzva pedig az
+   * egesz auto zoldes lesz -- a mintazata megtartasaval.
+   */
+  private static readonly ALAP_SZIN = 0xffffff;
+
   private setHealingTint(
     key: string,
     root: THREE.Object3D,
     active: boolean,
-    alapSzin: number,
   ): void {
+    const alapSzin = SceneView.ALAP_SZIN;
     const meglevo = this.healingCars.get(key);
     if (!active) {
       if (!meglevo) return;
-      // VISSZAALLITAS: a szint kozvetlenul irtuk, tehat a setOwnColor
-      // (ami valtozatlan szinnel azonnal visszater) nem allitana helyre.
+      // VISSZAALLITAS: a szint kozvetlenul irtuk, tehat magatol nem
+      // allna helyre -- a karosszeria csak auto-csereskor epul ujra.
       for (const m of meglevo.anyagok) m.color.setHex(meglevo.alapSzin);
       this.healingCars.delete(key);
       return;
@@ -959,7 +1049,7 @@ export class SceneView {
     const mesh = new THREE.Mesh(this.shieldGeometry, material);
     // A geometria egyseg-sugaru; a meret a skalabol jon.
     mesh.scale.setScalar(3);
-    mesh.position.y = CHASSIS.halfExtents.y;
+    mesh.position.y = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.y;
     parent.add(mesh);
     this.shields.set(key, { mesh, material });
   }
@@ -1237,19 +1327,128 @@ export class SceneView {
    * Csak a "Body" nevu anyagokat erinti -- a lampak, uveg es gumik
    * maradnak eredetiben.
    */
-  private tintBody(root: THREE.Object3D, hex: number): void {
+  /** A betoltott karosszeriak, auto-azonosito szerint. */
+  private readonly carTemplates = new Map<CarId, THREE.Object3D>();
+
+  /**
+   * A betoltott KEREKEK, autonkent negy (FL, FR, RL, RR sorrendben).
+   *
+   * Minden modell a sajatjaval jar: a kocsik kereke 0,7 es 0,9 m
+   * kozott van, es a mintazatuk is mas. Egy kozos kerek az egyik
+   * kerekjaratabol kilogna, a masikeba beleerne.
+   */
+  private readonly carWheelTemplates = new Map<CarId, THREE.Object3D[]>();
+
+  /** A mar betoltott skin-texturak (fajlnev szerint), kozos keszlet. */
+  private readonly skinTextures = new Map<string, THREE.Texture>();
+  private readonly textureLoader = new THREE.TextureLoader();
+
+  /** A SAJAT autonk festese -- a szerver dontese szerint. */
+  private ownSkin: string | null = null;
+
+  /**
+   * A betoltott autok neve -- a MERES hasznalja (auto-meret.ts).
+   *
+   * A jatek maga nem hivja: a mero szkriptnek kell tudnia megvarni,
+   * amig a modellek megerkeznek.
+   */
+  carTemplateNames(): string[] {
+    return [...this.carTemplates.keys()];
+  }
+
+  /**
+   * A karosszeria csereje egy autoban.
+   *
+   * A regi Body node HELYERE kerul az uj, ugyanazzal a helyi
+   * transzformmal: igy a kerekek, a fegyver es a HP-sav valtozatlanul a
+   * helyukon maradnak. A kerekek SZANDEKOSAN a sedan modelljebol
+   * valok -- azokhoz kotodik a felfuggesztes es a serules.
+   */
+  /**
+   * A SKIN texturai egy mar felepitett auton.
+   *
+   * A modell anyagai a SZEREPUKROL kaptak a nevuket ("Muscle_body",
+   * "Rescue_light"), a skin pedig szerepenkent mond egy texturat. Igy
+   * egy festes-csere nem uj geometria, csak par texturaval mas anyag.
+   *
+   * Az anyagbol SAJAT PELDANY keszul: a klonok kozos anyagon
+   * osztoznak, tehat a helyben valo atirasa az osszes tobbi ugyanolyan
+   * autora atterjedne.
+   */
+  private applySkin(root: THREE.Object3D, carId: CarId, skin: string): void {
+    const terkep = CAR_SKIN_TEXTURES[carId]?.[skin];
+    if (!terkep) return;
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
-      const material = mesh.material;
-      if (Array.isArray(material)) return; // lampak: hagyjuk eredetiben
-      if (!(material as THREE.MeshStandardMaterial).name.startsWith("Body")) return;
-      const tinted = (material as THREE.MeshStandardMaterial).clone();
-      tinted.color.setHex(hex);
-      // A karosszeria-textura (SedanYellow) elnyomna a szinezest.
-      tinted.map = null;
-      mesh.material = tinted;
+      const anyagok = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      const ujak = anyagok.map((anyag) => {
+        const std = anyag as THREE.MeshStandardMaterial;
+        const szerep = std.name.startsWith(`${carId}_`)
+          ? std.name.slice(carId.length + 1)
+          : null;
+        const fajl = szerep
+          ? terkep[szerep as keyof typeof terkep]
+          : undefined;
+        if (!fajl) return anyag;
+        const klon = std.clone();
+        klon.map = this.skinTexture(fajl, std.map);
+        klon.needsUpdate = true;
+        return klon;
+      });
+      mesh.material = Array.isArray(mesh.material) ? ujak : ujak[0];
     });
+  }
+
+  /**
+   * Egy skin-textura betoltese -- KESZLETBOL.
+   *
+   * Ugyanazt a festest tobb jatekos is viselheti, es a betoltes
+   * halozati keres: egyszer toltjuk be, utana mindenki ugyanazt a
+   * peldanyt kapja.
+   *
+   * A betoltes ASZINKRON: amig meg nem erkezett, az anyag a modell
+   * eredeti texturajaval latszik, nem szurken.
+   */
+  private skinTexture(
+    fajl: string,
+    alap: THREE.Texture | null,
+  ): THREE.Texture | null {
+    const kesz = this.skinTextures.get(fajl);
+    if (kesz) return kesz;
+    const tex = this.textureLoader.load(SKIN_URL + fajl);
+    // A modell texturaja adja a helyes beallitasokat (szinter, uv-
+    // ismetles, forditottsag) -- ezeket atvesszuk, kulonben a festes
+    // fejjel lefele vagy rossz gammaval jelenne meg.
+    if (alap) {
+      tex.flipY = alap.flipY;
+      tex.wrapS = alap.wrapS;
+      tex.wrapT = alap.wrapT;
+      tex.colorSpace = alap.colorSpace;
+    } else {
+      tex.flipY = false;
+      tex.colorSpace = THREE.SRGBColorSpace;
+    }
+    this.skinTextures.set(fajl, tex);
+    return tex;
+  }
+
+  /**
+   * A karosszeria FUGGOLEGES helye a fizikai testhez kepest.
+   *
+   * A halozaton (es a fizikaban) az utkozo doboz KOZEPPONTJA utazik, a
+   * modell origoja viszont a talajszinten van -- a kettot a doboz fel
+   * magassaga koti ossze. Ez autonkent mas: a sportkocsi 1,17 m, a SUV
+   * 1,95. Egyetlen, rogzitett eltolassal (a Sedane) az alacsony auto a
+   * talaj folott lebegne, a magas pedig belesullyedne.
+   */
+  private static talajEltolas(carId: CarId): number {
+    // A MERT eltolas, nem a fel magassag: a modell nullpontja nem
+    // feltetlenul a kerekek alja (merve: az izomautonal 4,6 cm-rel
+    // lejjebb van), es ha ezt elneznenk, a kocsi lathatoan lebegne.
+    return -CAR_GEOMETRY[carId].modelOffsetY;
   }
 
   /**
@@ -1260,11 +1459,39 @@ export class SceneView {
    * uzenet vagy snapshot), es a "joined" uzenet a mar bent levokrol meg
    * nem hozza -- igy barmelyik ut is marad el, a szin helyreall.
    */
-  setRemoteColor(id: string, hex: number): void {
+  setRemoteCar(id: string, carId: CarId, skin: string): void {
     const car = this.remoteCars.get(id);
-    if (!car || car.colorHex === hex) return;
-    car.colorHex = hex;
-    this.tintBody(car.wrapper, hex);
+    if (!car) return;
+    if (car.carId === carId && car.skin === skin) return;
+
+    if (car.carId !== carId) {
+      // MAS MODELL: a kocsit ujra kell epiteni, mert a kerekei is
+      // masok. A nev, a HP-sav es a fegyver megmarad.
+      const nev = car.shownName;
+      const hp = car.shownHp;
+      const weapon = car.weapon;
+      this.removeRemoteCar(id);
+      this.addRemoteCar(id, carId, skin);
+      const uj = this.remoteCars.get(id);
+      if (uj) {
+        uj.shownName = nev;
+        uj.shownHp = hp;
+        this.setRemoteWeapon(id, weapon);
+      }
+      return;
+    }
+
+    car.skin = skin;
+    const test = car.wrapper.getObjectByName("Body");
+    if (test) this.applySkin(test, carId, skin);
+    for (const kerek of car.wheels) this.applySkin(kerek, carId, skin);
+    car.wheelMeshes = car.wheels
+      .map((k) => this.findFirstMesh(k))
+      .filter((m): m is THREE.Mesh => m !== null);
+    for (const mesh of car.wheelMeshes) {
+      mesh.material = (mesh.material as THREE.MeshStandardMaterial).clone();
+    }
+    this.healingCars.delete(`heal|${id}`);
   }
 
   /**
@@ -1283,7 +1510,7 @@ export class SceneView {
     // eldobva a tobbiek modellje tunne el. Csak a jelenetbol vesszuk ki.
     car.wrapper.remove(car.launcher.root);
     car.launcher = this.createLauncher(weapon);
-    car.launcher.root.position.y = LAUNCHER_HEIGHT;
+    car.launcher.root.position.y = LAUNCHER_HEIGHT(car.carId);
     car.wrapper.add(car.launcher.root);
     car.weapon = weapon;
   }
@@ -1295,34 +1522,58 @@ export class SceneView {
     if (!this.chassisMesh) return;
     this.chassisMesh.remove(this.launcher.root);
     this.launcher = this.createLauncher(weapon);
-    this.launcher.root.position.y = LAUNCHER_HEIGHT;
+    this.launcher.root.position.y = LAUNCHER_HEIGHT(this.ownCarId ?? DEFAULT_CAR);
     this.chassisMesh.add(this.launcher.root);
   }
 
   /**
-   * Ahogy EZ a kliens latja egy tavoli auto szinet -- vagy null.
+   * Ahogy EZ a kliens latja egy tavoli auto MODELLJET -- vagy null.
    *
    * A tesztek ebbol ellenorzik, hogy ket kulon kliens ugyanazt latja-e;
    * a jatek maga nem hasznalja.
    */
-  remoteCarColor(id: string): number | null {
-    return this.remoteCars.get(id)?.colorHex ?? null;
+  remoteCarModel(id: string): CarId | null {
+    return this.remoteCars.get(id)?.carId ?? null;
   }
 
-  private ownColorHex: number | null = null;
+  private ownCarId: CarId | null = null;
 
   /**
-   * A SAJAT autonk szine.
+   * A SAJAT autonk karosszeriaja a szerver szerint.
    *
-   * A szerver dönti el (lasd assignCarColor), tehat csak a belepes utan
-   * derul ki -- az auto viszont mar a betolteskor felepul. Ezert kesobb
-   * szinezzuk at, es csak akkor, ha tenylegesen valtozott: minden hivas
-   * uj anyag-peldanyt keszitene.
+   * A szervertol jon (lasd assignCar), tehat csak a belepes utan derul
+   * ki -- az auto viszont mar a betolteskor felepul. Ezert csereljuk
+   * kesobb, es csak akkor, ha tenylegesen valtozott: minden hivas uj
+   * modell-klont keszitene.
+   *
+   * Kepkockankent hivhato: ha nem valtozott, azonnal visszater.
    */
-  setOwnColor(hex: number): void {
-    if (hex === this.ownColorHex) return;
-    this.ownColorHex = hex;
-    this.tintBody(this.chassisMesh, hex);
+  setOwnCar(carId: CarId, skin: string): void {
+    const kellUjEpites = carId !== this.ownCarId;
+    if (!kellUjEpites && skin === this.ownSkin) return;
+
+    if (kellUjEpites) {
+      // TELJES ujraepites: nem csak a karosszeria valtozik, hanem a
+      // KEREKEK is -- minden modell a sajatjaval jar.
+      this.buildOwnCar(carId);
+      this.ownCarId = carId;
+      // A hitbox-dratvaz a REGI auto burkat mutatna.
+      this.dobHitboxot("sajat");
+    }
+    this.ownSkin = skin;
+    const test = this.chassisMesh.getObjectByName("Body");
+    if (test) this.applySkin(test, carId, skin);
+    for (const kerek of this.wheelGroups) this.applySkin(kerek, carId, skin);
+    // A serules-szinezeshez ujra kell gyujteni a kerek-mesheket: az
+    // anyagaik most masok.
+    this.wheelTintMeshes = this.wheelGroups.map(
+      (k) => this.findFirstMesh(k) as THREE.Mesh,
+    );
+    for (const mesh of this.wheelTintMeshes) {
+      mesh.material = (mesh.material as THREE.MeshStandardMaterial).clone();
+    }
+    // A gyogyulas-szinezes a REGI anyagokra mutatna: ujra kell gyujteni.
+    this.healingCars.delete(SceneView.OWN_HEAL);
   }
 
   /** Latszik-e a sajat autonk -- a tesztek ezt olvassak. */
@@ -1340,37 +1591,53 @@ export class SceneView {
    * teljes klon egy wrapperbe kerul, -halfExtents.y eltolassal
    * (ugyanaz a korrekcio, mint a sajat autonknal).
    */
-  addRemoteCar(id: string, colorHex: number): void {
+  addRemoteCar(id: string, carId: CarId, skin: string): void {
     if (this.remoteCars.has(id)) return;
 
-    const car = this.remoteTemplate.clone(true);
-    car.position.y -= CHASSIS.halfExtents.y;
-
-    this.tintBody(car, colorHex);
+    // A tavoli auto EGYBEN mozog: a karosszeria es a kerekek is a
+    // wrapper gyerekei. A sajat autonknal ez maskepp van (ott a fizika
+    // mozgatja kulon a kerekeket), itt viszont a halozati latvany-
+    // allapotbol allitjuk oket -- lasd updateRemoteCar.
+    const car = new THREE.Group();
+    car.name = "Body";
+    car.position.y = SceneView.talajEltolas(carId);
+    const test = this.carTemplates.get(carId);
+    if (test) car.add(test.clone(true));
 
     const wrapper = new THREE.Group();
     wrapper.add(car);
+    // A KEREKEK a MERT helyukre kerulnek (a doboz kozeppontjahoz
+    // kepest): ugyanoda, ahova a fizika teszi oket a sajat autonknal.
+    // Igy a latvany es az utkozes ugyanazt az egy forrast koveti.
+    const geo = CAR_GEOMETRY[carId];
+    const sablonok = this.carWheelTemplates.get(carId) ?? [];
+    for (let i = 0; i < sablonok.length; i++) {
+      const kerek = sablonok[i].clone(true);
+      const hely = geo.wheels[i];
+      if (hely) kerek.position.set(hely.x, hely.y, hely.z);
+      wrapper.add(kerek);
+    }
     this.enableShadows(wrapper);
 
     // Fegyver a tavoli autora is: igy latszik, ha rank celoznak. A
     // fegyver fajtajat a snapshotbol tudjuk meg (setRemoteWeapon), addig
     // az alapertelmezettel indul.
     const launcher = this.createLauncher(DEFAULT_WEAPON);
-    launcher.root.position.y = LAUNCHER_HEIGHT;
+    launcher.root.position.y = LAUNCHER_HEIGHT(carId);
     wrapper.add(launcher.root);
 
     this.scene.add(wrapper);
 
-    // A kerek-node-ok a klonon belul ugyanazokat a neveket viselik.
-    // A nyugalmi Y-t elmentjuk: a rugo-elmozdulast EHHEZ KEPEST
-    // alkalmazzuk, igy nyugalomban pontosan a modell eredeti (vizualisan
-    // mar ellenorzott) poziciojat kapjuk vissza, es nem kell a fizika
-    // abszolut felfuggesztes-geometriajat rekonstrualni.
+    // A KEREKEK a wrapper gyerekei, a modellbol vett helyukon. A
+    // nyugalmi Y-t elmentjuk: a rugo-elmozdulast EHHEZ KEPEST
+    // alkalmazzuk, igy nyugalomban pontosan a modell eredeti (mert)
+    // poziciojat kapjuk vissza, es nem kell a fizika abszolut
+    // felfuggesztes-geometriajat rekonstrualni.
     const wheels: THREE.Object3D[] = [];
     const wheelRestY: number[] = [];
     const wheelMeshes: THREE.Mesh[] = [];
-    for (const name of WHEEL_NODE_NAMES) {
-      const node = car.getObjectByName(name);
+    for (const kulcs of WHEEL_KEYS) {
+      const node = wrapper.getObjectByName(`${carId}_wheel_${kulcs}`);
       if (!node) continue;
       wheels.push(node);
       wheelRestY.push(node.position.y);
@@ -1394,9 +1661,13 @@ export class SceneView {
     const nameTag = this.createNameTag();
     this.scene.add(nameTag);
 
+    // A FESTES a felepites utan kerul ra: a modell alap-skinnel jon.
+    this.applySkin(wrapper, carId, skin);
+
     this.remoteCars.set(id, {
       wrapper,
-      colorHex,
+      carId,
+      skin,
       wheels,
       wheelMeshes,
       wheelRestY,
@@ -1455,7 +1726,12 @@ export class SceneView {
     const car = this.remoteCars.get(id);
     if (!car) return;
 
-    this.syncCarHitbox(id, state.position.toArray(), state.quaternion.toArray());
+    this.syncCarHitbox(
+      id,
+      car.carId,
+      state.position.toArray(),
+      state.quaternion.toArray(),
+    );
 
     // Gordules: a ket frame kozotti elmozdulas vetulete az orr iranyara,
     // osztva a kerek sugaraval (r sugaru kerek d utat megteve d/r
@@ -1469,7 +1745,9 @@ export class SceneView {
       const travelled = forward.dot(delta);
       // Ujraszuletes/teleportalas eseten az ugras nem valodi gordules.
       if (Math.abs(travelled) < 5) {
-        car.rollAngle += travelled / WHEEL.radius;
+        // A SAJAT kerek sugara szerint: nagyobb kerek lassabban fordul
+        // ugyanakkora uton.
+        car.rollAngle += travelled / CAR_GEOMETRY[car.carId].wheels[0].radius;
       }
       car.prevPos.copy(state.position);
     } else {
@@ -1484,12 +1762,12 @@ export class SceneView {
     // hogy a kocsi eppen hogyan all (lasd a letrehozasnal).
     car.hpBar.position.set(
       state.position.x,
-      state.position.y + HP_BAR_HEIGHT,
+      state.position.y + hpBarHeight(car.carId),
       state.position.z,
     );
     car.nameTag.position.set(
       state.position.x,
-      state.position.y + NAME_TAG_HEIGHT,
+      state.position.y + nameTagHeight(car.carId),
       state.position.z,
     );
 
@@ -1515,7 +1793,8 @@ export class SceneView {
         broken: (state.brokenMask & (1 << i)) !== 0,
         gripMultiplier: state.grip[i],
       };
-      const scale = wheelRadiusFor(damage) / WHEEL.radius;
+      const alap = CAR_GEOMETRY[car.carId].wheels[i]?.radius ?? WHEEL.radius;
+      const scale = wheelRadiusFor(damage, alap) / alap;
       mesh.scale.set(1, scale, scale);
       (mesh.material as THREE.MeshStandardMaterial).color.setHex(
         wheelTintFor(damage),
@@ -1538,63 +1817,7 @@ export class SceneView {
     return null;
   }
 
-  /**
-   * A forras modellben a fej- es hatso lampak (index, hatralampa,
-   * hatso index) UGYANAZT az "Optics" anyagot hasznaljak (feher,
-   * textura nelkul), tehat nem lehet oket kulon szinezni pusztan a
-   * meglevo anyag modositasaval -- az az elso lampakat is befeste.
-   *
-   * Ehelyett a haromszogeket a lokalis Z-koordinatajuk elojele alapjan
-   * ket csoportra bontjuk (negativ Z = orr/elso lampak, pozitiv Z =
-   * hatso lampak -- lasd config.ts orr-konvencio), es a hatso
-   * csoportnak egy piros klonjat adjuk az eredeti "Optics" anyagnak.
-   */
-  private splitTaillights(body: THREE.Object3D): void {
-    const opticsMesh = body.children.find(
-      (child) =>
-        (child as THREE.Mesh).isMesh &&
-        ((child as THREE.Mesh).material as THREE.Material).name.startsWith(
-          "Optics",
-        ),
-    ) as THREE.Mesh | undefined;
-    if (!opticsMesh) return;
-
-    const geometry = opticsMesh.geometry;
-    const index = geometry.getIndex();
-    const position = geometry.attributes.position;
-    if (!index) return;
-
-    const frontIndices: number[] = [];
-    const rearIndices: number[] = [];
-    for (let i = 0; i < index.count; i += 3) {
-      const a = index.getX(i);
-      const b = index.getX(i + 1);
-      const c = index.getX(i + 2);
-      const avgZ = (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3;
-      (avgZ > 0 ? rearIndices : frontIndices).push(a, b, c);
-    }
-    if (rearIndices.length === 0) return;
-
-    const rearMaterial = (
-      opticsMesh.material as THREE.MeshStandardMaterial
-    ).clone();
-    rearMaterial.name = "Optics.rear";
-    rearMaterial.color.setHex(0xcc1414);
-    rearMaterial.emissive = new THREE.Color(0x330000);
-
-    type TypedArrayCtor = new (length: number) => Uint16Array | Uint32Array;
-    const IndexArrayCtor = index.array.constructor as TypedArrayCtor;
-    const newIndex = new IndexArrayCtor(frontIndices.length + rearIndices.length);
-    newIndex.set(frontIndices, 0);
-    newIndex.set(rearIndices, frontIndices.length);
-    geometry.setIndex(new THREE.BufferAttribute(newIndex, 1));
-
-    geometry.clearGroups();
-    geometry.addGroup(0, frontIndices.length, 0);
-    geometry.addGroup(frontIndices.length, rearIndices.length, 1);
-    opticsMesh.material = [opticsMesh.material as THREE.Material, rearMaterial];
-  }
-
+  /** Arnyekot vet es fogad minden mesh a fan. */
   private enableShadows(root: THREE.Object3D): void {
     root.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
@@ -2095,7 +2318,10 @@ export class SceneView {
       const mesh = this.wheelTintMeshes[i];
       // A sugar valtozhat (defekt / letort gumi). A szabalyok kozosek a
       // tavoli autokkal -- lasd wheelVisuals.ts.
-      const scale = w.radius / WHEEL.radius;
+      const alap =
+        CAR_GEOMETRY[this.ownCarId ?? DEFAULT_CAR].wheels[i]?.radius ??
+        WHEEL.radius;
+      const scale = w.radius / alap;
       mesh.scale.set(1, scale, scale);
       (mesh.material as THREE.MeshStandardMaterial).color.setHex(
         wheelTintFor(w.damage),
@@ -2104,6 +2330,7 @@ export class SceneView {
 
     this.syncCarHitbox(
       "sajat",
+      this.ownCarId ?? DEFAULT_CAR,
       interpolatedChassis.position,
       interpolatedChassis.quaternion,
     );
@@ -2209,12 +2436,27 @@ export class SceneView {
   }
 
   /**
+   * A hitbox-dratvaz eldobasa (auto-csere utan).
+   *
+   * A dratvaz a KONKRET auto konvex burka; ha a jatekos mas kocsit kap,
+   * a regi alak maradna kint. Ez pont az a csendes elteres, ami ellen a
+   * hitbox-megjelenites keszult: azt kell latni, amivel a jatek szamol.
+   */
+  private dobHitboxot(id: string): void {
+    const regi = this.carHitboxes.get(id);
+    if (!regi) return;
+    regi.removeFromParent();
+    this.carHitboxes.delete(id);
+  }
+
+  /**
    * Egy auto hitboxanak igazitasa.
    *
    * Az autoke MOZOG, tehat kepkockankent kell allitani -- az arenae nem.
    */
   private syncCarHitbox(
     id: string,
+    carId: CarId,
     position: readonly number[],
     quaternion: readonly number[],
   ): void {
@@ -2228,13 +2470,14 @@ export class SceneView {
       // modell haromszogeivel szamolja -- vagyis pontosan azzal, amit a
       // jatekos lat, tehat azt nincs mit kulon kirajzolni.
       csoport = new THREE.Group();
+      const burokPontok = CAR_GEOMETRY[carId].hull;
       const pontok: THREE.Vector3[] = [];
-      for (let i = 0; i < CAR_HULL_POINTS.length; i += 3) {
+      for (let i = 0; i < burokPontok.length; i += 3) {
         pontok.push(
           new THREE.Vector3(
-            CAR_HULL_POINTS[i],
-            CAR_HULL_POINTS[i + 1],
-            CAR_HULL_POINTS[i + 2],
+            burokPontok[i],
+            burokPontok[i + 1],
+            burokPontok[i + 2],
           ),
         );
       }
@@ -2286,10 +2529,16 @@ export class SceneView {
       yaw,
     );
 
+    // A kamera TAVOLSAGA az autohoz igazodik: egy 5,8 m-es pickupnal a
+    // sedanhoz szabott eltolas majdnem a csomagteroben ulne, es a
+    // jatekos nem latna, mi van elotte. A szorzo kozos mindharom
+    // tengelyre, tehat a ranezes SZOGE valtozatlan (lasd
+    // cameraScaleFor).
+    const arany = cameraScaleFor(this.ownCarId ?? DEFAULT_CAR);
     const offset = new THREE.Vector3(
-      CAMERA.offset.x,
-      CAMERA.offset.y,
-      CAMERA.offset.z,
+      CAMERA.offset.x * arany,
+      CAMERA.offset.y * arany,
+      CAMERA.offset.z * arany,
     );
 
     // KORULNEZES: az offsetet elforgatjuk az auto korul.
@@ -2326,7 +2575,7 @@ export class SceneView {
       .add(new THREE.Vector3(...chassis.position));
 
     const lookTarget = new THREE.Vector3(...chassis.position);
-    lookTarget.y += CAMERA.lookAtHeight;
+    lookTarget.y += CAMERA.lookAtHeight * arany;
 
     // A kamera ne kerulhessen falba (lasd cameraClamp).
     //

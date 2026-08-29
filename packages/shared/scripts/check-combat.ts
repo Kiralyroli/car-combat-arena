@@ -10,7 +10,8 @@
  *
  * Futtatas: npm run check:combat
  */
-import { CHASSIS } from "../src/config";
+import { CAR_GEOMETRY } from "../src/carGeometry";
+import { DEFAULT_CAR } from "../src/carModels";
 import {
   approachSpeed,
   carsOverlap,
@@ -47,8 +48,10 @@ function car(
   };
 }
 
-const LENGTH = CHASSIS.halfExtents.z * 2; // 4.91 m
-const WIDTH = CHASSIS.halfExtents.x * 2; // 2.18 m
+// Az ALAPERTELMEZETT auto merete: a carsOverlap is ezzel szamol, ha
+// nem mondunk mast. Ha a jatek alapautoja valtozik, ez kovetni fogja.
+const LENGTH = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z * 2;
+const WIDTH = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.x * 2;
 
 function main(): void {
   console.log("=== Utkozesi sebzes ===\n");
@@ -89,7 +92,7 @@ function main(): void {
   // Elforgatott auto: T-alakban nekimenve a hosszanti oldal szamit.
   check(
     "keresztbe allo auto erintkezese eszlelve",
-    carsOverlap(car([0, 1, 0]), car([0, 1, CHASSIS.halfExtents.z + 0.5], [0, 0, 0], 90)),
+    carsOverlap(car([0, 1, 0]), car([0, 1, LENGTH / 2 + 0.5], [0, 0, 0], 90)),
     "T-alaku utkozes",
   );
 

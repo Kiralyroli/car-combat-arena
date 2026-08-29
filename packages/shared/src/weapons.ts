@@ -1,4 +1,5 @@
-import { CHASSIS } from "./config";
+import { CAR_GEOMETRY } from "./carGeometry";
+import { DEFAULT_CAR, type CarId } from "./carModels";
 import { clamp, rotateVec } from "./math";
 
 /**
@@ -40,13 +41,46 @@ export const DEFAULT_WEAPON: WeaponId = "cannon";
  */
 
 /**
- * A fegyver talpanak magassaga a karosszeria kozeppontja folott (m).
+ * Mennyivel ul a talp a tetővonal ALATT (m).
  *
- * Ez KOZOS: mindket fegyver ugyanarra a tetőre kerul. A modell tetőteje
- * kb. 1.45 m-re van a talajtol, a chassis kozeppontja pedig
- * halfExtents.y magasan -- a kettő kulonbsege adja a tetőszintet.
+ * Nem nulla: a torony talpa igy tenylegesen RAUL a tetőre, nem
+ * lebeg a felszinen. Ennyi eppen elrejti az illesztest.
  */
-export const WEAPON_MOUNT_HEIGHT = 1.45 - CHASSIS.halfExtents.y;
+const MOUNT_SINK = 0.05;
+
+/**
+ * A fegyver talpanak magassaga EGY ADOTT auton, a karosszeria
+ * kozeppontja folott (m).
+ *
+ * A kocsik 1,3 es 2,0 m kozott vannak: egyetlen, rogzitett magassaggal
+ * a torony a rohamkocsi tetejebe sullyedne, az alacsony izomauto
+ * folott pedig a levegoben allna. Ez nem csak latvany -- a LOVES is
+ * innen indul (lasd weaponPivot), tehat a golyo a tető alol vagy a
+ * levegobol jonne.
+ *
+ * A TETO a legmagasabb SZELES talalati doboz teteje, nem a befoglalo
+ * doboze: a rohamkocsi villogoja es a tetőantennak keskenyek, azokra
+ * nem lehet fegyvert allitani -- ott a torony a levegoben ulne.
+ */
+export function weaponMountHeight(car: CarId = DEFAULT_CAR): number {
+  const geo = CAR_GEOMETRY[car];
+  const felX = geo.halfExtents.x;
+  let teto = -Infinity;
+  for (const b of geo.hitBoxes) {
+    if (b.hx < felX * 0.4) continue;
+    teto = Math.max(teto, b.dy + b.hy);
+  }
+  if (!Number.isFinite(teto)) teto = geo.halfExtents.y;
+  return teto - MOUNT_SINK;
+}
+
+/**
+ * A fegyver talpanak magassaga az ALAPERTELMEZETT auton.
+ *
+ * A tesztek es a merő szkriptek hasznaljak, ahol nincs kez alatt a
+ * konkret auto.
+ */
+export const WEAPON_MOUNT_HEIGHT = weaponMountHeight(DEFAULT_CAR);
 
 export interface WeaponMount {
   /**
@@ -104,8 +138,10 @@ export function muzzleWorldPosition(
   direction: readonly [number, number, number],
   weapon: WeaponId,
   forward: number = muzzleForwardOf(weapon),
+  /** Melyik auto tetejen ul a fegyver -- a magassag ebbol jon. */
+  car: CarId = DEFAULT_CAR,
 ): [number, number, number] {
-  const pivot = weaponPivot(carPosition, carRotation, weapon);
+  const pivot = weaponPivot(carPosition, carRotation, weapon, car);
   return [
     pivot[0] + direction[0] * forward,
     pivot[1] + direction[1] * forward,
@@ -132,6 +168,8 @@ export function weaponPivot(
   carPosition: readonly number[],
   carRotation: readonly number[],
   weapon: WeaponId,
+  /** Melyik auto tetejen ul a fegyver -- a magassag ebbol jon. */
+  car: CarId = DEFAULT_CAR,
 ): [number, number, number] {
   const rise = rotateVec(
     {
@@ -140,7 +178,7 @@ export function weaponPivot(
       z: carRotation[2],
       w: carRotation[3],
     },
-    { x: 0, y: WEAPON_MOUNT_HEIGHT + WEAPON_MOUNTS[weapon].pitchPivot, z: 0 },
+    { x: 0, y: weaponMountHeight(car) + WEAPON_MOUNTS[weapon].pitchPivot, z: 0 },
   );
   return [
     carPosition[0] + rise.x,

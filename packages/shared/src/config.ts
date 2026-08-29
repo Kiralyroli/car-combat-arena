@@ -23,12 +23,18 @@ export const GRAVITY = { x: 0, y: -9.81, z: 0 };
 
 export const CHASSIS = {
   /**
-   * Fel-meretek: a valodi Sedan modell (spike/public/models/sedan.glb)
-   * meretei alapjan -- 2.18 x 1.51 x 4.91 m teljes meret. A tomeg
-   * egyelore szandekosan MARADT 1000 kg-on (nem "realis" ~1300 kg),
-   * hogy a valtozas kezelheto maradjon -- lasd EREDMENYEK.md.
+   * A MERETEK NINCSENEK ITT.
+   *
+   * Minden jarmu sajat, MERT dobozzal jon (carGeometry.ts): a negy
+   * kocsi 4,1 es 4,9 m kozott van, es a magassaguk is fel meterrel
+   * elter. Egy kozos "chassis-doboz" mindegyikre hazudna -- es a
+   * hazugsag CSENDES lenne: a kocsi lebegne, vagy ott is talalna a
+   * loves, ahol nincs semmi.
+   *
+   * Ami itt maradt, az a VEZETES fizikaja: tomeg, csillapitas, spawn.
+   * Ezek szandekosan KOZOSEK, hogy az auto-valasztas izles kerdese
+   * legyen, ne elony.
    */
-  halfExtents: { x: 1.09, y: 0.755, z: 2.455 },
   mass: 1000,
   /** Ide kerul vissza reset-nel. */
   spawn: { x: 0, y: 2.5, z: 0 },
@@ -90,30 +96,34 @@ export const WHEEL = {
 
 export type WheelId = "FL" | "FR" | "RL" | "RR";
 
+/**
+ * Egy kerek SZEREPE.
+ *
+ * A HELYE nincs itt: az modellenkent mas, es a mert geometriabol jon
+ * (carGeometry.ts). Csak az marad, ami minden autora egyforma: melyik
+ * kerek kormanyoz, es melyik hajt.
+ */
 export interface WheelLayout {
   id: WheelId;
-  /** Csatlakozasi pont a chassis lokalis rendszereben. */
-  position: { x: number; y: number; z: number };
   steered: boolean;
   driven: boolean;
 }
 
-// A Sedan modell (Car root) sajat kerek-node pozicioi (glb export):
-// Wheel_FL (-0.79, 0.35, -1.49), Wheel_FR (0.79, 0.35, -1.50),
-// Wheel_RL (-0.78, 0.35, 1.45), Wheel_RR (0.79, 0.35, 1.45).
-// A "0.35" a kerek magassaga a talajtol -- a chassis-kozepponthoz kepesti
-// Y-t abbol szamoljuk: talajmagassag - CHASSIS.halfExtents.y = 0.35 - 0.755.
+/**
+ * A negy kerek SORRENDJE es szerepe -- minden autora ugyanaz.
+ *
+ * A sorrend (FL, FR, RL, RR) az egesz jatekban ez: a fizika, a
+ * halozat es a latvany is ebben adja a kerekeket. A HELYUK viszont
+ * modellenkent mas (carGeometry.ts), ezert nincs itt.
+ *
+ * Elol kormanyzunk, hatul hajtunk: ez a valasztas a vezetes
+ * jellegehez tartozik, nem a karosszeriahoz.
+ */
 export const WHEEL_LAYOUT: WheelLayout[] = [
-  // Elso (kormanyzott) kerekek: negativ Z -- az orr iranyaban.
-  // FL/FR z-je egyseges (-1.495, a modell -1.49/-1.50 atlaga). A regi,
-  // gumitapadas-alapu modellben mar ez a 0.01 m-es aszimmetria is
-  // erezheto elhuzast okozott egyenesben; az arkad modell erre nem
-  // erzekeny, de a szimmetria igy is helyesebb.
-  { id: "FL", position: { x: -0.79, y: -0.405, z: -1.495 }, steered: true, driven: false },
-  { id: "FR", position: { x: 0.79, y: -0.405, z: -1.495 }, steered: true, driven: false },
-  // Hatso (hajto) kerekek: pozitiv Z. X szinten szimmetrizalva (-0.78 -> -0.79).
-  { id: "RL", position: { x: -0.79, y: -0.405, z: 1.45 }, steered: false, driven: true },
-  { id: "RR", position: { x: 0.79, y: -0.405, z: 1.45 }, steered: false, driven: true },
+  { id: "FL", steered: true, driven: false },
+  { id: "FR", steered: true, driven: false },
+  { id: "RL", steered: false, driven: true },
+  { id: "RR", steered: false, driven: true },
 ];
 
 /**
@@ -421,7 +431,11 @@ export const SPAWN_POINTS: { x: number; y: number; z: number }[] = [
   { x: -39, y: 2.5, z: 0 },
   { x: -33, y: 2.5, z: -33 },
   { x: 0, y: 2.5, z: -45 },
-  { x: 33, y: 2.5, z: -33 },
+  // EGY METERREL kijjebb, mint a tobbi sarok: a szomszedos tartaly
+  // (Tank_4, 26/-34) miatt itt csak 4,6 m volt a szabad hely, a
+  // leghosszabb kocsi (Pickup, 5,8 m) pedig 4,64-et kivan. A sedanra
+  // ez meg jo volt -- eppen ezert nem tunt fel korabban.
+  { x: 34, y: 2.5, z: -33 },
 ];
 
 /**

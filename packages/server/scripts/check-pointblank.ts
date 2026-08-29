@@ -13,7 +13,9 @@
 import {
   ARENA,
   ARENA_HALF,
-  CHASSIS,
+  CAR_GEOMETRY,
+
+  DEFAULT_CAR,
   EXPLOSION_MAX_DAMAGE,
   explosionFalloff,
   raycastBVH,
@@ -107,7 +109,7 @@ function main(): void {
   // lovesnek legyen LATHATO kovetkezmenye, a helyen -- vagyis robbanjon,
   // a palyan BELUL, a jatekos ELOTT. (A loves sajat hangjat a kliens
   // adja, a kattintaskor -- lasd main.ts fireAtCrosshair.)
-  const falX = ARENA_HALF - CHASSIS.halfExtents.z;
+  const falX = ARENA_HALF - CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z;
   {
     const eredmeny = loves([0, 1, -falX], [0, 1.5, -ARENA_HALF]);
     check(
@@ -165,7 +167,10 @@ function main(): void {
     if (!lada) {
       console.log("  (nincs eleg magas akadaly a teszthez)");
     } else {
-      const elotte = lada.position.z + lada.halfExtents.z + CHASSIS.halfExtents.z;
+      const elotte =
+        lada.position.z +
+        lada.halfExtents.z +
+        CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z;
       const eredmeny = loves(
         [lada.position.x, 1, elotte],
         [lada.position.x, 1.5, lada.position.z + lada.halfExtents.z],

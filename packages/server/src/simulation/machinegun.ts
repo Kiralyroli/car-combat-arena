@@ -1,5 +1,6 @@
 import {
   MACHINEGUN,
+  type CarId,
   raycastBVH,
   segmentCarEntry,
   segmentCarEntryMesh,
@@ -24,6 +25,14 @@ export interface HitscanTarget {
   id: string;
   position: readonly number[];
   rotation: readonly number[];
+  /**
+   * A celpont karosszeriaja.
+   *
+   * A talalati alak ebbol jon: a kocsik 3,7 es 5,8 m kozott vannak,
+   * tehat egy kozos alakkal a pickup platojan at lehetne loni, a
+   * kisauto korul pedig a levego is talalat lenne.
+   */
+  car?: CarId;
 }
 
 export interface HitscanResult {
@@ -82,10 +91,17 @@ export function resolveHitscan(
     // magassagaban jóval nagyobb az autonal. Ha a halo hianyzik (nem
     // futott a generalas), a dobozokra esunk vissza -- inkabb bőkezű
     // talalat, mint semmi.
-    const halo = autoBVH();
+    const halo = autoBVH(target.car);
     const t = halo
       ? segmentCarEntryMesh(halo, from, far, target.position, target.rotation, 0)
-      : segmentCarEntry(from, far, target.position, target.rotation, 0);
+      : segmentCarEntry(
+          from,
+          far,
+          target.position,
+          target.rotation,
+          0,
+          target.car,
+        );
     if (t !== null && t > 1e-4 && t < hitAt) {
       hitAt = t;
       hitId = target.id;

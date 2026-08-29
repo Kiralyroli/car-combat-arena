@@ -1,5 +1,6 @@
 import {
-  DEFAULT_CAR_COLOR,
+  DEFAULT_CAR,
+  DEFAULT_SKIN,
   DEFAULT_ABILITY,
   DEFAULT_WEAPON,
   PING_INTERVAL_MS,
@@ -10,7 +11,7 @@ import {
   type WheelDamage,
   type MatchSnapshot,
   type RoomListing,
-  type CarColorId,
+  type CarId,
   type TracerSnapshot,
   type AbilityId,
   type WeaponId,
@@ -40,7 +41,7 @@ export interface NetworkEvents {
     roomCode: string,
     spawn: [number, number, number],
   ) => void;
-  onPlayerJoined?: (playerId: string, color: CarColorId) => void;
+  onPlayerJoined?: (playerId: string, car: CarId, skin: string) => void;
   onPlayerLeft?: (playerId: string) => void;
   onRespawn?: (position: [number, number, number]) => void;
   onExplosion?: (position: [number, number, number], ownerId: string) => void;
@@ -121,12 +122,15 @@ export class NetworkClient {
   ownProtected = false;
 
   /**
-   * A SAJAT autonk szine a szerver szerint.
+   * A SAJAT autonk a szerver szerint.
    *
-   * Nem a beallitott ertek: a szerver mast adhat, ha a kert szin a
-   * szobaban mar foglalt (lasd assignCarColor).
+   * Nem a beallitott ertek: a szerver mast adhat, ha a kert kocsit a
+   * szobaban mar hasznalja valaki (lasd assignCar).
    */
-  ownColor: CarColorId = DEFAULT_CAR_COLOR;
+  ownCar: CarId = DEFAULT_CAR;
+
+  /** A SAJAT autonk festese a szerver szerint (lasd assignCar). */
+  ownSkin: string = DEFAULT_SKIN;
 
   /**
    * Hova fogunk ujraszuletni -- vagy null, ha elunk.
@@ -258,8 +262,9 @@ export class NetworkClient {
     roomCode: string | undefined,
     name: string,
     weapon?: WeaponId,
-    color?: CarColorId,
+    car?: CarId,
     ability?: AbilityId,
+    skin?: string,
   ): void {
     this.transport?.send({
       type: "join",
@@ -267,8 +272,9 @@ export class NetworkClient {
       roomCode,
       name,
       weapon,
-      color,
+      car,
       ability,
+      skin,
     });
   }
 
@@ -397,7 +403,7 @@ export class NetworkClient {
         // elso snapshotbol derul ki, es a kliens ott igazitja
         // (lasd SceneView.setRemoteColor).
         for (const id of message.players) {
-          this.events.onPlayerJoined?.(id, DEFAULT_CAR_COLOR);
+          this.events.onPlayerJoined?.(id, DEFAULT_CAR, DEFAULT_SKIN);
         }
         this.events.onJoined?.(message.playerId, message.roomCode, message.spawn);
         return;
@@ -439,7 +445,8 @@ export class NetworkClient {
           this.heat = own.heat;
           this.overheated = own.overheated;
           this.ownProtected = own.protected;
-          this.ownColor = own.color;
+          this.ownCar = own.car;
+          this.ownSkin = own.skin;
           this.lives = own.lives;
           this.ownName = own.name;
           // A KEREK-SERULES is a szerveré: nem csak latvany, hanem
@@ -479,7 +486,11 @@ export class NetworkClient {
       }
 
       case "playerJoined":
-        this.events.onPlayerJoined?.(message.playerId, message.color);
+        this.events.onPlayerJoined?.(
+          message.playerId,
+          message.car,
+          message.skin,
+        );
         return;
 
       case "explosion":

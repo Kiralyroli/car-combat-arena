@@ -12,7 +12,7 @@
  * ELLENORZIK is a szabadsagat -- igy a kovetkezo palya-atrendezes
  * hangosan bukik el, nem csendesen felrevezet.
  */
-import { ARENA, CHASSIS } from "@cca/shared";
+import { ARENA, LARGEST_CAR_HALF } from "@cca/shared";
 
 /** A sav kozepvonala (x). */
 export const LANE_X = -12;
@@ -41,7 +41,9 @@ export function blockersInLane(): string[] {
 
 /** Mi all utban egy adott x-sav adott z-szakaszan. */
 function blockersBetween(x: number, z0: number, z1: number): string[] {
-  const margin = CHASSIS.halfExtents.x + 0.5;
+  // A LEGNAGYOBB autoval merunk: a sav akkor szabad, ha BARMELYIK
+  // kocsi elfer benne -- nem csak a Sedan.
+  const margin = LARGEST_CAR_HALF.x + 0.5;
   const also = Math.min(z0, z1);
   const felso = Math.max(z0, z1);
   return ARENA.filter((box) => {
@@ -49,8 +51,8 @@ function blockersBetween(x: number, z0: number, z1: number): string[] {
     if (Math.abs(box.position.x - x) - box.halfExtents.x - margin >= 0) {
       return false;
     }
-    const b0 = box.position.z - box.halfExtents.z - CHASSIS.halfExtents.z;
-    const b1 = box.position.z + box.halfExtents.z + CHASSIS.halfExtents.z;
+    const b0 = box.position.z - box.halfExtents.z - LARGEST_CAR_HALF.z;
+    const b1 = box.position.z + box.halfExtents.z + LARGEST_CAR_HALF.z;
     return b1 > also && b0 < felso;
   }).map((box) => box.name);
 }

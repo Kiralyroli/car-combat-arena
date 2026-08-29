@@ -214,12 +214,23 @@ async function main(): Promise<void> {
     }
     if (!synced) console.log("  [figyelem] a felallas nem szinkronizalt idoben");
 
+    // A HP-t MENET KOZBEN figyeljuk, nem a rammeles vegen nezzuk meg.
+    //
+    // MIERT: a megsemmisules utan a szerver par masodperc mulva
+    // ujraszuli a jatekost -- ha a becsapodas a rammeles elejen
+    // tortenik, a vegi pillanatfelvetel mar a friss, teli eletu autot
+    // latja. Merve: a HP vegigment 100 -> 79 -> 68 -> 43 -> 0 -> 100
+    // uton, es a teszt egyszer sem latta a nullat, tehat ugy bukott
+    // el, mintha a sebzes nem mukodne.
     await a.keyboard.down("w");
-    await sleep(4000);
+    for (let i = 0; i < 20 && !destroyed; i++) {
+      await sleep(200);
+      if ((await viewOf(a)).otherHp === 0) destroyed = true;
+    }
     await a.keyboard.up("w");
     await sleep(800);
 
-    destroyed = (await viewOf(a)).otherHp === 0;
+    if (!destroyed) destroyed = (await viewOf(a)).otherHp === 0;
   }
 
   // ROBBANAS a megsemmisuleskor. Enelkul a masik auto "nyomtalanul

@@ -49,9 +49,10 @@ import {
   idleMachinegun,
   stepMachinegun,
   toWeaponId,
-  assignCarColor,
-  toCarColorId,
-  type CarColorId,
+  assignCar,
+  toCarId,
+  toSkin,
+  type CarId,
   FIXED_DT,
   INTERP_DELAY_MS,
   MACHINEGUN,
@@ -128,11 +129,18 @@ export interface ServerPlayer {
   /**
    * Az auto szine.
    *
-   * A jatekos KERI a belepeskor, a szoba dönti el (lasd assignCarColor):
+   * A jatekos KERI a belepeskor, a szoba dönti el (lasd assignCar):
    * ket jatekos nem kaphat ugyanolyat, kulonben pont a
    * megkulonboztethetoseg veszne el, amiert az egesz keszult.
    */
-  color: CarColorId;
+  car: CarId;
+  /**
+   * A festes a karosszerian.
+   *
+   * A KAROSSZERIA + FESTES paros az, ami egyedi: negy forma nem lenne
+   * eleg nyolc jatekosra.
+   */
+  skin: string;
   spawnChosenManually: boolean;
   /**
    * A legutobb ELKULDOTT terv lenyomata.
@@ -289,8 +297,9 @@ export class Room {
     send: (message: ServerMessage) => void,
     name?: string,
     weapon?: WeaponId,
-    color?: CarColorId,
+    car?: CarId,
     ability?: AbilityId,
+    skin?: string,
   ): ServerPlayer {
     const spawn = this.allocateSpawn(null);
     const player: ServerPlayer = {
@@ -300,12 +309,11 @@ export class Room {
       send,
       state: spawn.state,
       spawnIndex: spawn.index,
-      // A szint a SZOBA osztja: a kliens keresebol csak akkor lesz
-      // valosag, ha meg szabad.
-      color: assignCarColor(
-        toCarColorId(color),
-        [...this.players.values()].map((p) => p.color),
-      ),
+      // A KINEZETET a SZOBA osztja: a kliens keresebol csak akkor lesz
+      // valosag, ha a paros (karosszeria + festes) meg szabad.
+      ...assignCar({ car: toCarId(car), skin: toSkin(toCarId(car), skin) }, [
+        ...this.players.values(),
+      ]),
       protectedUntil: 0,
       // A kepesseget is a SZERVER ellenorzi: ismeretlen ertek eseten
       // az alapertelmezett.
@@ -398,7 +406,10 @@ export class Room {
         const lastImpact = this.lastImpactAt.get(key) ?? 0;
         if (now - lastImpact < IMPACT_COOLDOWN_MS) continue;
 
-        if (!carsOverlap(a.state, b.state)) continue;
+        // Az AUTOJUKKAL: a kocsik 3,7 es 5,8 m kozott vannak, tehat
+        // egy kozos merettel a hosszu kocsi ugy is koccanna, hogy meg
+        // egy meterre van a masiktol.
+        if (!carsOverlap(a.state, b.state, a.car, b.car)) continue;
 
         // Aki nekiment a masiknak, kevesebbet kap -- lasd splitCollisionDamage.
         const damage = splitCollisionDamage(a.state, b.state);
@@ -746,6 +757,8 @@ export class Room {
         player.state.position,
         player.state.rotation,
         i,
+        // A SAJAT autojanak kerekhelye: modellenkent mas.
+        player.car,
       );
       const distance = Math.hypot(
         wheel[0] - position[0],
@@ -793,7 +806,7 @@ export class Room {
     // Hibas celpont (NaN, vegtelen) ne jusson a szimulacioba.
     if (!target.every((v) => Number.isFinite(v))) return false;
 
-    const rocket = this.rockets.spawn(id, player.state, target, now);
+    const rocket = this.rockets.spawn(id, player.state, target, now, player.car);
     if (!rocket) return false;
 
     player.lastFiredAt = now;
@@ -812,7 +825,7 @@ export class Room {
   stepRockets(dt: number, now: number): void {
     const targets = [...this.players.values()]
       .filter((p) => p.deadSince === null)
-      .map((p) => ({ id: p.id, state: p.state }));
+      .map((p) => ({ id: p.id, state: p.state, car: p.car }));
 
     for (const explosion of this.rockets.step(dt, now, targets)) {
       for (const player of this.players.values()) {
@@ -1059,7 +1072,7 @@ export class Room {
       const viewTime = now - this.rewindMsFor(player, tick);
       const targets = alive
         .filter((p) => p.id !== player.id)
-        .map((p) => ({ id: p.id, ...this.poseAt(p, viewTime) }));
+        .map((p) => ({ id: p.id, car: p.car, ...this.poseAt(p, viewTime) }));
 
       const direction = aimDirection(
         player.state.aimYaw,
@@ -1073,6 +1086,10 @@ export class Room {
         player.state.rotation,
         direction,
         "machinegun",
+        undefined,
+        // A TETEJEN ul a fegyver: magasabb autonal magasabban van a
+        // csotorkolat is.
+        player.car,
       );
 
       for (let i = 0; i < result.shots; i++) {
@@ -1137,7 +1154,8 @@ export class Room {
         heat: player.mg.heat,
         overheated: player.mg.overheated,
         protected: this.isProtected(player, now),
-        color: player.color,
+        car: player.car,
+        skin: player.skin,
       });
     }
     return snapshot;

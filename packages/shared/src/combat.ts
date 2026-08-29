@@ -1,4 +1,5 @@
-import { CHASSIS } from "./config";
+import { CAR_GEOMETRY } from "./carGeometry";
+import { DEFAULT_CAR, type CarId } from "./carModels";
 import { rotateVec } from "./math";
 import type { ClientState } from "./net/protocol";
 
@@ -61,8 +62,17 @@ export const IMPACT_COOLDOWN_MS = 600;
  */
 export { RESPAWN_DELAY_MS } from "./match";
 
-/** Fuggoleges atfedes: egymas felett atrepulo autok ne sebezzenek. */
-const VERTICAL_OVERLAP = CHASSIS.halfExtents.y * 2;
+/**
+ * Fuggoleges atfedes: egymas felett atrepulo autok ne sebezzenek.
+ *
+ * A ket auto fel-magassaganak osszege: azonos kocsiknal pontosan a
+ * teljes magassag (mint korabban), vegyes parosnal pedig a ketto
+ * kozott -- egy magas SUV folott igy tobb hely kell az atrepulesehez,
+ * mint egy sportkocsi folott.
+ */
+function verticalOverlap(carA: CarId, carB: CarId): number {
+  return CAR_GEOMETRY[carA].halfExtents.y + CAR_GEOMETRY[carB].halfExtents.y;
+}
 
 interface Footprint {
   x: number;
@@ -75,7 +85,7 @@ interface Footprint {
   halfWidth: number;
 }
 
-function footprintOf(state: ClientState): Footprint {
+function footprintOf(state: ClientState, car: CarId): Footprint {
   const [qx, qy, qz, qw] = state.rotation;
   const nose = rotateVec({ x: qx, y: qy, z: qz, w: qw }, { x: 0, y: 0, z: -1 });
   const len = Math.hypot(nose.x, nose.z) || 1;
@@ -84,8 +94,8 @@ function footprintOf(state: ClientState): Footprint {
     z: state.position[2],
     fx: nose.x / len,
     fz: nose.z / len,
-    halfLength: CHASSIS.halfExtents.z,
-    halfWidth: CHASSIS.halfExtents.x,
+    halfLength: CAR_GEOMETRY[car].halfExtents.z,
+    halfWidth: CAR_GEOMETRY[car].halfExtents.x,
   };
 }
 
@@ -104,11 +114,25 @@ function projectionRadius(f: Footprint, nx: number, nz: number): number {
  * nem gombokkel kozelitunk, mert az auto hosszu es keskeny (4.9 x 2.2 m):
  * egy kozos sugarral az egymas mellett elhalado autok is "utkoznenek".
  */
-export function carsOverlap(a: ClientState, b: ClientState): boolean {
-  if (Math.abs(a.position[1] - b.position[1]) > VERTICAL_OVERLAP) return false;
+export function carsOverlap(
+  a: ClientState,
+  b: ClientState,
+  /**
+   * A ket auto -- a teglalap MERETE ebbol jon.
+   *
+   * Egy kozos merettel a pickup (5,8 m) ugy is koccanna, hogy meg egy
+   * meterre van a masiktol, a kisauto (3,7 m) korul pedig bele
+   * lehetne hajtani a levegobe.
+   */
+  carA: CarId = DEFAULT_CAR,
+  carB: CarId = DEFAULT_CAR,
+): boolean {
+  if (Math.abs(a.position[1] - b.position[1]) > verticalOverlap(carA, carB)) {
+    return false;
+  }
 
-  const fa = footprintOf(a);
-  const fb = footprintOf(b);
+  const fa = footprintOf(a, carA);
+  const fb = footprintOf(b, carB);
   const dx = fb.x - fa.x;
   const dz = fb.z - fa.z;
 

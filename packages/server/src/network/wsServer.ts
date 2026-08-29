@@ -208,8 +208,9 @@ export class WsServer {
       (msg) => send(conn.socket, msg),
       message.name,
       message.weapon,
-      message.color,
+      message.car,
       message.ability,
+      message.skin,
     );
 
     conn.playerId = playerId;
@@ -223,7 +224,7 @@ export class WsServer {
       spawn: player.state.position,
     });
     room.broadcast(
-      { type: "playerJoined", playerId, color: player.color },
+      { type: "playerJoined", playerId, car: player.car, skin: player.skin },
       playerId,
     );
 

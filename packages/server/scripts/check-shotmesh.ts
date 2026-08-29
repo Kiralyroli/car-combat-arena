@@ -18,7 +18,8 @@
 import {
   ARENA,
   ARENA_HALF,
-  CHASSIS,
+  CAR_GEOMETRY,
+  CAR_MODELS,
   LAYOUT,
   PROP_MERETEK,
   raycastBVH,
@@ -195,14 +196,21 @@ function main(): void {
     );
   }
 
-  // --- Az AUTO halója ---
-  {
-    const halo = autoBVH();
+  // --- Az AUTOK halója -- MIND A TIZE ---
+  //
+  // Nem eleg egyet megnezni: a kocsik 3,7 es 5,8 m kozott vannak, es a
+  // generalas autonkent kulon halot ir ki. Ha valamelyik kimaradna, a
+  // szerver arra a kocsira a dobozokra esne vissza -- a jatek menne
+  // tovabb, csak az adott jatekos lenne eltalalhatobb a valosnal.
+  for (const modell of CAR_MODELS) {
+    const car = modell.id;
+    const cimke = (s: string) => `[${car}] ${s}`;
+    const halo = autoBVH(car);
     if (!halo) {
-      check("az auto halója megvan", false, "hianyzik a generalt adat");
+      check(cimke("az auto halója megvan"), false, "hianyzik a generalt adat");
     } else {
       check(
-        "az auto haromszog-haloja felepult",
+        cimke("az auto haromszog-haloja felepult"),
         halo.mesh.indices.length / 3 > 1000,
         `${halo.mesh.indices.length / 3} haromszog`,
       );
@@ -222,14 +230,15 @@ function main(): void {
         if (t === null) hiba++;
       }
       check(
-        "az autot minden iranybol el lehet talalni",
+        cimke("az autot minden iranybol el lehet talalni"),
         hiba === 0,
         hiba === 0 ? "mind a 16 irany" : `${hiba} irany nem talal`,
       );
 
       // A MOTORHAZTETÖ FOLOTT nem szabad talalnia -- ez a nyereseg a
       // dobozokhoz kepest, es a dobozos valtozat is igy viselkedik mar.
-      const H = CHASSIS.halfExtents;
+      // A meretek az adott auto SAJAT geometriajabol jonnek.
+      const H = CAR_GEOMETRY[car].halfExtents;
       const magas = H.y - 0.1;
       const orrFolott = segmentCarEntryMesh(
         halo,
@@ -240,9 +249,25 @@ function main(): void {
         0,
       );
       check(
-        "az orr FOLOTT nem talal",
+        cimke("az orr FOLOTT nem talal"),
         orrFolott === null,
         `y = ${magas.toFixed(2)}, z = ${(-H.z + 0.3).toFixed(2)}`,
+      );
+
+      // A halo az AUTO merete -- nem a Sedane. Ha a generalas
+      // osszekeverne a karosszeriakat, a halo befoglaloja nem esne
+      // egybe a mert dobozzal.
+      let bx = 0;
+      let bz = 0;
+      const cs = halo.mesh.vertices;
+      for (let i = 0; i < cs.length; i += 3) {
+        bx = Math.max(bx, Math.abs(cs[i]));
+        bz = Math.max(bz, Math.abs(cs[i + 2]));
+      }
+      check(
+        cimke("a halo merete a sajat autoe"),
+        Math.abs(bx - H.x) < 0.1 && Math.abs(bz - H.z) < 0.1,
+        `halo ${(bx * 2).toFixed(2)} x ${(bz * 2).toFixed(2)} m, doboz ${(H.x * 2).toFixed(2)} x ${(H.z * 2).toFixed(2)} m`,
       );
 
       // A halo SZUKEBB a dobozoknal: ahol a doboz talalt, ott a halo
@@ -257,13 +282,13 @@ function main(): void {
         const from: [number, number, number] = [-20, y, z];
         const to: [number, number, number] = [20, y, z];
         void a;
-        const dobozzal = segmentCarEntry(from, to, ALL, FORGATAS, 0);
+        const dobozzal = segmentCarEntry(from, to, ALL, FORGATAS, 0, car);
         const halóval = segmentCarEntryMesh(halo, from, to, ALL, FORGATAS, 0);
         if (halóval !== null) ossz++;
         if (halóval !== null && dobozzal === null) bovebb++;
       }
       check(
-        "a halo nem talal ott, ahol a doboz sem",
+        cimke("a halo nem talal ott, ahol a doboz sem"),
         bovebb === 0,
         bovebb === 0
           ? `2000 loves, ${ossz} talalat, egyik sem esik a dobozokon kivulre`

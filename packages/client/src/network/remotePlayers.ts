@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import {
-  DEFAULT_CAR_COLOR,
+  DEFAULT_CAR,
+  DEFAULT_SKIN,
   DEFAULT_WEAPON,
   INTERP_DELAY_MS,
-  type CarColorId,
+  type CarId,
   type PlayerSnapshot,
   type WeaponId,
 } from "@cca/shared";
@@ -134,7 +135,8 @@ export class RemotePlayers {
    * a sajat sorrendje szerint, es ugyanaz a jatekos mas szinu volt
    * minden kepernyon.
    */
-  private readonly colors = new Map<string, CarColorId>();
+  private readonly cars = new Map<string, CarId>();
+  private readonly skins = new Map<string, string>();
 
   /**
    * Ki milyen fegyverrel jatszik.
@@ -176,8 +178,13 @@ export class RemotePlayers {
     return this.healingIds.has(id);
   }
 
-  colorOf(id: string): CarColorId {
-    return this.colors.get(id) ?? DEFAULT_CAR_COLOR;
+  carOf(id: string): CarId {
+    return this.cars.get(id) ?? DEFAULT_CAR;
+  }
+
+  /** A tavoli jatekos FESTESE -- a karosszeriaval egyutt azonositja. */
+  skinOf(id: string): string {
+    return this.skins.get(id) ?? DEFAULT_SKIN;
   }
 
   weaponOf(id: string): WeaponId {
@@ -207,7 +214,7 @@ export class RemotePlayers {
     this.lives.delete(id);
     this.protectedIds.delete(id);
     this.healingIds.delete(id);
-    this.colors.delete(id);
+    this.cars.delete(id);
     this.weapons.delete(id);
     this.heats.delete(id);
     this.overheated.delete(id);
@@ -220,7 +227,7 @@ export class RemotePlayers {
     this.lives.clear();
     this.protectedIds.clear();
     this.healingIds.clear();
-    this.colors.clear();
+    this.cars.clear();
     this.weapons.clear();
     this.heats.clear();
     this.overheated.clear();
@@ -232,7 +239,8 @@ export class RemotePlayers {
       this.hp.set(player.id, player.hp);
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
-      this.colors.set(player.id, player.color);
+      this.cars.set(player.id, player.car);
+      this.skins.set(player.id, player.skin);
       this.weapons.set(player.id, player.weapon);
       this.heats.set(player.id, player.heat);
       if (player.overheated) this.overheated.add(player.id);

@@ -11,6 +11,7 @@
  *
  * Futtatas: npm run check:pickups
  */
+import { LARGEST_CAR_HALF } from "../src/carSizes";
 import {
   BOOST_CAPACITY_MS,
   BOOST_REFILL_MS,
@@ -127,7 +128,8 @@ async function main(): Promise<void> {
 
   // Az autonak oda kell ferni: a pickup kozeppontja korul legalabb egy
   // fel autonyi (2.46 m) szabad hely kell vizszintesen.
-  const clearance = CHASSIS.halfExtents.z;
+  // A LEGHOSSZABB autoval: a pickuphoz mindenkinek oda kell ferni.
+  const clearance = LARGEST_CAR_HALF.z;
   const blocked: string[] = [];
   for (let i = 0; i < PICKUP_POINTS.length; i++) {
     const p = PICKUP_POINTS[i];

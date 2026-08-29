@@ -11,8 +11,9 @@
  *
  *  - a PALYA, vilag-koordinatakban. Az elhelyezes a kozos LAYOUT-bol
  *    jon, tehat ugyanabbol, amibol a kliens is kirakja a modelleket.
- *  - az AUTO, a sajat rendszereben. A lovest ebbe a rendszerbe
- *    forgatjuk at, es igy egyetlen fa eleg minden jatekoshoz.
+ *  - az AUTOK, a sajat rendszerukben -- karosszeriankent egy. A lovest
+ *    ebbe a rendszerbe forgatjuk at, tehat egy jatekoshoz nem kell uj
+ *    fa; a KOCSIJA szerint valasztunk a keszek kozul.
  *
  * A fak a szerver indulasakor egyszer epulnek fel (merve: a palyara
  * nehany szaz ezredmasodperc), utana csak lekerdezes van.
@@ -20,10 +21,12 @@
 import {
   ARENA,
   ARENA_HALF,
+  DEFAULT_CAR,
   LAYOUT,
   buildBVH,
   perimeterPlacements,
   type BVH,
+  type CarId,
   type PropPlacement,
   type Trimesh,
 } from "@cca/shared";
@@ -93,7 +96,8 @@ function elhelyez(
 
 let arenaFa: BVH | null = null;
 let arenaFaTalajNelkul: BVH | null = null;
-let autoFa: BVH | null = null;
+/** Autonkent egy fa -- a kocsik alakja es merete kulonbozik. */
+const autoFak = new Map<CarId, BVH | null>();
 
 /**
  * A palya haromszog-faja TALAJ NELKUL.
@@ -160,26 +164,31 @@ export function arenaBVH(): BVH {
 }
 
 /**
- * Az AUTO haromszog-faja, a jarmu sajat rendszereben.
+ * Egy AUTO haromszog-faja, a jarmu sajat rendszereben.
  *
- * Egyetlen fa minden jatekoshoz: a lovest forgatjuk at az auto
- * rendszerebe, nem a halot a vilagba (lasd segmentCarEntryMesh).
+ * Karosszeriankent egy fa: a lovest forgatjuk at az auto rendszerebe,
+ * nem a halot a vilagba (lasd segmentCarEntryMesh) -- tehat a fa a
+ * jatekostol fuggetlen, csak az autotol fugg. Elso hivaskor epul fel.
  */
-export function autoBVH(): BVH | null {
-  if (autoFa) return autoFa;
-  const m = halo("__auto");
+export function autoBVH(car: CarId = DEFAULT_CAR): BVH | null {
+  const kesz = autoFak.get(car);
+  if (kesz !== undefined) return kesz;
+
+  const m = halo(`__auto:${car}`);
   if (!m) {
     // NEM csendben: enelkul a talalat a doboz-kozelitesre esik vissza,
     // ami a kabin magassagaban jóval bőkezűbb. A jatek menne tovabb,
     // csak masok lennenek a talalatok -- eppen a fajta csendes elteres,
     // ami ellen az egesz keszult.
     console.warn(
-      "[utkozes] az auto haromszog-haloja hianyzik; a talalat a dobozokra esik vissza. Futtasd: npm run utkozes-meret",
+      `[utkozes] a(z) ${car} haromszog-haloja hianyzik; a talalat a dobozokra esik vissza. Futtasd: npm run utkozes-meret`,
     );
+    autoFak.set(car, null);
     return null;
   }
-  autoFa = buildBVH(m);
-  return autoFa;
+  const fa = buildBVH(m);
+  autoFak.set(car, fa);
+  return fa;
 }
 
 /** Diagnosztika: hany haromszogbol all a palya. */

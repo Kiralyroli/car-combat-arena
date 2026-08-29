@@ -24,8 +24,8 @@ const row = (name: string, lives: number): ScoreRow => ({
   id: name,
   name,
   lives,
-  // A szin a sorrendet nem befolyasolja -- ez a teszt a rendezest meri.
-  color: "blue",
+  // A kinezet a sorrendet nem befolyasolja -- ez a teszt a rendezest meri.
+  car: "Jeep",
 });
 const order = (rows: ScoreRow[]): string =>
   sortScoreRows(rows)

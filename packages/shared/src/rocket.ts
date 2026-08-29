@@ -1,6 +1,6 @@
-import { CAR_BOXES } from "./carHitbox";
+import { CAR_GEOMETRY } from "./carGeometry";
+import { DEFAULT_CAR, type CarId } from "./carModels";
 import { raycastBVH, type BVH } from "./raycast";
-import { CHASSIS } from "./config";
 
 /**
  * Rakéta -- az elso SZERVER ALTAL SZIMULALT entitas (terv 4. lepcso 3.).
@@ -38,9 +38,26 @@ export const ROCKET_RADIUS = 0.6;
 /**
  * Ilyen tavol (m) szuletik a kilovo auto kozeppontja elott.
  *
- * Az auto fel-hossza + rahagyas: kulonben azonnal onmagaba utkozne.
+ * Az auto fel-hossza + rahagyas: kulonben azonnal onmagaba utkozne. Az
+ * ertek a SEDANE; mas autora lasd rocketSpawnOffsetFor.
  */
-export const ROCKET_SPAWN_OFFSET = CHASSIS.halfExtents.z + 1.2;
+/** Mennyivel az auto orra ELE szuletik a raketa (m). */
+const RAKETA_RAHAGYAS = 1.2;
+
+export const ROCKET_SPAWN_OFFSET =
+  CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z + RAKETA_RAHAGYAS;
+
+/**
+ * A raketa szuletesi tavolsaga EGY ADOTT auton.
+ *
+ * A kocsik 3,7 es 5,8 m kozott vannak: a sedanhoz szabott tavolsag a
+ * pickup orra ELOTT alig 0,7 m-re esne, egy kisautonal pedig
+ * feleslegesen messze -- ott a raketa a sajat orra elott szabad terben
+ * szuletik ugyan, de a kozeli akadalyokat a safeSpawn ugyis kezeli.
+ */
+export function rocketSpawnOffsetFor(car: CarId = DEFAULT_CAR): number {
+  return CAR_GEOMETRY[car].halfExtents.z + RAKETA_RAHAGYAS;
+}
 
 /** A robbanas hatosugara (m). */
 export const EXPLOSION_RADIUS = 7;
@@ -112,8 +129,11 @@ export function rocketHitsCar(
   carPosition: readonly number[],
   carRotation: readonly number[],
   radius: number = ROCKET_RADIUS,
+  car: CarId = DEFAULT_CAR,
 ): boolean {
-  return segmentCarEntry(from, to, carPosition, carRotation, radius) !== null;
+  return (
+    segmentCarEntry(from, to, carPosition, carRotation, radius, car) !== null
+  );
 }
 
 /**
@@ -130,6 +150,14 @@ export function segmentCarEntry(
   carPosition: readonly number[],
   carRotation: readonly number[],
   radius: number = ROCKET_RADIUS,
+  /**
+   * MELYIK auto -- a talalati test autonkent mas.
+   *
+   * A kocsik 3,7 es 5,8 m kozott vannak; egyetlen kozos dobozzal a
+   * pickupon at lehetne loni, a kisauto korul pedig ott is talalna a
+   * loves, ahol nincs semmi.
+   */
+  car: CarId = DEFAULT_CAR,
 ): number | null {
   // Az auto sajat koordinatarendszereben a doboz tengely-parhuzamos,
   // tehat a kozos slab-teszt hasznalhato.
@@ -152,7 +180,7 @@ export function segmentCarEntry(
   // A LEGKOZELEBBI talalat kell, nem az elso: a nyomjelzo csiknak es a
   // robbanasnak a becsapodas helyen kell vegzodnie.
   let legkozelebbi: number | null = null;
-  for (const b of CAR_BOXES) {
+  for (const b of CAR_GEOMETRY[car].hitBoxes) {
     const t = segmentBoxEntry(start, end, [b.dx, b.dy, b.dz], [
       b.hx + radius,
       b.hy + radius,

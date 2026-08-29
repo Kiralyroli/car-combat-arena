@@ -1,3 +1,4 @@
+import type { CarId } from "./carModels";
 import type { WheelId } from "./config";
 
 export interface DriveInput {
@@ -154,7 +155,28 @@ export interface VehicleBackend {
     maxPush: number,
   ): void;
 
-  addRemoteBody(id: string): void;
+  /**
+   * Tavoli jatekos fizikai teste.
+   *
+   * Az AUTOJA is szamit: a kocsik merete elter, es egy hosszabb auto
+   * nagyobb testtel utkozik.
+   */
+  addRemoteBody(id: string, car?: CarId): void;
+
+  /**
+   * A sajat autonk cseréje (a szerver osztja ki belepeskor).
+   *
+   * Opcionalis: a merő tesztek egy resze sajat, egyszerusitett
+   * backendet hasznal.
+   */
+  setCar?(car: CarId): void;
+  /**
+   * Melyik autoval epult egy tavoli jatekos teste -- vagy null.
+   *
+   * A TESZTEK olvassak: enelkul kivulrol nem lehetne megnezni, hogy a
+   * meret tenyleg atjutott-e a halozaton. A jatek maga nem hasznalja.
+   */
+  remoteCarOf?(id: string): CarId | null;
   removeRemoteBody(id: string): void;
   /**
    * A tavoli auto fizikai testenek allapota, vagy null.

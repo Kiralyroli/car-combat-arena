@@ -1,7 +1,14 @@
 import {
+  CAR_MODELS,
+  carModel,
+  skinsOf,
   toAbilityId,
+  toCarId,
+  toSkin,
   toWeaponId,
   type AbilityId,
+  type CarId,
+  type CarLook,
   type WeaponId,
 } from "@cca/shared";
 
@@ -89,6 +96,126 @@ export class WeaponPicker extends LoadoutPicker<WeaponId> {
     onChange: (weapon: WeaponId) => void,
   ) {
     super(containerId, "weapon", toWeaponId, initial, onChange);
+  }
+}
+
+/**
+ * AUTOVALASZTO: karosszeria ES festes, ket sorban.
+ *
+ * MIERT KET SZINT: negy karosszeria van, mindegyikhez harom-ot festes.
+ * Egyetlen listaban tizenhat gomb allna, amiben a FORMA -- a fontosabb
+ * valasztas -- elveszne. Igy eloszor a kocsit valasztja a jatekos,
+ * utana a festeset.
+ *
+ * A gombokat a KOZOS autolistabol (CAR_MODELS) rajzoljuk, nem kezzel
+ * irt HTML-bol: a festesek autonkent masok, tehat a masodik sor a
+ * valasztassal EGYUTT valtozik -- kezzel karbantartva ez elobb-utobb
+ * elcsuszna a jatek adataitol.
+ */
+export class CarSkinPicker {
+  private readonly carRoot: HTMLElement;
+  private readonly skinRoot: HTMLElement;
+  private readonly onChange: (look: CarLook) => void;
+  private car: CarId;
+  private skin: string;
+  private enabled = true;
+
+  constructor(
+    carContainerId: string,
+    skinContainerId: string,
+    initial: CarLook,
+    onChange: (look: CarLook) => void,
+  ) {
+    const carRoot = document.getElementById(carContainerId);
+    const skinRoot = document.getElementById(skinContainerId);
+    if (!carRoot) throw new Error(`#${carContainerId} nem talalhato`);
+    if (!skinRoot) throw new Error(`#${skinContainerId} nem talalhato`);
+    this.carRoot = carRoot;
+    this.skinRoot = skinRoot;
+    this.onChange = onChange;
+    this.car = toCarId(initial.car);
+    this.skin = toSkin(this.car, initial.skin);
+    this.renderCars();
+    this.renderSkins();
+  }
+
+  get value(): CarLook {
+    return { car: this.car, skin: this.skin };
+  }
+
+  /** Beallitas ERTESITES NELKUL -- pl. amikor a szerver mond ellent. */
+  set(look: CarLook): void {
+    this.car = toCarId(look.car);
+    this.skin = toSkin(this.car, look.skin);
+    this.renderCars();
+    this.renderSkins();
+  }
+
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    for (const b of this.carRoot.querySelectorAll("button")) {
+      b.disabled = !enabled;
+    }
+    for (const b of this.skinRoot.querySelectorAll("button")) {
+      b.disabled = !enabled;
+    }
+  }
+
+  private gomb(
+    nev: string,
+    leiras: string,
+    kivalasztott: boolean,
+    kattintas: () => void,
+  ): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "weapon";
+    b.disabled = !this.enabled;
+    // Az allapotot az aria-pressed hordozza, nem sajat CSS-osztaly:
+    // igy a kepernyoolvaso is helyesen mondja be.
+    b.setAttribute("aria-pressed", kivalasztott ? "true" : "false");
+    const cim = document.createElement("span");
+    cim.className = "wname";
+    cim.textContent = nev;
+    b.append(cim);
+    if (leiras) {
+      const d = document.createElement("span");
+      d.className = "wdesc";
+      d.textContent = leiras;
+      b.append(d);
+    }
+    b.addEventListener("click", kattintas);
+    return b;
+  }
+
+  private renderCars(): void {
+    this.carRoot.replaceChildren(
+      ...CAR_MODELS.map((m) =>
+        this.gomb(m.label, m.leiras, m.id === this.car, () => {
+          if (m.id === this.car) return;
+          this.car = m.id;
+          // A festesek AUTONKENT masok: uj kocsinal az elsore allunk.
+          this.skin = skinsOf(m.id)[0];
+          this.renderCars();
+          this.renderSkins();
+          this.onChange(this.value);
+        }),
+      ),
+    );
+  }
+
+  private renderSkins(): void {
+    const modell = carModel(this.car);
+    this.skinRoot.replaceChildren(
+      ...modell.skins.map((s) =>
+        this.gomb(s.label, "", s.id === this.skin, () => {
+          if (s.id === this.skin) return;
+          this.skin = s.id;
+          this.renderSkins();
+          this.onChange(this.value);
+        }),
+      ),
+    );
   }
 }
 

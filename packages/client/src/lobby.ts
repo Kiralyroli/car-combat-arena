@@ -2,18 +2,20 @@ import {
   DEFAULT_ABILITY,
   toAbilityId,
   type AbilityId,
-  DEFAULT_CAR_COLOR,
+  DEFAULT_CAR,
+  DEFAULT_SKIN,
   DEFAULT_WEAPON,
   MAX_NAME_LENGTH,
   sanitizePlayerName,
   toWeaponId,
   type RoomListing,
-  toCarColorId,
-  type CarColorId,
+  toCarId,
+  toSkin,
+  type CarId,
+  type CarLook,
   type WeaponId,
 } from "@cca/shared";
-import { AbilityPicker, WeaponPicker } from "./weaponPicker";
-import { ColorPicker } from "./colorPicker";
+import { AbilityPicker, CarSkinPicker, WeaponPicker } from "./weaponPicker";
 
 /**
  * Lobby: nev megadasa es szoba-valasztas (terv 5. lepcso 1. pont).
@@ -32,7 +34,7 @@ import { ColorPicker } from "./colorPicker";
 const STORAGE_KEY = "cca.playerName";
 const WEAPON_STORAGE_KEY = "cca.weapon";
 const ABILITY_STORAGE_KEY = "cca.ability";
-const COLOR_STORAGE_KEY = "cca.color";
+const CAR_STORAGE_KEY = "cca.car";
 
 /** Milyen surun kerjuk ujra a szoba-listat, amig a lobby nyitva van. */
 const REFRESH_MS = 2000;
@@ -43,7 +45,9 @@ export interface LobbyChoice {
   roomCode?: string;
   weapon: WeaponId;
   ability: AbilityId;
-  color: CarColorId;
+  car: CarId;
+  /** A valasztott festes a kocsin. */
+  skin: string;
 }
 
 export class Lobby {
@@ -56,7 +60,7 @@ export class Lobby {
   private readonly error: HTMLElement;
   private readonly weapons: WeaponPicker;
   private readonly abilities: AbilityPicker;
-  private readonly colors: ColorPicker;
+  private readonly cars: CarSkinPicker;
 
   private resolve: ((choice: LobbyChoice) => void) | null = null;
   private refreshTimer: number | null = null;
@@ -80,8 +84,8 @@ export class Lobby {
       readStoredAbility(),
       (ability) => storeAbility(ability),
     );
-    this.colors = new ColorPicker("color-pick", readStoredColor(), (color) =>
-      storeColor(color),
+    this.cars = new CarSkinPicker("car-pick", "skin-pick", readStoredCar(), (look) =>
+      storeCar(look),
     );
 
     // Ugyanaz a korlat, mint a szerveren -- igy a jatekos nem gepel be
@@ -114,7 +118,7 @@ export class Lobby {
     this.nameInput.value = readStoredName();
     this.weapons.set(readStoredWeapon());
     this.abilities.set(readStoredAbility());
-    this.colors.set(readStoredColor());
+    this.cars.set(readStoredCar());
     this.error.hidden = message === undefined;
     this.error.textContent = message ?? "";
     this.root.hidden = false;
@@ -192,7 +196,8 @@ export class Lobby {
       roomCode,
       weapon: this.weapons.value,
       ability: this.abilities.value,
-      color: this.colors.value,
+      car: this.cars.value.car,
+      skin: this.cars.value.skin,
     });
     this.resolve = null;
   }
@@ -244,17 +249,27 @@ export class RoomBadge {
   }
 }
 
-function readStoredColor(): CarColorId {
+/**
+ * A korabban valasztott kinezet: "<auto>|<festes>".
+ *
+ * EGY kulcsban a ketto, mert egyutt ervenyesek: a festesek autonkent
+ * masok, tehat kulon tarolva egy auto-valtas utan ervenytelen festes
+ * maradna bent.
+ */
+function readStoredCar(): CarLook {
   try {
-    return toCarColorId(localStorage.getItem(COLOR_STORAGE_KEY) ?? DEFAULT_CAR_COLOR);
+    const tarolt = localStorage.getItem(CAR_STORAGE_KEY) ?? "";
+    const [auto, festes] = tarolt.split("|");
+    const car = toCarId(auto);
+    return { car, skin: toSkin(car, festes) };
   } catch {
-    return DEFAULT_CAR_COLOR;
+    return { car: DEFAULT_CAR, skin: DEFAULT_SKIN };
   }
 }
 
-function storeColor(color: CarColorId): void {
+function storeCar(look: CarLook): void {
   try {
-    localStorage.setItem(COLOR_STORAGE_KEY, color);
+    localStorage.setItem(CAR_STORAGE_KEY, `${look.car}|${look.skin}`);
   } catch {
     // Privat mod vagy letiltott tarolas: a valasztas csak erre a
     // menetre ervenyes. Nem hiba, nem allitjuk meg.

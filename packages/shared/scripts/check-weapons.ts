@@ -6,7 +6,8 @@
  *
  * Futtatas: npm run check:weapons
  */
-import { CHASSIS } from "../src/config";
+import { CAR_GEOMETRY } from "../src/carGeometry";
+import { DEFAULT_CAR } from "../src/carModels";
 import {
   MACHINEGUN,
   muzzleForwardOf,
@@ -261,7 +262,7 @@ function main(): void {
   // modell meretei csusznak el.
   for (const weapon of WEAPON_IDS) {
     const nev = weaponLabel(weapon);
-    const roofAboveCenter = CHASSIS.halfExtents.y;
+    const roofAboveCenter = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.y;
     const level: [number, number, number, number] = [0, 0, 0, 1];
     const forward: [number, number, number] = [0, 0, -1];
 

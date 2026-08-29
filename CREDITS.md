@@ -39,6 +39,39 @@ háromszögből álló objektumként; a játékban használt változat:
 
 Az eredmény 1,36 MB.
 
+### Járművek — `packages/client/public/models/autok.glb`
+
+**„Low Poly Vehicle Mini Pack"** (Sketchfab) — a csomagsorozat három
+tagjából: *pack 2* (izomautó, szögletes terepjáró), *pack 5* (modern
+crossover), *pack 4.1* (3-ajtós terepjáró rendőr/mentő/szerviz
+festéssel).
+
+- Forrás: Sketchfab (a letöltött GLB-kben: `LowPolyVehiclePack4`)
+- Licenc: **kitöltendő** — a letöltött csomagokban nincs licencfájl
+
+**Módosítva.** A `tools/autok-export.py` állítja elő a játék
+változatát (`npm run autok-export`), és mindent SZKRIPTBŐL, hogy egy
+csomagfrissítés után újra lefuttatható legyen:
+
+- a négy használt karosszéria kiválasztva, mindegyikhez a **saját négy
+  kereke** — a csomagokban ezek részben egyetlen összevont hálóban
+  vannak (a terepjáró négy kereke egy 43 000 háromszöges objektum),
+  ezért laza részek szerint szét vannak szedve és a helyük szerint
+  négy kerékké összevonva,
+- ritkítva a webhez: karosszéria legfeljebb 8 000, kerék 1 200
+  háromszög (az eredetiben egyetlen kerék 11 500 volt),
+- egységes állásba forgatva (orr a `-Z` felé), vízszintesen középre,
+  a **kerekek alja** a nulla szintre,
+- a textúrák 4096×4096-ról 512×512-re, WEBP formátumban; a festések
+  külön fájlokban (`models/skins/`), mert a geometria közös.
+
+Az eredmény 3,1 MB + 0,8 MB festés (16 festés, négy karosszérián).
+
+**A méretek nem kézzel vannak beírva:** a modellből származnak
+(`packages/shared/src/carGeometry.ts`, generált fájl), és ebből épül az
+ütköző test, a találati test, a kerekek helye és mérete is. Így amit a
+játékos lát, és amivel a játék számol, ugyanaz.
+
 ### Ipari épületek — `packages/client/public/models/epuletek.glb`
 
 **„Industrial Buildings Set - Low poly models"** — készítette

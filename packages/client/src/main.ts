@@ -13,10 +13,11 @@ import {
   DEFAULT_WEAPON,
   RESPAWN_DELAY_MS,
   toWeaponId,
-  carColorHex,
-  toCarColorId,
-  DEFAULT_CAR_COLOR,
-  type CarColorId,
+
+  toCarId,
+  toSkin,
+  DEFAULT_CAR,
+  type CarId,
   weaponPivot,
   yawOf,
   ARCADE,
@@ -130,7 +131,8 @@ async function main(): Promise<void> {
             // NEM a kep kozepe: oda a sajat autonk esik. A hely a kamera
             // geometriajabol jon (lasd freeLookParkNdcY).
             y:
-              ((1 - freeLookParkNdcY(view.cameraFov)) / 2) * window.innerHeight,
+              ((1 - freeLookParkNdcY(view.cameraFov, net.ownCar)) / 2) *
+              window.innerHeight,
           }
         : null,
     ),
@@ -243,6 +245,9 @@ async function main(): Promise<void> {
       chassis.position,
       chassis.quaternion,
       net.ownWeapon,
+      // A SAJAT autonkkal: a fegyver a tetőn ul, tehat a magassaga az
+      // auto magassagatol fugg.
+      net.ownCar,
     );
     const dx = target[0] - origin[0];
     const dy = target[1] - origin[1];
@@ -390,12 +395,13 @@ async function main(): Promise<void> {
     roomCode: string | undefined,
     name: string,
     weapon?: WeaponId,
-    color?: CarColorId,
+    car?: CarId,
     ability?: AbilityId,
+    skin?: string,
   ): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       pendingJoin = resolve;
-      net.join(roomCode, name, weapon, color, ability);
+      net.join(roomCode, name, weapon, car, ability, skin);
     });
   }
 
@@ -458,10 +464,12 @@ async function main(): Promise<void> {
       pendingJoin?.(null);
       pendingJoin = null;
     },
-    onPlayerJoined: (id, color) => {
-      view.addRemoteCar(id, carColorHex(color));
-      // Fizikai test is kell hozza, kulonben athajtanank rajta.
-      backend.addRemoteBody(id);
+    onPlayerJoined: (id, car, skin) => {
+      view.addRemoteCar(id, car, skin);
+      // Fizikai test is kell hozza, kulonben athajtanank rajta. Az
+      // AUTOJA is szamit: 3,7 es 5,8 m kozott vannak, tehat egy kozos
+      // merettel a hosszu kocsi fele belelogna a masikba.
+      backend.addRemoteBody(id, car);
       hud.setNetworkStatus(`szoba ${net.roomCode}`, view.remoteCarCount);
     },
     onPlayerLeft: (id) => {
@@ -573,8 +581,10 @@ async function main(): Promise<void> {
    * (helyesen) elutasitja.
    */
   const directWeapon = toWeaponId(params.get("weapon") ?? DEFAULT_WEAPON);
-  /** Autoszin az URL-bol -- ugyanaz a minta, mint a "?weapon=". */
-  const directColor = toCarColorId(params.get("color") ?? DEFAULT_CAR_COLOR);
+  /** Auto az URL-bol -- ugyanaz a minta, mint a "?weapon=". */
+  const directCar = toCarId(params.get("car") ?? DEFAULT_CAR);
+  /** Festes az URL-bol -- az autohoz tartozik, tehat vele egyutt ervenyes. */
+  const directSkin = toSkin(directCar, params.get("skin"));
 
   try {
     await net.open(SERVER_URL, lagMs, jitterMs);
@@ -587,7 +597,14 @@ async function main(): Promise<void> {
 
   if (net.connected) {
     if (directName !== null) {
-      await joinAndWait(roomFromUrl || undefined, directName, directWeapon, directColor);
+      await joinAndWait(
+        roomFromUrl || undefined,
+        directName,
+        directWeapon,
+        directCar,
+        undefined,
+        directSkin,
+      );
     } else {
       // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
       let message: string | undefined;
@@ -597,8 +614,9 @@ async function main(): Promise<void> {
           choice.roomCode,
           choice.name,
           choice.weapon,
-          choice.color,
+          choice.car,
           choice.ability,
+          choice.skin,
         );
         if (failure === null) break;
         message = failure;
@@ -699,7 +717,7 @@ async function main(): Promise<void> {
       // kirajzolt auto egyezik-e vele. Igy barmelyik uton is erkezett
       // (playerJoined vagy snapshot), a vege ugyanaz -- es minden
       // kliens ugyanazt a jatekost ugyanolyannak latja.
-      view.setRemoteColor(id, carColorHex(net.remotes.colorOf(id)));
+      view.setRemoteCar(id, net.remotes.carOf(id), net.remotes.skinOf(id));
       // A FEGYVER ugyanigy: ujraszuleteskor valthat, es a tetőn ülő
       // modellbol kell latszania, mire szamitsunk az ellenfeltol.
       view.setRemoteWeapon(id, net.remotes.weaponOf(id));
@@ -816,7 +834,10 @@ async function main(): Promise<void> {
     // A celzas iranya: a sajat vetőnk beallitasahoz ES a halozathoz.
     const ownAim = currentAim(currChassis);
     view.setOwnAim(ownAim.yaw, ownAim.pitch);
-    view.setOwnColor(carColorHex(net.ownColor));
+    view.setOwnCar(net.ownCar, net.ownSkin);
+    // A FIZIKAI TEST is az autohoz tartozik: az utkozo alak es a
+    // kerekhelyek autonkent mask. A hivas olcso, ha nem valtozott.
+    backend.setCar?.(net.ownCar);
     // A sajat fegyverunk modellje is a halozati allapotbol jon: a
     // valasztast a SZERVER hagyja jova (elve nem lehet valtani), tehat
     // amit kirajzolunk, az a tenylegesen ervenyes fegyver.
@@ -889,8 +910,8 @@ async function main(): Promise<void> {
       // Uj jatekos is felbukkanhat pusztan a snapshotbol (pl. ha a
       // playerJoined ertesites elveszne) -- ilyenkor itt potoljuk.
       if (!view.hasRemoteCar(id)) {
-        view.addRemoteCar(id, carColorHex(net.remotes.colorOf(id)));
-        backend.addRemoteBody(id);
+        view.addRemoteCar(id, net.remotes.carOf(id), net.remotes.skinOf(id));
+        backend.addRemoteBody(id, net.remotes.carOf(id));
       }
 
       const state = net.remotes.sample(id, now);
@@ -935,7 +956,9 @@ async function main(): Promise<void> {
         continue;
       }
       // Ujraszuletes utan visszakerul a teste.
-      if (!backend.getRemoteBody(id)) backend.addRemoteBody(id);
+      if (!backend.getRemoteBody(id)) {
+        backend.addRemoteBody(id, net.remotes.carOf(id));
+      }
 
       // A HELYET a fizikai testrol vesszuk, nem kozvetlenul a halozati
       // mintabol. A test ugyanoda van vezerelve, DE az utkozes lokeset
@@ -1101,7 +1124,7 @@ async function main(): Promise<void> {
                 id: net.playerId,
                 name: net.ownName,
                 lives: net.lives ?? 0,
-                color: net.ownColor,
+                car: net.ownCar,
               },
             ]
           : []),
@@ -1109,7 +1132,7 @@ async function main(): Promise<void> {
           id,
           name: net.remotes.nameOf(id),
           lives: net.remotes.livesOf(id),
-          color: net.remotes.colorOf(id),
+          car: net.remotes.carOf(id),
         })),
       ],
       net.playerId,

@@ -25,10 +25,20 @@ export const WHEEL_TINT = {
   broken: 0x8b2f2a,
 } as const;
 
-/** A kerek tenyleges sugara az adott serules-allapotban. */
-export function wheelRadiusFor(damage: WheelDamage): number {
-  if (damage.broken) return WHEEL.radius * BROKEN_RADIUS_SCALE;
-  return WHEEL.radius * lerp(WORN_RADIUS_MIN_SCALE, 1, damage.gripMultiplier);
+/**
+ * A kerek tenyleges sugara az adott serules-allapotban.
+ *
+ * Az ALAPSUGAR autonkent mas (a negy kocsi kereke 0,72 es 0,92 m
+ * kozott van), ezert parameter -- a serules csak SZORZOKENT hat ra. Ha
+ * ez egyetlen kozos szam lenne, a nagy kerekű kocsi kereke a
+ * karosszeriaba erne, a kicsie meg lebegne.
+ */
+export function wheelRadiusFor(
+  damage: WheelDamage,
+  alapSugar: number = WHEEL.radius,
+): number {
+  if (damage.broken) return alapSugar * BROKEN_RADIUS_SCALE;
+  return alapSugar * lerp(WORN_RADIUS_MIN_SCALE, 1, damage.gripMultiplier);
 }
 
 /** A kerek szine az adott serules-allapotban. */

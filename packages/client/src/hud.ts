@@ -2,10 +2,10 @@ import {
   ABILITIES,
   DEFAULT_ABILITY,
   type AbilityId,
-  carColorHex,
   heatColor,
   OVERHEAT_FLASH_MS,
-  type CarColorId,
+  type CarId,
+  carLabel,
   type MatchSnapshot,
   type Telemetry,
   type WeaponId,
@@ -560,7 +560,7 @@ export interface ScoreRow {
   name: string;
   lives: number;
   /** Az auto szine -- ez koti a nevsort a palyan latott kocsihoz. */
-  color: CarColorId;
+  car: CarId;
 }
 
 /**
@@ -599,7 +599,7 @@ export class Scoreboard {
   update(rows: ScoreRow[], ownId: string | null): void {
     const sorted = sortScoreRows(rows);
 
-    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.color}`).join("|");
+    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.car}`).join("|");
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -618,12 +618,15 @@ export class Scoreboard {
       if (row.id === ownId) line.classList.add("self");
       if (row.lives <= 0) line.classList.add("out");
 
-      // Szinpotty a nev elott: EZ koti ossze a listat a palyan latott
-      // autoval. E nelkul a nevsor csak nevek listaja -- a jatekos nem
-      // tudja, melyik kocsi kicsoda.
+      // Az AUTO NEVE a jatekos neve elott: EZ koti ossze a listat a
+      // palyan latott kocsival. E nelkul a nevsor csak nevek listaja --
+      // a jatekos nem tudja, melyik kocsi kicsoda.
+      //
+      // Korabban szinpotty allt itt; a szinek helyett most kulonbozo
+      // karosszeriak vannak, es azokat a nevuk azonositja.
       const dot = document.createElement("span");
-      dot.className = "dot";
-      dot.style.background = `#${carColorHex(row.color).toString(16).padStart(6, "0")}`;
+      dot.className = "carnev";
+      dot.textContent = carLabel(row.car);
 
       const name = document.createElement("span");
       name.className = "nm";

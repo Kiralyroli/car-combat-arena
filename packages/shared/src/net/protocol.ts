@@ -17,7 +17,7 @@
 
 import type { AbilityId } from "../abilities";
 import type { MatchPhase } from "../match";
-import type { CarColorId } from "../carColors";
+import type { CarId } from "../carModels";
 import type { WeaponId } from "../weapons";
 /** Halozati snapshot-rata (Hz). A fizika ettol fuggetlenul 60 Hz -- lasd 15.3. */
 export const SNAPSHOT_HZ = 20;
@@ -50,8 +50,13 @@ export const INTERP_DELAY_MS = 100;
  * 8: KEPESSEGEK (gyogyitas / pajzs). A regi kliens nem tudna kepesseget
  * valasztani, es -- ami rosszabb -- nem latna a masik jatekos pajzsat:
  * a lovesei ok nelkul tunnenek el. Inkabb ne is csatlakozzon.
+ *
+ * 9: SZIN HELYETT AUTO. A jatekosok tiz kulonbozo karosszeria kozul
+ * valasztanak, a sajat texturajukkal. A regi kliens szint varna, es
+ * ismeretlen erteknel mindenkit ugyanolyannak latna -- vagyis nem
+ * lehetne megkulonboztetni a jatekosokat.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 10;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -201,13 +206,24 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    */
   protected: boolean;
   /**
-   * Az auto szine -- a SZERVER dontese szerint.
+   * Melyik karosszeriaval jatszik -- a SZERVER dontese szerint.
    *
    * Azert utazik a snapshotban, hogy MINDEN kliens ugyanazt lassa.
    * Korabban a fogado kliens osztotta ki a sajat listaja szerint, es
-   * ugyanaz a jatekos mas szinu volt minden kepernyon.
+   * ugyanaz a jatekos maskepp nezett ki minden kepernyon.
+   *
+   * Nem csak latvany: a kocsik merete elter (3,7 m-tol 5,8 m-ig),
+   * tehat ebbol jon a tavoli auto fizikai teste es a talalati teste is.
    */
-  color: CarColorId;
+  car: CarId;
+  /**
+   * A FESTES a valasztott karosszerian.
+   *
+   * Kulon utazik a modelltol: negy karosszeria van, festessel egyutt
+   * tizenhat kinezet -- egy szobaba pedig nyolc jatekos fer. A szerver
+   * a PAROST teszi egyedive (lasd assignCar).
+   */
+  skin: string;
 }
 
 /**
@@ -257,13 +273,15 @@ export interface JoinMessage {
   weapon?: WeaponId;
   ability?: AbilityId;
   /**
-   * Valasztott autoszin; hianyzo vagy ismeretlen ertek eseten sarga.
+   * Valasztott auto; hianyzo vagy ismeretlen ertek eseten Sedan.
    *
    * KERES, nem dontes: ha a szobaban mar hasznalja valaki, a szerver
-   * mast ad (lasd assignCarColor). A vegleges szin a snapshotbol derul
-   * ki -- igy nincs ket forras ugyanarra az adatra.
+   * mast ad (lasd assignCar). A vegleges auto a snapshotbol derul ki
+   * -- igy nincs ket forras ugyanarra az adatra.
    */
-  color?: CarColorId;
+  car?: CarId;
+  /** Valasztott festes; ismeretlen ertek eseten az auto elso festese. */
+  skin?: string;
 }
 
 /**
@@ -503,13 +521,14 @@ export interface PlayerJoinedMessage {
   type: "playerJoined";
   playerId: string;
   /**
-   * Az uj jatekos szine.
+   * Az uj jatekos KINEZETE (karosszeria + festes).
    *
-   * Azert megy MAR ITT, hogy az auto rogton a vegleges szinevel
-   * epuljon fel. A snapshotbol is kiderulne, de akkor egy pillanatra
-   * rossz szinnel villanna fel.
+   * Azert megy MAR ITT, hogy az auto rogton a veglegessel epuljon fel.
+   * A snapshotbol is kiderulne, de akkor egy pillanatra masik kocsi
+   * villanna fel -- es a modell csereje ujraepitest jelent.
    */
-  color: CarColorId;
+  car: CarId;
+  skin: string;
 }
 
 export interface PlayerLeftMessage {

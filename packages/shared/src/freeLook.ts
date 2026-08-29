@@ -25,6 +25,8 @@
  * MIERT ITT, a kozos csomagban: ez tiszta szamtan, DOM es Three.js
  * nelkul -- tehat Node alatt merheto (lasd check:freelook).
  */
+import { cameraScaleFor } from "./carSizes";
+import { DEFAULT_CAR, type CarId } from "./carModels";
 import { CAMERA } from "./config";
 
 export const FREELOOK = {
@@ -76,14 +78,24 @@ export const FREELOOK = {
  * FOLOTT latszik. Ha ezt kezzel irnank be, a kamera barmelyik
  * allitasakor (magassag, tavolsag, latoszog) csendben elcsuszna.
  */
-export function freeLookParkNdcY(fovFok: number): number {
+export function freeLookParkNdcY(
+  fovFok: number,
+  /**
+   * Melyik autoban ulunk: a kamera tavolsaga az auto meretehez
+   * igazodik (lasd cameraScaleFor), es a celkereszt helye ebbol jon.
+   * Egy nagyobb kocsinal a kamera tavolabb van, tehat a tavoli celpont
+   * kicsit maskepp latszik.
+   */
+  car: CarId = DEFAULT_CAR,
+): number {
+  const arany = cameraScaleFor(car);
   // A kamera nezesiranyanak lejtese: az autora nez, ami alatta van.
-  const magassag = CAMERA.offset.y - CAMERA.lookAtHeight;
-  const lejtes = Math.atan2(magassag, CAMERA.offset.z);
+  const magassag = (CAMERA.offset.y - CAMERA.lookAtHeight) * arany;
+  const lejtes = Math.atan2(magassag, CAMERA.offset.z * arany);
   // Ugyanez egy TAVOLI celpontra: alig lejt.
   const tavoliLejtes = Math.atan2(
     magassag,
-    CAMERA.offset.z + FREELOOK.celTavolsag,
+    CAMERA.offset.z * arany + FREELOOK.celTavolsag,
   );
   // A ketto kulonbsege a kep kozepe folotti szog.
   const szog = lejtes - tavoliLejtes;

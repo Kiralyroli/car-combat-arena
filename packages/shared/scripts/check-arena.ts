@@ -18,7 +18,8 @@
  *
  * Futtatas: npm run check:arena
  */
-import { ARENA, ARENA_HALF, CHASSIS, SPAWN_POINTS } from "../src/config";
+import { ARENA, ARENA_HALF, SPAWN_POINTS } from "../src/config";
+import { LARGEST_CAR_HALF } from "../src/carSizes";
 import { PICKUP_POINTS } from "../src/pickups";
 import { segmentHitsBox } from "../src/rocket";
 import { MACHINEGUN } from "../src/weapons";
@@ -29,8 +30,14 @@ function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
 }
 
-/** Az auto teljes magassaga -- ennel alacsonyabb targy nem takar el. */
-const CAR_HEIGHT = CHASSIS.halfExtents.y * 2;
+/**
+ * A LEGMAGASABB auto teljes magassaga -- ennel alacsonyabb targy nem
+ * takar el.
+ *
+ * A legmagasabbal merunk (nem a Sedannal): ami a SUV-ot nem takarja,
+ * az nem fedezek. Enelkul a palya a valosagosnal jobbnak latszana.
+ */
+const CAR_HEIGHT = LARGEST_CAR_HALF.y * 2;
 
 /** Minden akadaly (a padlon es a falakon kivul) -- jarhatosaghoz. */
 const OBSTACLES = ARENA.filter(
@@ -84,7 +91,8 @@ function makeRandom(seed: number): () => number {
 
 /** Beleer-e egy AKADALYBA ez a pont (fel autonyi rahagyassal)? */
 function insideObstacle(x: number, z: number): boolean {
-  const margin = CHASSIS.halfExtents.z;
+  // A LEGHOSSZABB autoval: aminel a pickup elakad, az nem szabad hely.
+  const margin = LARGEST_CAR_HALF.z;
   for (const box of OBSTACLES) {
     if (
       Math.abs(x - box.position.x) < box.halfExtents.x + margin &&

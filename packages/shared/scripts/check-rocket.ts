@@ -10,12 +10,15 @@
  *
  * Futtatas: npm run check:rocket
  */
+import { CAR_GEOMETRY } from "../src/carGeometry";
+import { DEFAULT_CAR } from "../src/carModels";
 import {
   EXPLOSION_MAX_DAMAGE,
   EXPLOSION_RADIUS,
   explosionFalloff,
   ROCKET_DIRECT_DAMAGE,
   ROCKET_SPAWN_OFFSET,
+  ROCKET_RADIUS,
   ROCKET_SPEED,
   rocketHitsCar,
 } from "../src/rocket";
@@ -78,6 +81,15 @@ function main(): void {
   const stepPerTick = ROCKET_SPEED * FIXED_DT;
   const target = car([0, 1, 0]);
 
+  // A MERETEK az alapertelmezett auto mert geometriajabol jonnek, nem
+  // beirt szamokbol: kulonben egy modell-csere utan a teszt akkor is
+  // "jo" maradna, ha kozben mast merne.
+  const felSzeles = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.x;
+  const felHossz = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z;
+  const felMagas = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.y;
+  /** Oldalt eddig er a sugarral felfujt doboz. */
+  const oldalHatar = felSzeles + ROCKET_RADIUS;
+
   // Egy tick-nyi szakaszt hasznalunk mindenhol, hogy a teszt azt merje,
   // ami a szerveren tenylegesen tortenik.
   const seg = (
@@ -102,11 +114,21 @@ function main(): void {
     seg(0, 1, -3.2),
     `z = -3.2 -> -${(3.2 - stepPerTick).toFixed(2)}`,
   );
-  check(
-    "az oldalaba erkezo lovedek talal",
-    rocketHitsCar([-2.5, 1, 0], [-2.5 + stepPerTick, 1, 0], target.position, target.rotation),
-    "oldalrol, a fel-szelesseg (1.09 m) fele",
-  );
+  {
+    // A hataron BELULRE erkezo lovedek: fel lepessel a doboz szele elott
+    // indul, tehat a lepes vegen mar biztosan benne van.
+    const kezdet = -(oldalHatar + stepPerTick / 2);
+    check(
+      "az oldalaba erkezo lovedek talal",
+      rocketHitsCar(
+        [kezdet, 1, 0],
+        [kezdet + stepPerTick, 1, 0],
+        target.position,
+        target.rotation,
+      ),
+      `oldalrol ${(-kezdet).toFixed(2)} m-rol (a doboz oldalhatara ${oldalHatar.toFixed(2)} m)`,
+    );
+  }
 
   // EZ A REGI HIBA. A korabbi gomb-kozelites 2.80 m sugarral dolgozott,
   // tehat az autotol 2.5 m-re oldalt elhuzo lovedek is KOZVETLEN
@@ -118,23 +140,31 @@ function main(): void {
   // karosszeria oldalt csak 1.09 m-ig er (a sugarral egyutt 1.69 m).
   // (Egy tavolabbi, orr elotti pont nem mutatna ki a hibat: az mar a
   // gombon is kivul esett volna.)
-  check(
-    "az auto MELLETT elhuzo lovedek NEM talal",
-    !seg(2.5, 1, 0) && !seg(-2.5, 1, 0),
-    "x = +-2.5 m a hossz kozepen (doboz-hatar 1.69 m) -- a regi 2.80 m-es gomb ezt talalatnak vette",
-  );
-  check(
-    "az auto FOLOTT elhuzo lovedek NEM talal",
-    !seg(0, 3.2, -3.2),
-    "y = 3.2 m (a doboz hatara 1 + 0.755 + 0.6 = 2.36 m)",
-  );
+  {
+    // Fel meterrel a hataron KIVUL: a lepes vegig kint marad, mert
+    // vizszintesen halad (a doboz szelet nem keresztezi).
+    const mellette = oldalHatar + 0.5;
+    check(
+      "az auto MELLETT elhuzo lovedek NEM talal",
+      !seg(mellette, 1, 0) && !seg(-mellette, 1, 0),
+      `x = ±${mellette.toFixed(2)} m a hossz kozepen (doboz-hatar ${oldalHatar.toFixed(2)} m)` +
+        " -- a regi 2.80 m-es gomb ezt talalatnak vette",
+    );
+    const folotte = 1 + felMagas + ROCKET_RADIUS + 0.5;
+    check(
+      "az auto FOLOTT elhuzo lovedek NEM talal",
+      !seg(0, folotte, -3.2),
+      `y = ${folotte.toFixed(2)} m (a doboz hatara ${(1 + felMagas + ROCKET_RADIUS).toFixed(2)} m)`,
+    );
+  }
 
   // Atfurodás: egy teljes tick-lepes barmelyik iranybol erje el a celt.
   // A legvekonyabb irany a szelesseg (1.09 m fel-meret).
   check(
     "egy tick alatt nem furodik at az auton",
-    seg(-1.6, 1, 0, [1, 0, 0]) || stepPerTick < 2 * (1.09 + 0.6),
-    `${stepPerTick.toFixed(2)} m/tick a ${(2 * (1.09 + 0.6)).toFixed(2)} m-es legvekonyabb atmerohoz`,
+    seg(-(oldalHatar + 0.05), 1, 0, [1, 0, 0]) ||
+      stepPerTick < 2 * oldalHatar,
+    `${stepPerTick.toFixed(2)} m/tick a ${(2 * oldalHatar).toFixed(2)} m-es legvekonyabb atmerohoz`,
   );
 
   // Elforgatott auto: 90 fokban a hossz es a szelesseg SZEREPET CSEREL.

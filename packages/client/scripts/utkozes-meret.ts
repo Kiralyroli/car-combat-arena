@@ -26,6 +26,7 @@
  * Futtatas (fusson a kliens dev szerver): npm run utkozes-meret
  */
 import { writeFileSync } from "node:fs";
+import { CAR_GEOMETRY, CAR_MODELS } from "@cca/shared";
 import { chromium } from "playwright";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
@@ -61,7 +62,20 @@ async function main(): Promise<void> {
 
   // SEGEDFUGGVENY NELKUL: a tsx a megnevezett fuggvenyeket __name()
   // burokba teszi, az viszont a LAPON nem letezik.
-  const halok = (await page.evaluate(() => {
+  // Az autok MERT geometriaja (carGeometry.ts): a haromszog-halot
+  // pontosan oda kell allitani, ahol a fizikai test all -- kulonben a
+  // szerver mashol keresne az autot, mint amit a jatekos lat.
+  const autoAdat = CAR_MODELS.map((m) => ({
+    id: m.id,
+    // A MERT talaj-eltolas (nem a fel magassag): a jatek is ezzel teszi
+    // le a modellt. Ha a ketto elterne, a szerver mashol keresne az
+    // autot, mint amit a jatekos lat -- a Muscle-nel ez 3 cm volt, es
+    // eppen ennyivel logott ki a halo a talalati dobozokbol.
+    eltolas: CAR_GEOMETRY[m.id].modelOffsetY,
+    kerekek: CAR_GEOMETRY[m.id].wheels.map((w) => [w.x, w.y, w.z]),
+  }));
+
+  const halok = (await page.evaluate((autok: any[]) => {
     const v = (window as any).__spike.view;
     const ki: any[] = [];
 
@@ -78,35 +92,39 @@ async function main(): Promise<void> {
       klon.rotation.y = 0;
       gyokerek.push([nev, klon]);
     }
-    // --- Az AUTO, a fizikai test rendszereben ---
+    // --- Az AUTOK, a fizikai test rendszereben ---
+    //
+    // MINDEGYIK karosszeria kulon: a negy kocsi merete es alakja
+    // elter, tehat egyetlen kozos halo az egyiknel a levegoben
+    // talalna, a masiknal atengedne a lovest.
     //
     // A fegyver KIMARAD: celzaskor elfordul, tehat egy auto-rogzitett
     // alak vagy nem fedne, vagy a teljes soport teruletet lefoglalna.
-    // A KEREKEK viszont benne vannak: sebzodnek, es celozni lehet rajuk.
-    const w = v.chassisMesh;
-    const launcher = v.launcher?.root ?? null;
-    const autoGyoker = w.clone(true);
-    // A klon a wrapper masolata; a fegyvert kivesszuk belole.
-    for (const gy of [...autoGyoker.children]) {
-      if (launcher !== null && gy.name === launcher.name) {
-        autoGyoker.remove(gy);
+    // A KEREKEK viszont benne vannak: sebzodnek, es celozni lehet rajuk
+    // -- es MINDEN modell a sajatjaval jar.
+    for (const auto of autok) {
+      const sablon = (v.carTemplates as Map<string, any>).get(auto.id);
+      const kerekSablonok =
+        (v.carWheelTemplates as Map<string, any[]>).get(auto.id) ?? [];
+      if (!sablon) continue;
+
+      // UGYANUGY allitjuk ossze, ahogy a jatek: a modell origoja a
+      // talajon van, a fizika viszont a doboz KOZEPPONTJAT szamolja --
+      // ezert megy minden resz fel magassaggal lejjebb.
+      const autoGyoker = new sablon.constructor();
+      const test = sablon.clone(true);
+      test.position.set(0, -auto.eltolas, 0);
+      autoGyoker.add(test);
+      for (let i = 0; i < kerekSablonok.length; i++) {
+        const kerek = kerekSablonok[i].clone(true);
+        const hely = auto.kerekek[i];
+        // A MERT helyre, ugyanoda, ahova a jatek is teszi.
+        if (hely) kerek.position.set(hely[0], hely[1], hely[2]);
+        autoGyoker.add(kerek);
       }
+
+      gyokerek.push([`__auto:${auto.id}`, autoGyoker]);
     }
-    autoGyoker.position.set(0, 0, 0);
-    autoGyoker.rotation.set(0, 0, 0);
-    autoGyoker.quaternion.set(0, 0, 0, 1);
-    for (const kerek of v.wheelGroups ?? []) {
-      // A kerekek a JELENETBEN allnak, nem a wrapperben. A klonjukat a
-      // wrapper rendszerebe kell vinni.
-      const kk = kerek.clone(true);
-      w.updateWorldMatrix(true, true);
-      kerek.updateWorldMatrix(true, true);
-      const rel = w.matrixWorld.clone().invert().multiply(kerek.matrixWorld);
-      kk.matrix.copy(rel);
-      kk.matrix.decompose(kk.position, kk.quaternion, kk.scale);
-      autoGyoker.add(kk);
-    }
-    gyokerek.push(["__auto", autoGyoker]);
 
     for (const [nev, gyoker] of gyokerek) {
       gyoker.updateWorldMatrix(true, true);
@@ -134,7 +152,7 @@ async function main(): Promise<void> {
       if (indices.length > 0) ki.push({ nev, vertices, indices });
     }
     return ki;
-  })) as Halo[];
+  }, autoAdat)) as Halo[];
 
   await browser.close();
 
@@ -185,7 +203,7 @@ export interface KodoltHalo {
   i: string;
 }
 
-/** Kulcs: a modell neve; "__auto" a jarmu. */
+/** Kulcs: a modell neve; "__auto:<auto>" a jarmuve (pl. "__auto:Sedan"). */
 export const UTKOZO_HALOK: Record<string, KodoltHalo> = {
 ${sorok}
 };

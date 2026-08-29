@@ -1,3 +1,5 @@
+import { CAR_GEOMETRY } from "./carGeometry";
+import { DEFAULT_CAR, type CarId } from "./carModels";
 import { WHEEL_LAYOUT } from "./config";
 import { explosionFalloff, EXPLOSION_RADIUS } from "./rocket";
 import { HEALTHY_WHEEL, type WheelDamage } from "./types";
@@ -43,8 +45,16 @@ export function wheelWorldPosition(
   carPosition: readonly number[],
   carRotation: readonly number[],
   wheelIndex: number,
+  /**
+   * Melyik auto: a kerekek helye modellenkent mas.
+   *
+   * Egy kozos elrendezessel a robbanas a rossz helyen keresne a
+   * kereket -- a jatekos azt latna, hogy a talalat mellette csapodott
+   * be, megis letort a gumija (vagy forditva).
+   */
+  car: CarId = DEFAULT_CAR,
 ): [number, number, number] {
-  const offset = WHEEL_LAYOUT[wheelIndex].position;
+  const offset = CAR_GEOMETRY[car].wheels[wheelIndex];
   const [qx, qy, qz, qw] = carRotation;
   const { x, y, z } = offset;
 

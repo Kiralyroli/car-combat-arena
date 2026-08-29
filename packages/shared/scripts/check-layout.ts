@@ -12,9 +12,9 @@
  *
  * Futtatas: npm run check:layout
  */
+import { LARGEST_CAR_HALF } from "../src/carSizes";
 import {
   ARENA_HALF,
-  CHASSIS,
   PROP_MERETEK,
   PROP_TALPAK,
   LAYOUT,
@@ -126,7 +126,9 @@ function main(): void {
   // Egy epuletbe szuletett jatekos beszorul, vagy a palya ala esik. Az
   // auto fel-atlojanal nagyobb tavolsag kell, plusz rahagyas.
   {
-    const kell = Math.hypot(CHASSIS.halfExtents.x, CHASSIS.halfExtents.z) + 1.5;
+    // A LEGNAGYOBB autoval: a szuletesi hely mindenkinek szabad kell
+    // legyen, nem csak a sedannak.
+    const kell = Math.hypot(LARGEST_CAR_HALF.x, LARGEST_CAR_HALF.z) + 1.5;
     const bajos: string[] = [];
     for (const s of SPAWN_POINTS) {
       for (const b of boxes) {
@@ -148,7 +150,7 @@ function main(): void {
   // A pickup a talaj felett lebeg: ha egy epuletbe kerul, oda nem lehet
   // odahajtani, es a palyarol gyakorlatilag eltunik.
   {
-    const kell = PICKUP_RADIUS + CHASSIS.halfExtents.z;
+    const kell = PICKUP_RADIUS + LARGEST_CAR_HALF.z;
     const bajos: string[] = [];
     for (const p of PICKUP_POINTS) {
       for (const b of boxes) {
@@ -199,7 +201,7 @@ function main(): void {
 
     // Minden oldalon vegigmegyunk, es megnezzuk, van-e olyan pont, ahol
     // egyetlen hataroló epulet sem all.
-    const AUTO = CHASSIS.halfExtents.x;
+    const AUTO = LARGEST_CAR_HALF.x;
     const resek: string[] = [];
     const oldalak: [string, "x" | "z", number][] = [
       ["eszak", "z", -ARENA_HALF],
@@ -324,7 +326,7 @@ function main(): void {
   // jatszik tovabb, csak a viztorony megint tomor hasab lesz, es a
   // rakodoszinbe nem lehet behajtani. Ezert nezzuk meg konkretan.
   {
-    const AUTO = CHASSIS.halfExtents.x * 2;
+    const AUTO = LARGEST_CAR_HALF.x * 2;
     const bajos: string[] = [];
     for (const nev of ["Watertower_1", "Railroad_Loadbay_Shed_1"] as const) {
       const talpak = PROP_TALPAK[nev];

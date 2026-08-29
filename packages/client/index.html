@@ -448,12 +448,15 @@
         gap: 8px;
       }
       #scoreboard .nm { flex: 1; }
-      #scoreboard .dot {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
+      /*
+        Az AUTO NEVE a jatekos neve elott -- ez koti ossze a nevsort a
+        palyan latott kocsival. Korabban szinpotty allt itt.
+      */
+      #scoreboard .carnev {
         flex: 0 0 auto;
-        /* A szint a JS allitja, a kozos CAR_COLORS listabol. */
+        font-size: 10px;
+        color: #8b949e;
+        min-width: 62px;
       }
       #scoreboard .row.self .nm { color: #f0a020; font-weight: bold; }
       #scoreboard .row.out .nm,
@@ -535,30 +538,23 @@
 
       /* Fegyvervalaszto: a lobbyban es a halal-kepernyon ugyanaz. */
       /* Autoszin-valaszto: szines korok, kivalasztva keretezve. */
-      .colors { display: flex; gap: 7px; flex-wrap: wrap; }
       /*
-         Az azonosito-alapu "#lobby button" szabaly (border-radius: 5px)
-         erosebb, mint egy puszta osztaly -- ezert kell ide is az id,
-         kulonben a korok lekerekitett negyzetnek latszanak.
+        AUTOVALASZTO: racsban, mert tiz elem egy sorban olvashatatlan
+        lenne. Ugyanaz a gomb-kinezet, mint a fegyvernel -- a ket
+        valasztas egyforma sulyu.
       */
-      #lobby .colors button {
-        width: 30px;
-        height: 30px;
-        padding: 0;
-        border-radius: 50%;
-        border: 2px solid #30363d;
-        cursor: pointer;
-        /* A szint a JS allitja a kozos CAR_COLORS listabol -- itt csak
-           a keret es a meret dol el. */
+      .cars {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 6px;
       }
-      #lobby .colors button:hover { border-color: #7d8590; }
-      #lobby .colors button[aria-pressed="true"] {
-        border-color: #e6edf3;
-        box-shadow: 0 0 0 2px #0d1117, 0 0 0 4px #e3b341;
+      @media (max-width: 700px) {
+        .cars { grid-template-columns: repeat(2, 1fr); }
       }
 
       .weapons { display: flex; gap: 8px; }
-      .weapons .weapon {
+      .weapons .weapon,
+      .cars .weapon {
         flex: 1;
         display: flex;
         flex-direction: column;
@@ -572,15 +568,20 @@
         text-align: left;
         cursor: pointer;
       }
-      .weapons .weapon:hover { border-color: #4d5866; }
-      .weapons .weapon[aria-pressed="true"] {
+      .weapons .weapon:hover,
+      .cars .weapon:hover { border-color: #4d5866; }
+      .weapons .weapon[aria-pressed="true"],
+      .cars .weapon[aria-pressed="true"] {
         border-color: #e3b341;
         background: #1c1a12;
         color: #e6edf3;
       }
-      .weapons .wname { font-size: 13px; letter-spacing: 0.04em; }
-      .weapons .wdesc { font-size: 10px; line-height: 1.35; color: #7d8590; }
-      .weapons .weapon[aria-pressed="true"] .wname { color: #e3b341; }
+      .weapons .wname,
+      .cars .wname { font-size: 13px; letter-spacing: 0.04em; }
+      .weapons .wdesc,
+      .cars .wdesc { font-size: 10px; line-height: 1.35; color: #7d8590; }
+      .weapons .weapon[aria-pressed="true"] .wname,
+      .cars .weapon[aria-pressed="true"] .wname { color: #e3b341; }
       #room-list {
         display: flex;
         flex-direction: column;
@@ -918,8 +919,15 @@
         <label class="lbl" for="name-input">Neved</label>
         <input id="name-input" type="text" autocomplete="off" spellcheck="false" />
 
-        <label class="lbl">Autó színe</label>
-        <div id="color-pick" class="colors"></div>
+        <label class="lbl">Autó</label>
+        <!--
+          KET SZINT: eloszor a karosszeria, aztan a festes. A gombokat
+          a CarSkinPicker rajzolja ki a kozos autolistabol -- kezzel
+          irt HTML mellett a ketto elobb-utobb elcsuszna egymastol.
+        -->
+        <div id="car-pick" class="cars"></div>
+        <label class="lbl">Festés</label>
+        <div id="skin-pick" class="cars"></div>
 
         <label class="lbl">Fegyver</label>
         <div id="weapon-pick" class="weapons">
@@ -941,7 +949,7 @@
           </button>
           <button type="button" class="weapon" data-ability="heal">
             <span class="wname">Gyógyítás</span>
-            <span class="wdesc">Azonnal +40 élet</span>
+            <span class="wdesc">3 mp alatt +40 élet</span>
           </button>
         </div>
 
@@ -1087,7 +1095,7 @@
           </button>
           <button type="button" class="weapon" data-ability="heal">
             <span class="wname">Gyógyítás</span>
-            <span class="wdesc">Azonnal +40 élet</span>
+            <span class="wdesc">3 mp alatt +40 élet</span>
           </button>
         </div>
       </div>
