@@ -65,6 +65,34 @@ const WEAPON_MODEL_URLS: Record<WeaponId, string> = {
 };
 
 /**
+ * A TEXTURA NELKULI fegyver-anyagok festese.
+ *
+ * A gepfegyver (turret.glb) teljes PBR-keszlettel jott: alapszin-,
+ * normal- es AO-terkep anyagonkent. Az agyu (flak.glb) NEM: harom
+ * anyaga (`Mat haut`, `mat sous haut`, `Mat pied`) egyetlen terkepet
+ * sem hoz, es alapszin-szorzot (baseColorFactor) sem -- a glTF
+ * alapertelmezese pedig tiszta feher, metalness=1. A csucspont-szinek
+ * (COLOR_0) is vegig 255,255,255-osek, tehat onnan sem jon szin.
+ *
+ * Feher + fem + a panorama-eg mint kornyezeti fenykep = az agyu
+ * VILAGITO FEHER foltkent ult az auto tetejen, miközben korulotte
+ * minden texturazott.
+ *
+ * A modell forrastexturaja nincs meg (a Sketchfab-csomagbol csak a
+ * geometria maradt, lasd CREDITS.md), ezert nem visszaallitani lehet,
+ * hanem FESTENI: anyagonkent egy hadizold-szurke alapszin. A nevek a
+ * modellbol valok, ezert kulcskent hasznalhatoak.
+ */
+const CANNON_PAINT: Record<string, number> = {
+  "Mat haut": 0x767c6c, // felso pancel/pajzs -- vilagosabb olivazold
+  "mat sous haut": 0x565b4d, // a fo test, mindket felen (cso ES talp)
+  "Mat pied": 0x3f4239, // talp -- a legsotetebb, hogy elvaljon a tetotol
+};
+
+/** Ha egy anyag neve nem szerepel a tablazatban, ezt a szint kapja. */
+const CANNON_PAINT_FALLBACK = 0x565b4d;
+
+/**
  * Diszites nelkuli mod: `?dekor=0`.
  *
  * MIERT VAN: a panorama-eg es a texturazott talaj a kep MINDEN pixelen
@@ -400,6 +428,10 @@ export class SceneView {
       if (!base) {
         throw new Error(`Turret_Base csomopont nem talalhato: ${url}`);
       }
+      // A SABLONON festunk, nem a peldanyokon: a createLauncher
+      // clone(true)-nal az anyagok kozosek maradnak, tehat egyszer
+      // kell megtenni, es minden autora ervenyes lesz.
+      this.paintUntexturedWeapon(base);
       this.weaponTemplates[weapon] = base;
     });
 
@@ -1931,6 +1963,41 @@ export class SceneView {
       if (found) return found;
     }
     return null;
+  }
+
+  /**
+   * A textura nelkuli fegyver-anyagok befestese (lasd CANNON_PAINT).
+   *
+   * A feltetel az ALAPSZIN-TERKEP hianya, nem a fegyver neve: amelyik
+   * anyagnak van sajat texturaja (a gepfegyver mind az ot anyaga),
+   * ahhoz nem nyulunk -- a MeshStandardMaterial szine a texturaval
+   * SZORZODIK, tehat a festes ott besotetitene a kesz mintazatot.
+   *
+   * A metalness/roughness ugyanazert allitodik at, amiert az autoknal
+   * (lasd normalizeMaterials): terkep nelkuli metalness=1 mellett a
+   * felulet csak a kornyezeti fenykepet tukrozne vissza.
+   */
+  private paintUntexturedWeapon(root: THREE.Object3D): void {
+    const kesz = new Set<THREE.Material>();
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const anyagok = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      for (const anyag of anyagok) {
+        const mat = anyag as THREE.MeshStandardMaterial;
+        if (mat.map || kesz.has(mat)) continue;
+        kesz.add(mat);
+        mat.color.setHex(CANNON_PAINT[mat.name] ?? CANNON_PAINT_FALLBACK);
+        mat.metalness = 0.25;
+        mat.roughness = 0.65;
+        // A csucspont-szinek vegig feherek, tehat nem hordoznak
+        // informaciot -- kikapcsolva eggyel kevesebb shader-valtozat.
+        mat.vertexColors = false;
+        mat.needsUpdate = true;
+      }
+    });
   }
 
   /** Arnyekot vet es fogad minden mesh a fan. */

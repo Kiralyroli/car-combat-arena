@@ -34,10 +34,17 @@ háromszögből álló objektumként; a játékban használt változat:
 - kettévágva forgó talpra (`Turret_Base`) és bólintó ágyúra
   (`Turret_Gun`), a bólintási tengely a cső magasságában,
 - 14 000 háromszögre ritkítva (Blender, Decimate),
-- a textúrák 1024×1024-ről 256×256-ra kicsinyítve, WEBP formátumban,
 - 3,45 m-ről 2,6 m-re méretezve, és a játék előre-irányához forgatva.
 
 Az eredmény 1,36 MB.
+
+**Textúra nélkül.** A gépfegyverrel ellentétben ebben a fájlban egyetlen
+kép sincs: a három anyag (`Mat haut`, `mat sous haut`, `Mat pied`)
+alapszín-térképet és alapszín-szorzót sem hoz, a csúcspont-színek pedig
+végig fehérek. A glTF alapértelmezése így tiszta fehér, fémes felület —
+az ágyú ettől világító fehér foltként ült az autó tetején. A színt ezért
+a kliens festi rá betöltéskor (`CANNON_PAINT`, `scene.ts`); ha az eredeti
+textúrák valaha előkerülnek, a festés kiváltható velük.
 
 ### Járművek — `packages/client/public/models/autok.glb`
 
