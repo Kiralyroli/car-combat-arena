@@ -470,10 +470,29 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(1, 4, 9, 0.82);
+        /*
+          GORGETHETO, ha nem fer ki: az auto-elonezettel a panel egy
+          alacsonyabb ablakban magasabb a kepernyonel. Kozepre zarva es
+          gorgetes nelkul a teteje ES az alja is levagodna -- a
+          "Csatlakozas" gomb elerhetetlen lenne. A padding kell a
+          "safe-area"-hoz: gorgeteskor is maradjon keret.
+        */
+        overflow-y: auto;
+        padding: 16px 0;
+        /*
+          ATTETSZOBB, mint korabban (0,82): a hatterben a palya
+          latszik, es lassan fordul (lasd menuCamera). A panel maga
+          tomor marad, tehat a szoveg ugyanugy olvashato.
+        */
+        background: rgba(1, 4, 9, 0.55);
         font-family: ui-monospace, monospace;
         z-index: 50;
       }
+      /*
+        A flex-kozepre zart elem teteje levagodna gorgeteskor; az "auto"
+        margo ezt kikeruli (a flexbox ismert korlatja).
+      */
+      #lobby .box { margin: auto; }
       #lobby .box {
         display: flex;
         flex-direction: column;
@@ -482,6 +501,12 @@
         background: #0d1117;
         border: 1px solid #4d5866;
         border-radius: 10px;
+        /*
+          SZELES panel: a fo tartalma egy 3D auto-elonezet, azt egy
+          keskeny hasabban nezni nem er semmit. A vw-korlat kis
+          ablakon (es telefonon) tartja meg a keretet.
+        */
+        width: min(920px, 94vw);
         min-width: 330px;
       }
       #lobby .title { font-size: 19px; color: #e6edf3; margin-bottom: 6px; }
@@ -545,12 +570,111 @@
       */
       .cars {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        /*
+          AUTO-KITOLTES: a karosszeriakbol negy van, a festesekbol
+          autonkent mas-mas szamu. Rogzitett oszlopszam mellett vagy
+          nyulnanak, vagy kilognanak; igy mindketto ugyanakkora
+          gombokkal all sorba.
+        */
+        grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
         gap: 6px;
       }
       @media (max-width: 700px) {
         .cars { grid-template-columns: repeat(2, 1fr); }
       }
+
+      /*
+        A NAGY elonezet vaszna. Rogzitett aranyu sav a valasztok
+        folott: a benne forgo autot a carPreview.ts rajzolja ide.
+        Hatter nelkul (a renderelo atlatszo), hogy a lobby sajat
+        hattere latszodjon at.
+      */
+      .carprev {
+        display: block;
+        width: 100%;
+        height: 240px;
+        /*
+          A KURZOR itt legyen latszik: a vaszon folott alapbol a jatek
+          szabalya ervenyes ("canvas { cursor: none }", mert ott a
+          celkereszt veszi at a szerepet), es a festes-kockakra ugy
+          kellett vakon celozni.
+        */
+        cursor: default;
+        background: #0e1218;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+      }
+
+      /*
+        A FESTES-VALASZTO a forgo auto ABLAKABAN ul, apro kockakban.
+        MIERT itt: a festes nem kulon dontes, hanem ugyanannak az
+        autonak a valtozata -- ott a helye, ahol maga az auto latszik,
+        es a menu is rovidebb egy teljes sorral. A vaszon folott lebeg,
+        atlatszo hatterrel, hogy a kocsi vegig latszodjon.
+      */
+      #lobby .carstage {
+        position: relative;
+        margin-bottom: 8px;
+      }
+      #skin-pick {
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-width: calc(100% - 20px);
+      }
+      #skin-pick .weapon {
+        display: block;
+        width: 62px;
+        height: 44px;
+        padding: 2px;
+        background: rgba(13, 17, 23, 0.78);
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      #skin-pick .weapon:hover { border-color: #4d5866; }
+      #skin-pick .weapon[aria-pressed="true"] {
+        border-color: #e3b341;
+        background: rgba(28, 26, 18, 0.92);
+      }
+      #skin-pick .carthumb {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+      /*
+        A festes NEVE csak a felolvasoknak (es a teszteknek) szol: a
+        kockan maga a kep mondja meg, milyen szinu lesz az auto. A
+        gomb "title"-je egerrel is megmutatja.
+      */
+      #skin-pick .wname {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      /* Kepes gomb: a belyegkep felul, a nev alatta. */
+      .cars .weapon.carbtn {
+        align-items: center;
+        gap: 4px;
+        padding: 6px 6px 7px;
+        text-align: center;
+      }
+      .cars .carthumb {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        /* A belyegkep NE fogja el a kattintast a gombtol. */
+        pointer-events: none;
+      }
+      .cars .weapon.carbtn .wdesc { text-align: center; }
 
       .weapons { display: flex; gap: 8px; }
       .weapons .weapon,
@@ -924,10 +1048,18 @@
           KET SZINT: eloszor a karosszeria, aztan a festes. A gombokat
           a CarSkinPicker rajzolja ki a kozos autolistabol -- kezzel
           irt HTML mellett a ketto elobb-utobb elcsuszna egymastol.
+
+          A NAGY vasznon a kivalasztott auto forog, a gombokon pedig
+          egy-egy belyegkep -- mindketto a JATEK modelljebol, elo
+          rendereléssel (lasd carPreview.ts). Igy a valasztoban
+          pontosan az latszik, amivel a jatekos jatszani fog.
         -->
+        <div class="carstage">
+          <canvas id="car-preview" class="carprev"></canvas>
+          <!-- A festesek a vaszon SARKABAN, apro kockakban. -->
+          <div id="skin-pick" role="group" aria-label="Festés"></div>
+        </div>
         <div id="car-pick" class="cars"></div>
-        <label class="lbl">Festés</label>
-        <div id="skin-pick" class="cars"></div>
 
         <label class="lbl">Fegyver</label>
         <div id="weapon-pick" class="weapons">

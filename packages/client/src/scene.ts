@@ -233,6 +233,17 @@ export class SceneView {
   private ownWeapon: WeaponId = DEFAULT_WEAPON;
 
   private camPos = new THREE.Vector3(0, 6, -12);
+  /**
+   * A KOVETKEZO kamera-frissites simitas nelkul, egybol a helyere.
+   *
+   * A menu kameraja a palya folott korozik, tehat a belepes utani elso
+   * kepkockan a kovetesi simitas egy fel palyanyi utat kezdene el
+   * megtenni -- kozben pedig a fal-elkerules (cameraClamp) minden
+   * kepkockan visszatolna a legkozelebbi epulet ele. Igy a kamera oda
+   * ragadt: a jatekos a sajat autojat felulrol, egy hazfal mellol
+   * latta. A belepeskor ezert egyszer odarakjuk, ahol lennie kell.
+   */
+  private camSnap = false;
   private camLook = new THREE.Vector3();
   private tmpVec = new THREE.Vector3();
   private tmpQuat = new THREE.Quaternion();
@@ -1342,6 +1353,15 @@ export class SceneView {
   /** A mar betoltott skin-texturak (fajlnev szerint), kozos keszlet. */
   private readonly skinTextures = new Map<string, THREE.Texture>();
   private readonly textureLoader = new THREE.TextureLoader();
+  /**
+   * A FOLYAMATBAN levo festes-betoltesek -- a lobby varakozik rajuk.
+   *
+   * A jatekban ez nem szamit: ott folyamatosan rajzolunk, es a textura
+   * a megerkezesekor egyszeruen megjelenik. A valaszto belyegkepei
+   * viszont EGYSZER keszulnek el; ha akkor meg nincs meg a festes,
+   * minden gombon a modell alap (fekete) texturaja maradna.
+   */
+  private readonly skinBetoltesek: Promise<void>[] = [];
 
   /** A SAJAT autonk festese -- a szerver dontese szerint. */
   private ownSkin: string | null = null;
@@ -1354,6 +1374,79 @@ export class SceneView {
    */
   carTemplateNames(): string[] {
     return [...this.carTemplates.keys()];
+  }
+
+  /**
+   * Egy auto ELONEZETI peldanya: karosszeria + negy kerek, festessel.
+   *
+   * A lobby valasztoja hasznalja. UGYANABBOL a modellbol es ugyanazzal
+   * a festes-logikaval keszul, mint a jatekbeli auto -- igy amit a
+   * jatekos a valasztoban lat, pontosan az, amivel jatszani fog. Egy
+   * kulon "valaszto-keszlet" elobb-utobb elcsuszna a jatektol.
+   *
+   * A csoport origoja a TALAJ (a kerekek also sikja), vizszintesen
+   * kozepen: a hivo igy egyszeruen ra tud nezni.
+   */
+  buildCarPreview(
+    carId: CarId,
+    skin: string,
+    weapon?: WeaponId,
+  ): THREE.Object3D | null {
+    const test = this.carTemplates.get(carId);
+    const kerekek = this.carWheelTemplates.get(carId);
+    if (!test || !kerekek) return null;
+
+    const geo = CAR_GEOMETRY[carId];
+    const csoport = new THREE.Group();
+    const testKlon = test.clone(true);
+    testKlon.name = "Body";
+    csoport.add(testKlon);
+    for (let i = 0; i < kerekek.length; i++) {
+      const kerek = kerekek[i].clone(true);
+      const hely = geo.wheels[i];
+      if (hely) {
+        // A mert helyre, a MODELL rendszereben (a talajhoz kepest).
+        kerek.position.set(hely.x, hely.y + geo.modelOffsetY, hely.z);
+      }
+      csoport.add(kerek);
+    }
+    // A FEGYVER is a valasztas resze: ugyanaz a modell, ugyanarra a
+    // mert magassagra teve, mint a jatekban. A LAUNCHER_HEIGHT a
+    // fizikai doboz KOZEPPONTJAHOZ mert (ott a jarmu wrapper origoja),
+    // ez a csoport viszont a talajrol indul -- innen a fel magassag.
+    if (weapon) {
+      const veto = this.createLauncher(weapon);
+      veto.root.position.y = LAUNCHER_HEIGHT(carId) + geo.halfExtents.y;
+      csoport.add(veto.root);
+    }
+
+    this.applySkin(csoport, carId, skin);
+    return csoport;
+  }
+
+  /**
+   * MENU-KAMERA: lassu korozes a palya felett.
+   *
+   * A lobby alatt a hatterben az arena latszik. Allo kepen ez egy
+   * tapetanak nez ki; a lassu fordulastol viszont latszik, hogy egy
+   * hely, ahova be fogunk lepni. SZANDEKOSAN lassu: egy teljes kor
+   * tobb mint harom perc, tehat a menu olvasasat nem zavarja.
+   *
+   * A camPos/camLook is koveti, hogy a belepeskor a szokasos
+   * kamerakovetes innen induljon -- kulonben az elso kepkockan
+   * atugrana az auto moge.
+   */
+  menuCamera(masodperc: number): void {
+    const szog = masodperc * 0.03;
+    const tav = ARENA_HALF * 1.3;
+    this.camPos.set(
+      Math.sin(szog) * tav,
+      ARENA_HALF * 0.5,
+      Math.cos(szog) * tav,
+    );
+    this.camera.position.copy(this.camPos);
+    this.camLook.set(0, 0, 0);
+    this.camera.lookAt(this.camLook);
   }
 
   /**
@@ -1418,7 +1511,18 @@ export class SceneView {
   ): THREE.Texture | null {
     const kesz = this.skinTextures.get(fajl);
     if (kesz) return kesz;
-    const tex = this.textureLoader.load(SKIN_URL + fajl);
+    // A betoltes vege KIVULROL is megvarhato (lasd skinsReady): a
+    // lobby belyegkepei egyszer keszulnek el, azokat a kesz textura
+    // utan ujra kell rajzolni. Hibanal is "kesz" a fogadalom -- egy
+    // hianyzo festesre varni orokke tartana.
+    let jelez: () => void = () => {};
+    this.skinBetoltesek.push(new Promise<void>((kesz) => (jelez = kesz)));
+    const tex = this.textureLoader.load(
+      SKIN_URL + fajl,
+      () => jelez(),
+      undefined,
+      () => jelez(),
+    );
     // A modell texturaja adja a helyes beallitasokat (szinter, uv-
     // ismetles, forditottsag) -- ezeket atvesszuk, kulonben a festes
     // fejjel lefele vagy rossz gammaval jelenne meg.
@@ -1433,6 +1537,18 @@ export class SceneView {
     }
     this.skinTextures.set(fajl, tex);
     return tex;
+  }
+
+  /**
+   * A FESTES-BETOLTESEK bevarasa -- a lobby belyegkepeihez.
+   *
+   * A visszaadott szam az eddig KERT texturak darabszama: a hivo ebbol
+   * latja, hogy az ujrarajzolas kert-e ujabbakat (uj auto festesei),
+   * vagy mar minden a helyen van.
+   */
+  async skinsReady(): Promise<number> {
+    await Promise.all(this.skinBetoltesek);
+    return this.skinBetoltesek.length;
   }
 
   /**
@@ -2597,7 +2713,7 @@ export class SceneView {
     // lathatoan lemarad az egertol. A jatekos a kepet koveti, nem a
     // kezet, tehat ez azonnal zavaro. A kivant hely ilyenkor is az auto
     // SIMITOTT allasabol jon, tehat nem lesz tole rangatos.
-    if (korulnezes.aktiv) {
+    if (korulnezes.aktiv || this.camSnap) {
       this.camPos.copy(desired);
     } else {
       this.camPos.lerp(desired, CAMERA.positionLerp);
@@ -2609,8 +2725,22 @@ export class SceneView {
     );
     this.camera.position.set(simitott[0], simitott[1], simitott[2]);
 
-    this.camLook.lerp(lookTarget, CAMERA.lookAtLerp);
+    if (this.camSnap) {
+      this.camLook.copy(lookTarget);
+      this.camSnap = false;
+    } else {
+      this.camLook.lerp(lookTarget, CAMERA.lookAtLerp);
+    }
     this.camera.lookAt(this.camLook);
+  }
+
+  /**
+   * A kovetkezo kamera-frissites UGORJON a helyere, ne kusszon oda.
+   *
+   * A menubol a jatekba lepeskor kell (lasd camSnap).
+   */
+  snapCamera(): void {
+    this.camSnap = true;
   }
 
   // --- Valaszthato ujraszuletesi helyek ---

@@ -562,6 +562,12 @@ async function main(): Promise<void> {
   // tudja kerdezni a nyitott szobakat, mielott a jatekos valasztana.
   const lobby = new Lobby();
   const roomBadge = new RoomBadge();
+  // Az auto-valaszto a JATEK sajat modelljeit mutatja meg: amit a
+  // lobbyban lat a jatekos, pontosan az lesz a palyan is.
+  lobby.setCarPreview(
+    (car, skin, weapon) => view.buildCarPreview(car, skin, weapon),
+    () => view.skinsReady(),
+  );
   lobby.setRefreshHandler(() => net.requestRoomList());
   net.on({ onRoomList: (rooms) => lobby.showRooms(rooms) });
 
@@ -606,20 +612,41 @@ async function main(): Promise<void> {
         directSkin,
       );
     } else {
+      // MENU-HATTER: a jatek kepkocka-hurka csak a belepes UTAN indul
+      // (lentebb), tehat a lobby mogott egy soha ki nem rajzolt, fekete
+      // vaszon allna. Ez a kis hurok csak a palyat rajzolja, lassan
+      // koroztetve a kamerat -- igy a menu azon a helyen all, ahova
+      // belepni keszulunk. A belepessel leall.
+      let menuFut = true;
+      const menuKepkocka = (most: number): void => {
+        if (!menuFut) return;
+        requestAnimationFrame(menuKepkocka);
+        view.menuCamera(most / 1000);
+        view.render();
+      };
+      requestAnimationFrame(menuKepkocka);
+
       // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
       let message: string | undefined;
-      for (;;) {
-        const choice = await lobby.open(message);
-        const failure = await joinAndWait(
-          choice.roomCode,
-          choice.name,
-          choice.weapon,
-          choice.car,
-          choice.ability,
-          choice.skin,
-        );
-        if (failure === null) break;
-        message = failure;
+      try {
+        for (;;) {
+          const choice = await lobby.open(message);
+          const failure = await joinAndWait(
+            choice.roomCode,
+            choice.name,
+            choice.weapon,
+            choice.car,
+            choice.ability,
+            choice.skin,
+          );
+          if (failure === null) break;
+          message = failure;
+        }
+      } finally {
+        menuFut = false;
+        // A kamera ne a palya folotti menu-nezopontbol kusszon az auto
+        // moge (lasd snapCamera).
+        view.snapCamera();
       }
     }
     if (net.roomCode) roomBadge.show(net.roomCode);

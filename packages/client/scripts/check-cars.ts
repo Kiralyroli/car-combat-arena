@@ -187,6 +187,47 @@ async function main(): Promise<void> {
     hosszak.map((h) => `${h.toFixed(2)} m`).join(", "),
   );
 
+  // --- A lobby elonezeti autoja: rajta a valasztott FEGYVER ---
+  //
+  // A MEGOLDANDO HIBA: a fegyver magassaga (LAUNCHER_HEIGHT) a fizikai
+  // doboz KOZEPPONTJAHOZ mert, az elonezeti csoport viszont a talajrol
+  // indul. A ket rendszer osszekeverese nem latvanyos hiba: a torony
+  // egyszeruen a karosszeria BELSEJEBE kerul, es a jatekos nem erti,
+  // miert nem latja a valasztott fegyverét.
+  const veto = await A.page.evaluate((car: string) => {
+    const view = (window as unknown as Record<string, any>).__spike.view;
+    const fegyveres = view.buildCarPreview(car, "Fekete", "cannon");
+    const fegyvertelen = view.buildCarPreview(car, "Fekete");
+    fegyveres.updateMatrixWorld(true);
+    const cso = fegyveres.getObjectByName("Turret_Gun");
+    let ures = true;
+    fegyvertelen.traverse((o: { name: string }) => {
+      if (o.name === "Turret_Gun") ures = false;
+    });
+    // A matrixWorld 14. eleme a vilag-beli Y (a modell talajanak
+    // rendszereben, mert az elonezeti csoport origoja a talaj).
+    return { magassag: cso ? cso.matrixWorld.elements[13] : null, ures };
+  }, ownA);
+
+  const tetoA = CAR_GEOMETRY[ownA].halfExtents.y * 2;
+  check(
+    "az elonezeti auton ott van a valasztott fegyver",
+    veto.magassag !== null,
+    veto.magassag === null ? "nincs Turret_Gun" : "Turret_Gun megvan",
+  );
+  check(
+    "a fegyver a TETO FOLOTT ul, nem a karosszeriaban",
+    veto.magassag !== null &&
+      veto.magassag >= tetoA &&
+      veto.magassag < tetoA + 1.5,
+    `a cso tengelye ${(veto.magassag ?? 0).toFixed(2)} m, a teto ${tetoA.toFixed(2)} m`,
+  );
+  check(
+    "fegyver nelkul kert elonezeten NINCS torony",
+    veto.ures,
+    "a belyegkepekre nem kerul fegyver",
+  );
+
   for (const client of [A, B, C, D]) await client.browser.close();
 
   console.log(

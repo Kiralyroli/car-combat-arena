@@ -15,6 +15,7 @@ import {
   type CarLook,
   type WeaponId,
 } from "@cca/shared";
+import { CarPreview } from "./carPreview";
 import { AbilityPicker, CarSkinPicker, WeaponPicker } from "./weaponPicker";
 
 /**
@@ -62,6 +63,27 @@ export class Lobby {
   private readonly abilities: AbilityPicker;
   private readonly cars: CarSkinPicker;
 
+  /**
+   * A NAGY elonezet vaszna es a rajzolo.
+   *
+   * A rajzolo csak akkor keszul el, ha a hivo ad modell-epitot (lasd
+   * setCarPreview): a mero szkriptek es a tesztek egy resze modellek
+   * nelkul is megnyitja a lobbyt, es attol meg mukodnie kell.
+   */
+  private readonly previewCanvas: HTMLCanvasElement;
+  private preview: CarPreview | null = null;
+  private previewEpito:
+    | ((
+        car: CarId,
+        skin: string,
+        weapon?: WeaponId,
+      ) => import("three").Object3D | null)
+    | null = null;
+  /** A festes-texturak bevarasa (a jatek jelenetebol). */
+  private previewKesz: (() => Promise<number>) | null = null;
+  /** Epp fut-e a belyegkep-frissito hurok (ne induljon ketto). */
+  private belyegkepFut = false;
+
   private resolve: ((choice: LobbyChoice) => void) | null = null;
   private refreshTimer: number | null = null;
   private onRefresh: (() => void) | null = null;
@@ -74,18 +96,33 @@ export class Lobby {
     this.joinBtn = must("lobby-join") as HTMLButtonElement;
     this.list = must("room-list");
     this.error = must("lobby-error");
+    this.previewCanvas = must("car-preview") as HTMLCanvasElement;
     // A valasztas megmarad a kovetkezo meccsre is: aki egyszer eldontotte,
     // ne kelljen minden belepesnel ujra rakattintania.
-    this.weapons = new WeaponPicker("weapon-pick", readStoredWeapon(), (weapon) =>
-      storeWeapon(weapon),
-    );
+    this.weapons = new WeaponPicker("weapon-pick", readStoredWeapon(), (weapon) => {
+      storeWeapon(weapon);
+      // A fegyver is a KINEZET resze: a forgo auton azonnal latszik,
+      // mi kerul a tetejere.
+      this.preview?.setWeapon(weapon);
+    });
     this.abilities = new AbilityPicker(
       "ability-pick",
       readStoredAbility(),
       (ability) => storeAbility(ability),
     );
-    this.cars = new CarSkinPicker("car-pick", "skin-pick", readStoredCar(), (look) =>
-      storeCar(look),
+    this.cars = new CarSkinPicker(
+      "car-pick",
+      "skin-pick",
+      readStoredCar(),
+      (look) => {
+        storeCar(look);
+        // A nagy elonezet AZONNAL koveti a valasztast -- ez az egesz
+        // valaszto lenyege: a jatekos lassa, mit valaszt.
+        this.preview?.show(look.car, look.skin);
+        // Masik autora valtva UJ festesek kellenek: a most kirajzolt
+        // belyegkepek meg a modell alap texturajaval keszultek.
+        void this.belyegkepeketFrissit();
+      },
     );
 
     // Ugyanaz a korlat, mint a szerveren -- igy a jatekos nem gepel be
@@ -97,6 +134,60 @@ export class Lobby {
     this.roomInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") this.chooseTypedCode();
     });
+  }
+
+  /**
+   * Az AUTO-ELONEZET bekapcsolasa.
+   *
+   * A hivo adja at a modell-epitot (a jatek jelenetebol), mert a lobby
+   * nem ismeri a 3D reteget. Enelkul a valaszto nev szerint mukodik
+   * tovabb -- kepek nelkul.
+   */
+  setCarPreview(
+    epito: (
+      car: CarId,
+      skin: string,
+      weapon?: WeaponId,
+    ) => import("three").Object3D | null,
+    kesz?: () => Promise<number>,
+  ): void {
+    this.previewEpito = epito;
+    this.previewKesz = kesz ?? null;
+  }
+
+  /** A gombok belyegkepeinek ujrarajzolasa a jelenlegi rajzoloval. */
+  private belyegkepeketRajzol(): void {
+    this.cars.setThumbnailer((car, skin, w, h) =>
+      this.preview ? this.preview.thumbnail(car, skin, w, h) : "",
+    );
+  }
+
+  /**
+   * A belyegkepek KESZRE rajzolasa.
+   *
+   * A festes-texturak halozatrol jonnek: az elso rajzolaskor meg
+   * nincsenek meg, es minden gombon a modell alap (fekete) texturaja
+   * latszana. Ezert megvarjuk a folyamatban levo betolteseket, es
+   * ujrarajzolunk -- addig ismetelve, amig egy kor mar nem kert ujabb
+   * texturat (a masodik auto festesei csak az elso rajzolaskor
+   * indulnak el).
+   */
+  private async belyegkepeketFrissit(): Promise<void> {
+    if (!this.previewKesz || this.belyegkepFut) return;
+    this.belyegkepFut = true;
+    try {
+      let elozo = -1;
+      // A felso hatar csak biztositek: harom kor alatt minden gomb
+      // texturaja megerkezik. Vegtelen hurok igy sem lehet belole.
+      for (let kor = 0; kor < 4; kor++) {
+        const db = await this.previewKesz();
+        if (!this.preview || db === elozo) return;
+        elozo = db;
+        this.belyegkepeketRajzol();
+      }
+    } finally {
+      this.belyegkepFut = false;
+    }
   }
 
   /** A lista frissiteset a hivo vegzi (o ismeri a halozatot). */
@@ -124,6 +215,19 @@ export class Lobby {
     this.root.hidden = false;
     this.nameInput.focus();
     this.nameInput.select();
+
+    // Az elonezet a MEGNYITASKOR epul fel, es a bezarasnal all le: egy
+    // meccs alatt semmi szukseg egy forgo autora (es egy WebGL
+    // kontextusra). A lobby tobbszor is megnyilhat -- sikertelen
+    // belepes utan --, ezert kell ujra felepiteni.
+    if (this.previewEpito && !this.preview) {
+      this.preview = new CarPreview(this.previewEpito);
+      this.preview.setWeapon(this.weapons.value);
+      this.belyegkepeketRajzol();
+      void this.belyegkepeketFrissit();
+    }
+    const valasztott = this.cars.value;
+    this.preview?.live(this.previewCanvas, valasztott.car, valasztott.skin);
 
     // Azonnal kerunk egy listat, utana rendszeresen.
     this.onRefresh?.();
@@ -208,6 +312,10 @@ export class Lobby {
       window.clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    // Az elonezet WebGL kontextusa nem kell tovabb: a meccs alatt egy
+    // felesleges renderelo futna a hatterben.
+    this.preview?.dispose();
+    this.preview = null;
   }
 }
 

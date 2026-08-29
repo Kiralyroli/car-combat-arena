@@ -125,6 +125,19 @@ export class CarSkinPicker {
     skinContainerId: string,
     initial: CarLook,
     onChange: (look: CarLook) => void,
+    /**
+     * BELYEGKEP-keszito: egy auto+festes kis kepe (data-URL).
+     *
+     * Opcionalis: ha nincs (pl. a modellek meg nem alltak fel), a
+     * gombokon csak a nev latszik. A valasztas igy is mukodik --
+     * kepek nelkul csak kevesbe kenyelmes.
+     */
+    private belyegkep?: (
+      car: CarId,
+      skin: string,
+      szeles: number,
+      magas: number,
+    ) => string,
   ) {
     const carRoot = document.getElementById(carContainerId);
     const skinRoot = document.getElementById(skinContainerId);
@@ -141,6 +154,22 @@ export class CarSkinPicker {
 
   get value(): CarLook {
     return { car: this.car, skin: this.skin };
+  }
+
+  /**
+   * A belyegkep-keszito UTOLAG is beallithato.
+   *
+   * A lobby a megnyitaskor keszit uj rajzolot (a bezarasnal eldobja a
+   * WebGL kontextust), a valaszto viszont a lobbyval egyutt jon
+   * letre. Beallitaskor ujrarajzoljuk a gombokat, kulonben a kepek
+   * csak a kovetkezo valasztasnal jelennenek meg.
+   */
+  setThumbnailer(
+    keszito: (car: CarId, skin: string, szeles: number, magas: number) => string,
+  ): void {
+    this.belyegkep = keszito;
+    this.renderCars();
+    this.renderSkins();
   }
 
   /** Beallitas ERTESITES NELKUL -- pl. amikor a szerver mond ellent. */
@@ -166,14 +195,22 @@ export class CarSkinPicker {
     leiras: string,
     kivalasztott: boolean,
     kattintas: () => void,
+    kep?: string,
   ): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "weapon";
+    b.className = kep ? "weapon carbtn" : "weapon";
     b.disabled = !this.enabled;
     // Az allapotot az aria-pressed hordozza, nem sajat CSS-osztaly:
     // igy a kepernyoolvaso is helyesen mondja be.
     b.setAttribute("aria-pressed", kivalasztott ? "true" : "false");
+    if (kep) {
+      const img = document.createElement("img");
+      img.src = kep;
+      img.alt = "";
+      img.className = "carthumb";
+      b.append(img);
+    }
     const cim = document.createElement("span");
     cim.className = "wname";
     cim.textContent = nev;
@@ -184,6 +221,9 @@ export class CarSkinPicker {
       d.textContent = leiras;
       b.append(d);
     }
+    // A festes-kockakon a felirat rejtve van: a "title" mondja meg,
+    // mit valasztunk, ha valaki raviszi az egeret.
+    b.title = nev;
     b.addEventListener("click", kattintas);
     return b;
   }
@@ -191,15 +231,29 @@ export class CarSkinPicker {
   private renderCars(): void {
     this.carRoot.replaceChildren(
       ...CAR_MODELS.map((m) =>
-        this.gomb(m.label, m.leiras, m.id === this.car, () => {
-          if (m.id === this.car) return;
-          this.car = m.id;
-          // A festesek AUTONKENT masok: uj kocsinal az elsore allunk.
-          this.skin = skinsOf(m.id)[0];
-          this.renderCars();
-          this.renderSkins();
-          this.onChange(this.value);
-        }),
+        this.gomb(
+          m.label,
+          m.leiras,
+          m.id === this.car,
+          () => {
+            if (m.id === this.car) return;
+            this.car = m.id;
+            // A festesek AUTONKENT masok: uj kocsinal az elsore allunk.
+            this.skin = skinsOf(m.id)[0];
+            this.renderCars();
+            this.renderSkins();
+            this.onChange(this.value);
+          },
+          // A KIVALASZTOTT auto a sajat festesevel latszik, a tobbi
+          // az elsovel: igy az auto-sorban is latszik, mit valasztott
+          // a jatekos a festes-sorban.
+          this.belyegkep?.(
+            m.id,
+            m.id === this.car ? this.skin : skinsOf(m.id)[0],
+            240,
+            150,
+          ),
+        ),
       ),
     );
   }
@@ -208,12 +262,22 @@ export class CarSkinPicker {
     const modell = carModel(this.car);
     this.skinRoot.replaceChildren(
       ...modell.skins.map((s) =>
-        this.gomb(s.label, "", s.id === this.skin, () => {
-          if (s.id === this.skin) return;
-          this.skin = s.id;
-          this.renderSkins();
-          this.onChange(this.value);
-        }),
+        this.gomb(
+          s.label,
+          "",
+          s.id === this.skin,
+          () => {
+            if (s.id === this.skin) return;
+            this.skin = s.id;
+            this.renderSkins();
+            // Az auto-gomb kepe is a friss festest mutatja.
+            this.renderCars();
+            this.onChange(this.value);
+          },
+          // A festes-gombon a KIVALASZTOTT auto latszik, azzal a
+          // festessel: igy a jatekos azt latja, amit valaszt.
+          this.belyegkep?.(this.car, s.id, 96, 64),
+        ),
       ),
     );
   }
