@@ -39,8 +39,12 @@ kommentben van.
 - **Egy példány.** A szobák és a meccsek a szerver MEMÓRIÁJÁBAN élnek
   (terv 15.7: MVP-ben nincs adatbázis). Két példány között a szobák nem
   látszanának, és a lobby listája szakadozna.
-- **Nem állhat le tétlenségkor** (`auto_stop_machines = false`). Egy
-  leállás minden futó meccset megszakít.
+- **Tétlenségkor felfüggesztés, nem leállás** (`auto_stop_machines =
+  'suspend'`, `min_machines_running = 0`). A felfüggesztés a memóriát is
+  lementi, így a szobák és a futó meccsek túlélik; egy teljes leállás
+  mindet eldobná. Amíg bárki játszik, a WebSocket-kapcsolat nyitva van,
+  tehát a gép nem alszik el — és az első kérés (már a lobby megnyitása
+  is) visszaébreszti.
 - **Deploy = újraindítás.** Játékidőn kívül érdemes.
 - **Régió.** A ping közvetlenül számít: az interpolációs puffer, az
   ütközés-jóslat és a becsapódás visszajelzése mind belőle számol.
