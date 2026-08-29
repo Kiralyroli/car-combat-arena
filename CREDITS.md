@@ -41,13 +41,30 @@ Az eredmény 1,36 MB.
 
 ### Járművek — `packages/client/public/models/autok.glb`
 
-**„Low Poly Vehicle Mini Pack"** (Sketchfab) — a csomagsorozat három
-tagjából: *pack 2* (izomautó, szögletes terepjáró), *pack 5* (modern
-crossover), *pack 4.1* (3-ajtós terepjáró rendőr/mentő/szerviz
-festéssel).
+**„Low Poly Vehicle Mini Pack"** — készítette **Vladek**
+(@vladek27). A sorozat három tagjából használunk járműveket:
 
-- Forrás: Sketchfab (a letöltött GLB-kben: `LowPolyVehiclePack4`)
-- Licenc: **kitöltendő** — a letöltött csomagokban nincs licencfájl
+- **Pack 2** (izomautó, szögletes terepjáró):
+  <https://sketchfab.com/3d-models/low-poly-vehicle-mini-pack-2-36b9cd0d2e19467cbe76d0fbd4182e53>
+- **Pack 5** (modern crossover):
+  <https://sketchfab.com/3d-models/low-poly-vehicle-mini-pack-5-8deab9d97646487fbe6390012775a4ba>
+- **Pack 4.1** (3-ajtós terepjáró, rendőr/mentő/szerviz festéssel):
+  <https://sketchfab.com/3d-models/low-poly-vehicle-mini-pack-41-b49688ffec6943c7b77cafdb1286e079>
+
+Licenc: **Free Standard** (Sketchfab Standard licenc,
+<https://sketchfab.com/licenses>) — mindhárom modellnél ez szerepel.
+Ez NEM Creative Commons, szemben a projekt többi modelljével.
+
+**A feltüntetés itt is kötelező**, éppen a mi helyzetünkben: a licenc
+3.2 pontja szerint ha a mű más licencelt anyagok szerzőit feltünteti,
+akkor ezt is fel kell tüntetni — „in equal size and comparable
+placement". Mivel a lobbyban a CC-BY anyagok szerzői ki vannak írva,
+Vladek neve is ott van, ugyanúgy.
+
+Amit a licenc tilt, és ránk vonatkozik: a modellt **önálló fájlként**
+nem adhatjuk tovább (a játék részeként igen), és nem adhatjuk el vagy
+licencelhetjük tovább. A játék eredeti mű, a modellek beépített
+elemek — ez a licenc szerint rendben van.
 
 **Módosítva.** A `tools/autok-export.py` állítja elő a játék
 változatát (`npm run autok-export`), és mindent SZKRIPTBŐL, hogy egy
