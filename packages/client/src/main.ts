@@ -42,6 +42,7 @@ import {
   hideLoading,
   Hud,
   KillFeed,
+  KillNotice,
   MatchHud,
   NetStat,
   PlayerHud,
@@ -320,6 +321,8 @@ async function main(): Promise<void> {
   const scoreboard = new Scoreboard();
   // KILOVES-LISTA a jobb felso sarokban -- minden jatekmodban.
   const killFeed = new KillFeed();
+  // ...es ami EPPEN VELUNK tortent, a kep kozepe folott.
+  const killNotice = new KillNotice();
   /** A legutobb latott meccs-fazis -- az uj meccs felismeresehez. */
   let elozoFazis: MatchPhase = "waiting";
   const netStat = new NetStat();
@@ -510,9 +513,13 @@ async function main(): Promise<void> {
       for (const tracer of tracers) tracerQueue.push(tracer, now);
     },
     onKills: (kills) => {
+      const now = performance.now();
       // A SAJAT azonositonk is atmegy: a listan a sajat nevunk kiemelve
       // latszik -- harc kozben elsosorban az erdekel, mi tortent VELUNK.
-      killFeed.add(kills, net.playerId, performance.now());
+      killFeed.add(kills, net.playerId, now);
+      // ...es amit VELUNK tettek, azt kulon is kimondjuk a kep kozepen:
+      // a sarokban levo listat harc kozben nem nezi senki.
+      killNotice.add(kills, net.playerId, now);
     },
     onRespawn: (position) => {
       // A szerver altal kiosztott helyre allunk, teli HP-val. A serult
@@ -1235,9 +1242,13 @@ async function main(): Promise<void> {
     if (net.match.phase === "playing" && elozoFazis !== "playing") {
       killFeed.clear();
     }
+    if (net.match.phase === "playing" && elozoFazis !== "playing") {
+      killNotice.clear();
+    }
     elozoFazis = net.match.phase;
-    // A kilovés-lista sorai maguktol jarnak le -- lasd KillFeed.
+    // A kilovés-lista sorai es az ertesites maguktol jarnak le.
     killFeed.update(renderNow);
+    killNotice.update(renderNow);
 
     requestAnimationFrame(frame);
   }

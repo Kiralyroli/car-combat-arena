@@ -1178,6 +1178,57 @@
         text-transform: uppercase;
       }
 
+      /*
+         KILOVES-ERTESITO: mi tortent EPPEN VELUNK.
+
+         A kilovés-lista a jobb felso sarokban minden esemenyt mutat --
+         de eppen ezert nem alkalmas arra, hogy a SAJAT kilovesunket
+         vagy halalunkat kiemelje: harc kozben a szem a kep kozepen van,
+         nem a sarokban.
+
+         A kep KOZEPE FOLOTT all, nem a kozepen: ott a celkereszt es a
+         sajat autonk van. Rovid ideig latszik, es magatol elhalvanyul --
+         esemeny, nem allapot.
+      */
+      #kill-notice {
+        position: fixed;
+        top: 30%;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        text-align: center;
+        font: 16px/1.3 ui-monospace, monospace;
+        text-shadow: 0 2px 12px rgba(1, 4, 9, 0.95);
+        pointer-events: none;
+        user-select: none;
+        animation: kill-ertesito 2.4s ease-out forwards;
+      }
+      #kill-notice .fo {
+        font-size: 30px;
+        font-weight: bold;
+        letter-spacing: 0.08em;
+      }
+      #kill-notice.kill .fo { color: #3fb950; }
+      #kill-notice.halal .fo { color: #f85149; }
+      #kill-notice .al { color: #e6edf3; font-size: 15px; }
+      /* A fegyver neve halvanyabb: a KI a lenyeg, a mivel csak reszlet. */
+      #kill-notice .al .mivel { color: #8b949e; }
+      @keyframes kill-ertesito {
+        0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
+        8% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        70% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        @keyframes kill-ertesito {
+          0%, 70% { opacity: 1; transform: translateX(-50%); }
+          100% { opacity: 0; transform: translateX(-50%); }
+        }
+      }
+
       #match-result {
         position: fixed;
         inset: 0;
@@ -1593,6 +1644,12 @@
       újraindulás<div class="sav"><i></i></div>
     </div>
     <div id="match-banner" hidden></div>
+    <!--
+      Mi tortent EPPEN VELUNK: sajat kiloves vagy sajat megsemmisules.
+      A tartalmat a KillNotice rajzolja ki (lasd hud.ts).
+    -->
+    <div id="kill-notice" hidden></div>
+
     <div id="match-result" hidden></div>
 
     <!--

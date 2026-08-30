@@ -990,6 +990,119 @@ export class KillFeed {
   }
 }
 
+/**
+ * KILOVES-ERTESITO: mi tortent EPPEN VELUNK.
+ *
+ * A kilovés-lista (KillFeed) MINDEN esemenyt mutat a jobb felso
+ * sarokban -- eppen ezert nem alkalmas arra, hogy a sajat kilovesunket
+ * vagy halalunkat kiemelje: harc kozben a szem a kep kozepen jar, nem a
+ * sarokban. Ket kerdesre valaszol, amire a jatekosnak AZONNAL kell a
+ * valasz:
+ *
+ *  - sikerult-e a kiloves, es kit kaptunk el,
+ *  - ha minket lottek ki: KI volt az, es mivel.
+ *
+ * A masodik nelkul a halal magyarazat nelkuli: a jatekos csak annyit
+ * lat, hogy vege -- azt nem, hogy kitol tartson legkozelebb.
+ *
+ * UGYANABBOL a forrasbol dolgozik, mint a kilovés-lista (KillEvent):
+ * ket kulon szamolasbol a ketto elobb-utobb mast mondana ugyanarrol az
+ * esemenyrol.
+ */
+export class KillNotice {
+  private readonly el: HTMLElement;
+
+  /**
+   * Meddig latszik (ms).
+   *
+   * Valamivel tovabb, mint a sebzes-szam: ez nem a talalat
+   * visszajelzese, hanem egy lezart parharce -- van ideje elolvasni.
+   */
+  private static readonly ELETTARTAM_MS = 2400;
+
+  /** Mikor jar le a most kint levo ertesites; null, ha nincs. */
+  private lejar: number | null = null;
+
+  constructor() {
+    this.el = must("kill-notice");
+  }
+
+  /**
+   * A ranK tartozo esemenyek megjelenitese.
+   *
+   * Egy snapshotban tobb esemeny is lehet (egy robbanas ketto autot is
+   * elvihet). A SAJAT HALALUNK az erosebb: ha ugyanabban a korben
+   * kilottunk valakit ES minket is kilottek, a halal az, amire a
+   * jatekosnak reagalnia kell.
+   */
+  add(kills: readonly KillEvent[], ownId: string | null, now: number): void {
+    if (ownId === null) return;
+    const sajatHalal = kills.find((k) => k.victimId === ownId);
+    const sajatKiloves = kills.find(
+      (k) => k.killerId === ownId && k.victimId !== ownId,
+    );
+    if (sajatHalal) this.mutat("halal", sajatHalal, ownId, now);
+    else if (sajatKiloves) this.mutat("kill", sajatKiloves, ownId, now);
+  }
+
+  /** Kepkockankent: a lejart ertesites eltuntetese. */
+  update(now: number): void {
+    if (this.lejar !== null && now >= this.lejar) {
+      this.lejar = null;
+      this.el.hidden = true;
+    }
+  }
+
+  /** Uj meccsnel tiszta lappal indulunk. */
+  clear(): void {
+    this.lejar = null;
+    this.el.hidden = true;
+  }
+
+  private mutat(
+    fajta: "kill" | "halal",
+    kill: KillEvent,
+    ownId: string,
+    now: number,
+  ): void {
+    this.el.textContent = "";
+    this.el.className = fajta;
+
+    const fo = document.createElement("div");
+    fo.className = "fo";
+    fo.textContent = fajta === "kill" ? "KILOVES" : "MEGSEMMISULTEL";
+    this.el.appendChild(fo);
+
+    const al = document.createElement("div");
+    al.className = "al";
+    if (fajta === "kill") {
+      // SZOVEGKENT: a nev egy masik jatekostol jon.
+      al.textContent = kill.victimName;
+    } else if (kill.killerId === null || kill.cause === null) {
+      // Sajat hiba: nincs kit megnevezni. Ezt is kimondjuk -- kulonben
+      // a jatekos a nem letezo tamadot keresne.
+      al.textContent = "saját hiba";
+    } else {
+      al.textContent = `${kill.killerName} `;
+      const mivel = document.createElement("span");
+      mivel.className = "mivel";
+      mivel.textContent = `(${KILL_CAUSE_LABEL[kill.cause]})`;
+      al.appendChild(mivel);
+    }
+    this.el.appendChild(al);
+
+    // Az ANIMACIOT ujra kell inditani: a CSS csak az elem
+    // MEGJELENESEKOR indul, tehat egymast koveto ertesiteseknel elobb
+    // el kell rejteni, es egy kikenyszeritett ujraszamolas utan
+    // visszahozni.
+    this.el.hidden = true;
+    void this.el.offsetWidth;
+    this.el.hidden = false;
+    this.lejar = now + KillNotice.ELETTARTAM_MS;
+    void ownId;
+  }
+}
+
 export function hideLoading(): void {
   const el = document.getElementById("loading");
   if (el) el.remove();
