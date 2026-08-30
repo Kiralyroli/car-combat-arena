@@ -16,6 +16,7 @@
  * Futtatas: npx tsx scripts/check-match-flow.ts [--lag=200 --jitter=60]
  */
 import { chromium, type Browser, type Page } from "playwright";
+import { SHOOT_FAR_Z, SHOOT_NEAR_Z, SHOOT_X } from "./arenaLane";
 import { LIVES_PER_PLAYER } from "@cca/shared";
 
 const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
@@ -81,7 +82,8 @@ function clientUrl(hash: string): string {
   // azok a JATEKMENETBEN nem szamitanak, a szoftveres rendereloben
   // viszont annyira lelassitjak a lapot, hogy a fizika lemarad (lasd
   // scene.ts dekoracioBe).
-  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}${lag}&dekor=0${hash}`;
+  // GEPFEGYVER, nem agyu: a kivegzes ezzel tortenik (lasd shootUntilKill).
+  return `${CLIENT_URL}?name=${encodeURIComponent(testName)}&weapon=machinegun${lag}&dekor=0${hash}`;
 }
 
 let failures = 0;
@@ -148,8 +150,45 @@ async function bothSynced(a: Page, b: Page): Promise<boolean> {
   return (await error(a, b)) < 1 && (await error(b, a)) < 1;
 }
 
+/** Ahol A latja B-t (interpolalt kep) -- a celzashoz. */
+async function seenPosition(page: Page): Promise<[number, number, number] | null> {
+  return (await page.evaluate(`(function () {
+    var s = window.__spike;
+    var ids = s.net.remotes.ids();
+    if (ids.length === 0) return null;
+    var t = s.view.remoteCarTransform(ids[0]);
+    return t ? t.position : null;
+  })()`)) as [number, number, number] | null;
+}
+
+/** A celkereszt a megadott vilagbeli pontra. */
+async function aimAt(page: Page, target: [number, number, number]): Promise<void> {
+  const screen = (await page.evaluate(`(function () {
+    var c = window.__spike.view.camera;
+    var v = c.position.clone();
+    v.set(${target[0]}, ${target[1]}, ${target[2]});
+    v.project(c);
+    return [
+      (v.x * 0.5 + 0.5) * window.innerWidth,
+      (-v.y * 0.5 + 0.5) * window.innerHeight,
+    ];
+  })()`)) as [number, number];
+  await page.mouse.move(screen[0], screen[1]);
+}
+
 /**
- * Egy kivegzes: A nekihajt B-nek, amig B el nem veszit egy eletet.
+ * Egy kivegzes: A KILOVI B-t, amig B el nem veszit egy eletet.
+ *
+ * GEPFEGYVERREL, nem rammelessel. A rammeles ket okbol volt rossz
+ * eszkoz erre: az utkozes-sebzest a hutes visszafogja (egy nekifutas a
+ * felenel is kevesebbet visz el), es a TAMADO is sebzodik -- a harmadik
+ * kivegzesnel a teszt rendszeresen elakadt, mert a nyolc nekifutas
+ * elfogyott, mielott B elete elfogyott volna. A meres targya nem a
+ * rammeles, hanem a MECCS MENETE: az eszkoznek megbizhatonak kell
+ * lennie, nem valosaghunek.
+ *
+ * ROVID SOROZATOK, kozottuk ellenorzessel: egy hosszu sorozat
+ * atlone a halalon, es a kovetkezo elettel is vegezne.
  *
  * Az ELETSZAM csokkeneset figyeljuk, nem azt, hogy egy adott
  * pillanatban nulla-e B HP-ja. A HP visszaall az ujraszuletessel,
@@ -158,12 +197,17 @@ async function bothSynced(a: Page, b: Page): Promise<boolean> {
  * futasban, ahol a kovetkezo sor mar 3 -> 2 eletet mutatott. Az
  * eletszam viszont monoton csokken, azon nincs mit lecsuszni.
  */
-async function ramUntilKill(a: Page, b: Page): Promise<boolean> {
+async function shootUntilKill(a: Page, b: Page): Promise<boolean> {
   const livesBefore: number = await b.evaluate(
     () => ((window as any).__spike.net.lives ?? 0) as number,
   );
-  for (let attempt = 0; attempt < 8; attempt++) {
-    // Mindketto eljen, mielott ujra nekifutunk (A is sebzodik).
+  const eletek = async (): Promise<number> =>
+    (await b.evaluate(
+      () => ((window as any).__spike.net.lives ?? 0) as number,
+    )) as number;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // Mindketto eljen, mielott ujra felallunk.
     await a.waitForFunction(() => ((window as any).__spike.net.hp ?? 0) > 0, null, {
       timeout: 15000,
     }).catch(() => undefined);
@@ -171,25 +215,35 @@ async function ramUntilKill(a: Page, b: Page): Promise<boolean> {
       timeout: 15000,
     }).catch(() => undefined);
 
-    await a.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 34 })");
-    await b.evaluate("window.__spike.backend.reset({ x: 0, y: 1.0, z: 0 })");
+    await a.evaluate(
+      `window.__spike.backend.reset({ x: ${SHOOT_X}, y: 1.2, z: ${SHOOT_FAR_Z} })`,
+    );
+    await b.evaluate(
+      `window.__spike.backend.reset({ x: ${SHOOT_X}, y: 1.2, z: ${SHOOT_NEAR_Z} })`,
+    );
 
     // A teleportot a plauzibilitas-ellenorzes elutasitja, amig a resync
-    // be nem indul -- addig a szerver szerint a ket auto nem is er ossze.
+    // be nem indul -- addig a lovo mashonnan lone, mint ahonnan celoz.
     for (let i = 0; i < 30; i++) {
       if (await bothSynced(a, b)) break;
       await sleep(300);
     }
 
-    await a.keyboard.down("w");
-    await sleep(4000);
-    await a.keyboard.up("w");
-    await sleep(800);
+    const kezdo = await seenPosition(a);
+    if (kezdo === null) continue;
+    await aimAt(a, kezdo);
+    await sleep(400);
 
-    const lives: number = await b.evaluate(
-      () => ((window as any).__spike.net.lives ?? 0) as number,
-    );
-    if (lives < livesBefore) return true;
+    for (let i = 0; i < 60; i++) {
+      // UJRACELZAS minden korben: a celkereszt KEPERNYO-pozicio, es ha
+      // a kamera meg mozog, a celzas elcsuszik alola.
+      const at = await seenPosition(a);
+      if (at) await aimAt(a, at);
+      await a.mouse.down();
+      await sleep(120);
+      await a.mouse.up();
+      if ((await eletek()) < livesBefore) return true;
+    }
   }
   return false;
 }
@@ -227,7 +281,7 @@ async function main(): Promise<void> {
   );
 
   // Elso kivegzes: egy elet fogy, de a jatekos visszater.
-  const killed = await ramUntilKill(a, b);
+  const killed = await shootUntilKill(a, b);
   check("A ki tudja vegezni B-t", killed, `${killed}`);
 
   await sleep(1200);
@@ -251,7 +305,7 @@ async function main(): Promise<void> {
 
   // Meg ket kivegzes: B kiesik.
   for (let i = 0; i < LIVES_PER_PLAYER - 1; i++) {
-    await ramUntilKill(a, b);
+    await shootUntilKill(a, b);
     await sleep(1200);
   }
 
