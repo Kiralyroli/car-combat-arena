@@ -19,6 +19,20 @@ egy arénában, arcade vezetéssel, fizikai ütközésekkel, fegyverekkel
     interpoláció, autók közti ütközés, szerver-oldali
     plauzibilitás-ellenőrzés és késleltetéssel való tesztelés
 
+## Játékmódok
+
+A szobát nyitó játékos választja ki a módot; aki egy meglévő szobába
+lép be, annak a szoba módja az érvényes (a lobby listájában ott áll,
+melyik szoba melyik módban megy).
+
+-   **Utolsó túlélő** -- 3 élet fejenként, aki elfogyasztja, kiesik. A
+    meccs addig tart, amíg egy játékos marad talpon.
+-   **Kilövés** -- 3 perc, korlátlan újraszületés. A legtöbb kilövéssel
+    rendelkező játékos nyer; holtversenynél döntetlen.
+
+Mindkét módban a jobb felső sarokban fut a **kilövés-lista**: ki, mivel,
+kit lőtt ki.
+
 ## Indítás
 
 ```bash
@@ -88,6 +102,15 @@ npm run check:collision
 
 Két autó fizikai ütközése: valódi lökés, azonnal látható visszajelzés,
 nincs átcsúszás.
+
+```bash
+npm run check:heal
+```
+
+Gyógyulás végponttól végpontig, két böngészővel: a pályán felvett élet
+fokozatosan tölt vissza, és a másik játékos is látja rajta -- zöld
+kereszt az autó fölött, a karosszéria zöldbe húz. Futó szervert **és**
+klienst igényel.
 
 ```bash
 npm run check:lag

@@ -6,6 +6,12 @@ import {
   OVERHEAT_FLASH_MS,
   type CarId,
   carLabel,
+  GAME_MODES,
+  isTimed,
+  type GameModeId,
+  KILL_CAUSE_LABEL,
+  type KillEvent,
+  DAMAGE_NUMBER_MS,
   type MatchSnapshot,
   type Telemetry,
   type WeaponId,
@@ -160,6 +166,21 @@ export class Hud {
  * ketto eszrevetlenul elcsuszna, es ugyanaz a ping az egyik helyen
  * zold, a masikon sarga lenne.
  */
+/**
+ * Hatralevo ido "m:ss" alakban.
+ *
+ * PERC ES MASODPERC, nem puszta masodpercek: harom percnyi jatekbol a
+ * "148 mp" nem mond semmit egy pillantasra, az "2:28" igen. A vegen
+ * (egy perc alatt) is megmarad a formatum, hogy a szam ne ugorjon at
+ * mas alakba eppen a leszoritasban.
+ */
+export function formatTime(ms: number): string {
+  const osszes = Math.max(0, Math.ceil(ms / 1000));
+  const perc = Math.floor(osszes / 60);
+  const mp = osszes % 60;
+  return `${perc}:${String(mp).padStart(2, "0")}`;
+}
+
 export function pingQuality(pingMs: number | null): "" | "good" | "warn" | "bad" {
   if (pingMs === null) return "";
   return pingMs < 60 ? "good" : pingMs < 120 ? "warn" : "bad";
@@ -231,6 +252,11 @@ export class PlayerHud {
   private readonly weaponName: HTMLElement;
   private readonly weaponState: HTMLElement;
   private readonly ability: HTMLElement;
+  /** A sajat sebzes-szamunk eleme a HP-sav folott. */
+  private readonly hpDamage: HTMLElement;
+  /** A most mutatott osszeg es a kezdete -- az osszevonashoz. */
+  private damageShown = 0;
+  private damageShownAt = -Infinity;
   /** A kamera-mod sora es allapot-cimkeje (koveto / szabad). */
   private readonly camera: HTMLElement;
   private readonly cameraState: HTMLElement;
@@ -288,6 +314,7 @@ export class PlayerHud {
     this.ability = must("ability");
     this.abilityName = must("ability-name");
     this.abilityState = must("ability-state");
+    this.hpDamage = must("hp-damage");
     this.camera = must("camera");
     this.cameraState = must("camera-state");
     this.tyres = must("tyres");
@@ -297,6 +324,33 @@ export class PlayerHud {
 
   show(): void {
     this.root.hidden = false;
+  }
+
+  /**
+   * A SAJAT sebzes-szamunk a HP-sav folott ("-24").
+   *
+   * OSSZEADODIK, amig latszik az elozo: egy gepfegyver-sorozat alatt
+   * masodpercenkent tobb talalat is er, es harom egymast tulíro "-4"
+   * kevesebbet mond, mint egy novekvo "-12". Ugyanez a szabaly all a
+   * palyan levo szamokra is (lasd SceneView.addDamageNumber).
+   *
+   * Az ANIMACIOT ujra kell inditani minden talalatnal: a CSS csak az
+   * osztaly HOZZAADASAKOR indul, tehat elobb le kell venni, es egy
+   * kikenyszeritett ujraszamolas utan visszatenni.
+   */
+  showDamage(mennyi: number, now: number): void {
+    if (mennyi <= 0) return;
+    const elozo =
+      now - this.damageShownAt < DAMAGE_NUMBER_MS ? this.damageShown : 0;
+    this.damageShown = elozo + mennyi;
+    this.damageShownAt = now;
+    this.hpDamage.textContent = `-${Math.round(this.damageShown)}`;
+    this.hpDamage.classList.remove("uj");
+    // A stilus kiolvasasa kikenyszeriti az ujraszamolast -- e nelkul a
+    // bongeszo osszevonna a ket osztaly-valtoztatast, es az animacio
+    // nem indulna ujra.
+    void this.hpDamage.offsetWidth;
+    this.hpDamage.classList.add("uj");
   }
 
   /**
@@ -526,19 +580,33 @@ export class MatchHud {
     match: MatchSnapshot,
     lives: number | null,
     isOwnWin: boolean | null,
+    /** Sajat kilovesek -- az idore meno modban ez a sajat allasunk. */
+    kills = 0,
   ): void {
     // Csak VALTOZASKOR nyulunk a DOM-hoz: ez a ket elem minden frame-ben
     // frissulne, pedig masodpercenkent legfeljebb egyszer valtozik
     // ertelmesen (a visszaszamlalas is egesz masodpercekben).
     const seconds = Math.ceil(match.restartInMs / 1000);
-    const key = `${match.phase}|${lives}|${match.survivors}|${match.winnerId}|${seconds}|${isOwnWin}`;
+    // AZ IDORE meno mod visszaszamlaloja masodpercre kerekitve kerul a
+    // kulcsba: enelkul minden kepkockaban ujrairnank a DOM-ot.
+    const hatra = Math.ceil(match.timeLeftMs / 1000);
+    const key =
+      `${match.phase}|${match.mode}|${lives}|${kills}|${match.survivors}|` +
+      `${match.winnerId}|${seconds}|${hatra}|${isOwnWin}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
 
     this.banner.hidden = false;
-    const eliminated = lives !== null && lives <= 0;
-    const livesText =
-      lives === null
+    const idore = isTimed(match.mode);
+
+    // A BAL OLDALON az all, ami a modban a sajat allasunkat jelenti:
+    // tulelés-modban a megmaradt eletek, idore meno modban a sajat
+    // kilovesunk szama. Ket mod, ket kerdes -- de ugyanaz a hely.
+    const eliminated = !idore && lives !== null && lives <= 0;
+    const sajatCimke = idore ? "KILOVES" : "ELET";
+    const sajatErtek = idore
+      ? `<span class="lives">${kills}</span>`
+      : lives === null
         ? "--"
         : eliminated
           ? '<span class="out">KIESTEL</span>'
@@ -549,11 +617,15 @@ export class MatchHud {
         ? "varakozas jatekosokra"
         : match.phase === "ended"
           ? "meccs vege"
-          : `${match.survivors} jatekos talpon`;
+          : idore
+            ? formatTime(match.timeLeftMs)
+            : `${match.survivors} jatekos talpon`;
 
     this.banner.innerHTML =
-      `<span><span class="cap">ELET</span> ${livesText}</span>` +
-      `<span class="phase">${phaseText}</span>`;
+      `<span><span class="cap">${sajatCimke}</span> ${sajatErtek}</span>` +
+      `<span class="phase${idore && match.phase === "playing" ? " ido" : ""}">` +
+      `${phaseText}</span>` +
+      `<span class="mod">${GAME_MODES[match.mode].nev}</span>`;
 
     if (match.phase !== "ended") {
       this.result.hidden = true;
@@ -580,6 +652,8 @@ export interface ScoreRow {
   id: string;
   name: string;
   lives: number;
+  /** Hany jatekost lott ki ebben a meccsben. */
+  kills: number;
   /** Az auto szine -- ez koti a nevsort a palyan latott kocsihoz. */
   car: CarId;
 }
@@ -603,9 +677,21 @@ export interface ScoreRow {
  * sorrendje frame-rol frame-re valtozhatna (a bejaras sorrendje nem
  * garantalt), es a lista lathatoan ugralna.
  */
-export function sortScoreRows(rows: readonly ScoreRow[]): ScoreRow[] {
-  return [...rows].sort(
-    (a, b) => b.lives - a.lives || a.name.localeCompare(b.name),
+export function sortScoreRows(
+  rows: readonly ScoreRow[],
+  /**
+   * KILOVES szerint rendezzunk-e (idore meno mod) az eletek helyett.
+   *
+   * A rendezes a mod KERDESET koveti: ha az eletek szerint rendeznenk
+   * egy deathmatchben, a lista sorrendje semmit nem mondana az
+   * allasrol -- ott mindenkinek ugyanannyi elete van vegig.
+   */
+  byKills = false,
+): ScoreRow[] {
+  return [...rows].sort((a, b) =>
+    byKills
+      ? b.kills - a.kills || a.name.localeCompare(b.name)
+      : b.lives - a.lives || a.name.localeCompare(b.name),
   );
 }
 
@@ -617,10 +703,17 @@ export class Scoreboard {
     this.el = must("scoreboard");
   }
 
-  update(rows: ScoreRow[], ownId: string | null): void {
-    const sorted = sortScoreRows(rows);
+  /**
+   * @param mode A jatekmod: ez donti el, MI az allas (elet vagy kiloves).
+   */
+  update(rows: ScoreRow[], ownId: string | null, mode: GameModeId): void {
+    const idore = isTimed(mode);
+    const sorted = sortScoreRows(rows, idore);
 
-    const key = sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.car}`).join("|");
+    const key =
+      mode +
+      "|" +
+      sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.kills}:${r.car}`).join("|");
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -637,7 +730,9 @@ export class Scoreboard {
       const line = document.createElement("div");
       line.className = "row";
       if (row.id === ownId) line.classList.add("self");
-      if (row.lives <= 0) line.classList.add("out");
+      // KIESVE csak a tulelés-modban lehet valaki: idore meno modban az
+      // ujraszuletes korlatlan, ott az athuzott sor hazudna.
+      if (!idore && row.lives <= 0) line.classList.add("out");
 
       // Az AUTO NEVE a jatekos neve elott: EZ koti ossze a listat a
       // palyan latott kocsival. E nelkul a nevsor csak nevek listaja --
@@ -655,13 +750,135 @@ export class Scoreboard {
       // jatekostol jon, tehat jelolest tartalmazhatna.
       name.textContent = row.name;
 
-      const lives = document.createElement("span");
-      lives.className = "lv";
-      lives.textContent = row.lives > 0 ? "●".repeat(row.lives) : "KIESETT";
+      // Az ALLAS oszlopa modonkent MAST mutat: tulelés-modban a
+      // megmaradt eleteket, idore meno modban a kilovesek szamat --
+      // mert a ket modban mas donti el, ki all jol.
+      const allas = document.createElement("span");
+      if (idore) {
+        allas.className = "kills";
+        allas.textContent = String(row.kills);
+      } else {
+        allas.className = "lv";
+        allas.textContent = row.lives > 0 ? "●".repeat(row.lives) : "KIESETT";
+      }
 
-      line.append(dot, name, lives);
+      line.append(dot, name, allas);
       this.el.appendChild(line);
     }
+  }
+}
+
+/**
+ * KILOVES-LISTA a jobb felso sarokban: ki, mivel, kit lott ki.
+ *
+ * MINDEN jatekmodban megy. A deathmatchben ez maga az esemenyfolyam,
+ * de a tulelés-modban is fontos: abbol, hogy ki fogy a mezonybol es
+ * kinek koszonhetoen, a jatekos eldonti, kitol tartson.
+ *
+ * A NEVEK az esemenybol jonnek, nem a jelenlegi jatekoslistabol: egy
+ * kilepett jatekos neve is helyesen marad a listan.
+ */
+export class KillFeed {
+  private readonly el: HTMLElement;
+
+  /**
+   * Ennyi sor latszik egyszerre.
+   *
+   * Egy hosszabb lista mar a palyat takarna, es a regi sorokkal ugysem
+   * kezd semmit a jatekos -- a kilovés-lista a MOSTROL szol. Nyolc
+   * jatekosnal egy kaotikus pillanatban is ennyi a hasznos.
+   */
+  private static readonly MAX = 5;
+
+  /**
+   * Meddig marad kint egy sor (ms).
+   *
+   * Ket rossz vege lenne a szelsoseges ertekeknek: egy villano sort a
+   * jatekos harc kozben nem venne eszre, egy allando lista viszont
+   * elveszitene az "eppen most tortent" jelenteset.
+   */
+  private static readonly ELETTARTAM_MS = 7000;
+
+  /** A kint levo sorok, a lejaratukkal -- a legregibb elol. */
+  private readonly sorok: { el: HTMLElement; lejar: number }[] = [];
+
+  constructor() {
+    this.el = must("kill-feed");
+  }
+
+  /**
+   * Uj kilovesek felvetele.
+   *
+   * A SAJAT azonositonk kell hozza: a jatekost elsosorban az erdekli,
+   * mi tortent VELE, es az o neve ezert kiemelve latszik.
+   */
+  add(kills: KillEvent[], ownId: string | null, now: number): void {
+    for (const kill of kills) {
+      const sor = document.createElement("div");
+      sor.className = "sor";
+
+      if (kill.killerId === null || kill.cause === null) {
+        // SAJAT HIBA: nincs kilovo. Nem hallgatjuk el -- a mezonybol
+        // igy is kiesett valaki, es ezt latni kell.
+        sor.append(
+          this.nevElem(kill.victimName, kill.victimId === ownId),
+          this.szoveg("maga", "megsemmisült"),
+        );
+      } else {
+        sor.append(
+          this.nevElem(kill.killerName, kill.killerId === ownId),
+          this.szoveg("mivel", KILL_CAUSE_LABEL[kill.cause]),
+          this.nevElem(kill.victimName, kill.victimId === ownId),
+        );
+      }
+
+      this.el.appendChild(sor);
+      this.sorok.push({ el: sor, lejar: now + KillFeed.ELETTARTAM_MS });
+    }
+
+    // A regi sorok azonnal mennek, ha tullepnenk a keretet: igy egy
+    // nagy csata alatt is a LEGUJABB ot esemeny latszik.
+    while (this.sorok.length > KillFeed.MAX) this.torolLegregebbi();
+    this.el.hidden = this.sorok.length === 0;
+  }
+
+  /** Kepkockankent: a lejart sorok eltuntetese. */
+  update(now: number): void {
+    while (this.sorok.length > 0 && this.sorok[0].lejar <= now) {
+      this.torolLegregebbi();
+    }
+    this.el.hidden = this.sorok.length === 0;
+  }
+
+  /** Uj meccsnel tiszta lappal indulunk. */
+  clear(): void {
+    while (this.sorok.length > 0) this.torolLegregebbi();
+    this.el.hidden = true;
+  }
+
+  private torolLegregebbi(): void {
+    const sor = this.sorok.shift();
+    sor?.el.remove();
+  }
+
+  /**
+   * Egy nev a soron.
+   *
+   * SZOVEGKENT, nem innerHTML-lel: a nev egy MASIK jatekostol jon,
+   * tehat jelolest tartalmazhatna.
+   */
+  private nevElem(nev: string, sajat: boolean): HTMLElement {
+    const el = document.createElement("span");
+    el.className = sajat ? "nev en" : "nev";
+    el.textContent = nev;
+    return el;
+  }
+
+  private szoveg(osztaly: string, szoveg: string): HTMLElement {
+    const el = document.createElement("span");
+    el.className = osztaly;
+    el.textContent = szoveg;
+    return el;
   }
 }
 

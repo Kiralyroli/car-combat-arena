@@ -60,6 +60,8 @@ function player(t: number): PlayerSnapshot {
   abilityActive: false,
   abilityCooldownMs: 0,
   abilityActiveMs: 0,
+  healing: false,
+  kills: 0,
   };
 }
 

@@ -15,6 +15,8 @@ import {
   toWeaponId,
 
   toCarId,
+  toGameModeId,
+  DEFAULT_GAME_MODE,
   toSkin,
   DEFAULT_CAR,
   type CarId,
@@ -23,6 +25,8 @@ import {
   ARCADE,
   type TracerSnapshot,
   type AbilityId,
+  type GameModeId,
+  type MatchPhase,
   type WeaponId,
 } from "@cca/shared";
 import { Aim } from "./aim";
@@ -37,6 +41,7 @@ import { DevMode } from "./devMode";
 import {
   hideLoading,
   Hud,
+  KillFeed,
   MatchHud,
   NetStat,
   PlayerHud,
@@ -313,6 +318,10 @@ async function main(): Promise<void> {
   korulnezes.onValtozas((aktiv) => playerHud.setCameraFree(aktiv));
   playerHud.setCameraFree(korulnezes.isActive);
   const scoreboard = new Scoreboard();
+  // KILOVES-LISTA a jobb felso sarokban -- minden jatekmodban.
+  const killFeed = new KillFeed();
+  /** A legutobb latott meccs-fazis -- az uj meccs felismeresehez. */
+  let elozoFazis: MatchPhase = "waiting";
   const netStat = new NetStat();
   // A peldanyositas maga koti be a H billentyut es a sugo-gombot; a
   // sugo CSAK keresre nyilik, tehat innen nem hivunk rajta semmit.
@@ -403,10 +412,11 @@ async function main(): Promise<void> {
     car?: CarId,
     ability?: AbilityId,
     skin?: string,
+    mode?: GameModeId,
   ): Promise<string | null> {
     return new Promise<string | null>((resolve) => {
       pendingJoin = resolve;
-      net.join(roomCode, name, weapon, car, ability, skin);
+      net.join(roomCode, name, weapon, car, ability, skin, mode);
     });
   }
 
@@ -498,6 +508,11 @@ async function main(): Promise<void> {
     onTracers: (tracers) => {
       const now = performance.now();
       for (const tracer of tracers) tracerQueue.push(tracer, now);
+    },
+    onKills: (kills) => {
+      // A SAJAT azonositonk is atmegy: a listan a sajat nevunk kiemelve
+      // latszik -- harc kozben elsosorban az erdekel, mi tortent VELUNK.
+      killFeed.add(kills, net.playerId, performance.now());
     },
     onRespawn: (position) => {
       // A szerver altal kiosztott helyre allunk, teli HP-val. A serult
@@ -596,6 +611,14 @@ async function main(): Promise<void> {
   const directCar = toCarId(params.get("car") ?? DEFAULT_CAR);
   /** Festes az URL-bol -- az autohoz tartozik, tehat vele egyutt ervenyes. */
   const directSkin = toSkin(directCar, params.get("skin"));
+  /**
+   * JATEKMOD az URL-bol -- ugyanaz a minta, mint a "?weapon=".
+   *
+   * Csak UJ szoba nyitasakor szamit (hash nelkul); enelkul egy
+   * automatizalt teszt nem tudna deathmatchet inditani, mert a lobbyt
+   * eppen megkeruli.
+   */
+  const directMode = toGameModeId(params.get("mode") ?? DEFAULT_GAME_MODE);
 
   try {
     await net.open(SERVER_URL, lagMs, jitterMs);
@@ -615,6 +638,7 @@ async function main(): Promise<void> {
         directCar,
         undefined,
         directSkin,
+        directMode,
       );
     } else {
       // MENU-HATTER: a jatek kepkocka-hurka csak a belepes UTAN indul
@@ -643,6 +667,9 @@ async function main(): Promise<void> {
             choice.car,
             choice.ability,
             choice.skin,
+            // A MOD csak uj szobanal szamit -- meglevo szobaba lepve a
+            // szerver a szoba modjat tartja (lasd JoinMessage.mode).
+            choice.mode,
           );
           if (failure === null) break;
           message = failure;
@@ -740,6 +767,18 @@ async function main(): Promise<void> {
     // "atcsuszasnak" latszana. Ugyanabbol az interpolalt allapotbol
     // dolgozunk, mint a megjelenites, igy amit latunk, azzal utkozunk.
     for (const id of net.remotes.ids()) {
+      // SEBZES-SZAM: a halozati reteg osszegzi a talalatokat, mi
+      // kiolvassuk (es ezzel nullazzuk). A HP-sav a maradekot mutatja,
+      // ez azt, mennyit vitt el az iment kapott talalat.
+      //
+      // A MEGSEMMISULT autonal is: a HALALOS talalat merteke a
+      // legerdekesebb szam a parharcban -- ezert all ez a sor a
+      // "halottat kihagyjuk" elott. (Es ha kimaradna, az osszeg ott
+      // ragadna, es az ujraszuletes utan villanna fel egy sosem
+      // tortent talalatkent.)
+      const sebzes = net.remotes.consumeDamage(id);
+      if (sebzes > 0) view.addDamageNumber(id, sebzes, now);
+
       // Megsemmisult autonak nincs teste -- lasd lentebb.
       if (net.remotes.hpOf(id) === 0) continue;
       view.setRemoteProtected(id, net.remotes.isProtected(id));
@@ -855,10 +894,11 @@ async function main(): Promise<void> {
 
     // Ujraszuletesi pajzs (a tavoli autoke a lentebbi ciklusban).
     view.setOwnProtected(net.ownProtected);
-    // ZOLD burok gyogyulas kozben: a jatekos igy latja, hogy a
-    // kepesseg tenylegesen dolgozik -- a HP-sav lassu emelkedese
-    // onmagaban konnyen eszrevetlen marad.
-    view.setOwnHealing(net.ownAbility === "heal" && net.ownAbilityActive);
+    // ZOLD lüktetes gyogyulas kozben: a jatekos igy latja, hogy a
+    // gyogyulas tenylegesen dolgozik -- a HP-sav lassu emelkedese
+    // onmagaban konnyen eszrevetlen marad. A SZERVER jelzesebol, mert
+    // a kepesseg mellett a felvett elet is gyogyit.
+    view.setOwnHealing(net.ownHealing);
 
     // --- Halozat: sajat allapot kuldese, tavoli autok interpolacioja ---
     // A sajat autot NEM a szervertol kapjuk vissza (hibrid authority,
@@ -1109,6 +1149,11 @@ async function main(): Promise<void> {
     view.updateTracers(renderNow);
     view.updateShields(renderNow);
     view.updateHealing(renderNow);
+    view.updateDamageNumbers(renderNow);
+    // A SAJAT sebzesunk ugyanabbol a szabalybol (hpLoss), csak a HUD-on:
+    // a bal also HP-sav folott. A palyan levo szamokkal egyutt egy
+    // esemenyt mutat ket helyen.
+    playerHud.showDamage(net.consumeOwnDamage(), renderNow);
     view.updateSpawnChoices(renderNow);
 
     view.render();
@@ -1156,6 +1201,7 @@ async function main(): Promise<void> {
                 id: net.playerId,
                 name: net.ownName,
                 lives: net.lives ?? 0,
+                kills: net.ownKills,
                 car: net.ownCar,
               },
             ]
@@ -1164,16 +1210,28 @@ async function main(): Promise<void> {
           id,
           name: net.remotes.nameOf(id),
           lives: net.remotes.livesOf(id),
+          kills: net.remotes.killsOf(id),
           car: net.remotes.carOf(id),
         })),
       ],
       net.playerId,
+      // A MOD donti el, mit jelent az "allas": eletet vagy kilovest.
+      net.match.mode,
     );
     matchHud.update(
       net.match,
       net.lives,
       net.match.winnerId === null ? null : net.match.winnerId === net.playerId,
+      net.ownKills,
     );
+    // UJ MECCS, tiszta lista: az elozo meccs kilovesei nem az uj
+    // meccshez tartoznak, es a vege utan kiirt sorok ott ragadnanak.
+    if (net.match.phase === "playing" && elozoFazis !== "playing") {
+      killFeed.clear();
+    }
+    elozoFazis = net.match.phase;
+    // A kilovés-lista sorai maguktol jarnak le -- lasd KillFeed.
+    killFeed.update(renderNow);
 
     requestAnimationFrame(frame);
   }

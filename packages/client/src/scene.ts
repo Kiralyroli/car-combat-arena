@@ -14,6 +14,10 @@ import {
   CAR_GEOMETRY,
   CAR_MODELS,
   CAR_SKIN_TEXTURES,
+  DAMAGE_NUMBER_MS,
+  DAMAGE_NUMBER_OFFSET,
+  damageNumberOpacity,
+  damageNumberRise,
   SKIN_URL,
   cameraScaleFor,
   DEFAULT_CAR,
@@ -146,6 +150,13 @@ function nameTagHeight(carId: CarId): number {
   return CAR_GEOMETRY[carId].halfExtents.y + NAME_TAG_CLEARANCE;
 }
 
+/** A gyogyulas-jel a nevtabla FOLE kerul, hogy egyik se takarja a masikat. */
+const HEAL_TAG_CLEARANCE = NAME_TAG_CLEARANCE + 0.75;
+
+function healTagHeight(carId: CarId): number {
+  return CAR_GEOMETRY[carId].halfExtents.y + HEAL_TAG_CLEARANCE;
+}
+
 /**
  * A fegyver meretei a KOZOS forrasbol jonnek (weaponMountHeight).
  *
@@ -220,6 +231,35 @@ interface RemoteCar {
   hpBar: THREE.Sprite;
   /** Nevtabla a HP-sav felett. */
   nameTag: THREE.Sprite;
+  /**
+   * Zold kereszt a nevtabla felett, amig a jatekos gyogyul.
+   *
+   * A karosszeria zold lüktetese (setHealingTint) KOZELROL egyertelmu,
+   * tavolrol viszont beleolvad: par tucat meterrol az auto mar csak
+   * nehany pixel, es a szinarnyalata a napfeny meg a por alatt nem
+   * megbizhato jel. A tabla viszont billboard -- tavolsagtol
+   * fuggetlenul ugyanaz a forma nez a kamera fele.
+   */
+  healTag: THREE.Sprite;
+  /**
+   * A most kapott sebzes szama a HP-sav folott ("-24").
+   *
+   * MIERT KELL: a HP-sav megmutatja, MENNYI maradt, azt nem, hogy
+   * MENNYIT vitt el az iment kapott talalat. Pedig a harc kozbeni
+   * dontes (nyomjam meg, vagy huzodjak ki) eppen ezen mulik -- es a sav
+   * 100-bol 8 pontnyi valtozasa szabad szemmel alig latszik.
+   */
+  damageTag: THREE.Sprite;
+  /** A most mutatott sebzes es a kezdete; null, ha nem latszik semmi. */
+  damage: { mennyi: number; startedAt: number } | null;
+  /**
+   * Ahonnan a szam INDUL (vilagbeli Y).
+   *
+   * Az auto koveti ezt kepkockankent, az EMELKEDES viszont az ido
+   * fuggvenye -- a kettot kulon kell tartani, kulonben a mozgo auto
+   * minden frame-ben visszarantana a szamot a kiindulasi magassagba.
+   */
+  damageTagBaseY: number;
   /** Az utoljara KIRAJZOLT nev -- csak valtozaskor rajzolunk ujra. */
   shownName: string;
   /** Az utoljara KIRAJZOLT HP -- csak valtozaskor rajzolunk ujra. */
@@ -982,13 +1022,68 @@ export class SceneView {
     const car = this.remoteCars.get(id);
     if (!car) return;
     this.setHealingTint(`heal|${id}`, car.wrapper, active);
+    // A MEGSEMMISULT autonal semmi nem latszik: a hpBar/nameTag mar
+    // rejtve van, a jel se bukkanjon fel egyedul a roncs folott.
+    car.healTag.visible = active && car.diedAt === null;
+  }
+
+  /**
+   * A most latszo sebzes-szamok -- a tesztek ezt olvassak.
+   *
+   * A SZOVEGET is visszaadjuk, nem csak a darabszamot: enelkul a meres
+   * nem tudna megkulonboztetni a "megjelent valami" es a "megjelent a
+   * HELYES szam" esetet.
+   */
+  get damageNumbers(): string[] {
+    const ki: string[] = [];
+    for (const car of this.remoteCars.values()) {
+      if (car.damage && car.damageTag.visible) {
+        ki.push(`-${Math.round(car.damage.mennyi)}`);
+      }
+    }
+    return ki;
+  }
+
+  /** Hany gyogyulas-jel latszik eppen -- a tesztek ezt olvassak. */
+  get healTagsVisible(): number {
+    let n = 0;
+    for (const car of this.remoteCars.values()) if (car.healTag.visible) n++;
+    return n;
+  }
+
+  /**
+   * Mennyire huz ZOLDBE egy tavoli auto karosszeriaja (0 = semennyire).
+   *
+   * A TENYLEGES anyag-szinbol merve, nem a sajat konyvelesunkbol: a
+   * "gyogyul-e" jelzot a healingCars is megmondana, de abbol nem derul
+   * ki, hogy a szin valoban ra is kerult-e az autora. A zold tulsuly
+   * (g a piros es a kek atlagahoz kepest) feher alapszinnel pontosan
+   * nulla, gyogyulas kozben pedig merhetoen pozitiv.
+   */
+  remoteBodyGreenBias(id: string): number | null {
+    const car = this.remoteCars.get(id);
+    if (!car) return null;
+    let max = 0;
+    for (const m of this.bodyMaterials(car.wrapper)) {
+      max = Math.max(max, m.color.g - (m.color.r + m.color.b) / 2);
+    }
+    return max;
   }
 
   /**
    * A karosszeria anyagai egy autoban.
    *
-   * A tintBody mar KLONOZTA oket autonkent, tehat nyugodtan
+   * Az applySkin mar KLONOZTA oket autonkent, tehat nyugodtan
    * modosithatjuk a szinuket: nem terjed at masik jatekosra.
+   *
+   * A NEVKONVENCIO ugyanaz, mint a festesnel (lasd applySkin): az
+   * anyagok a szerepukrol kaptak a nevuket, "<Auto>_<szerep>" alakban
+   * -- a karosszeria tehat "_body"-ra vegzodik ("Muscle_body",
+   * "Rescue_body"). Korabban itt "Body" ELOTAG-ra szurtunk, ami a regi,
+   * tizautos csomag konvencioja volt: az uj modellek ota EGYETLEN
+   * anyagot sem talalt, es a gyogyulas zold szinezese csendben nem
+   * csinalt semmit. Csendben, mert egy ures lista epp ugy "sikeres",
+   * mint egy teli.
    */
   private bodyMaterials(root: THREE.Object3D): THREE.MeshStandardMaterial[] {
     const ki: THREE.MeshStandardMaterial[] = [];
@@ -998,7 +1093,7 @@ export class SceneView {
       const anyag = mesh.material;
       if (Array.isArray(anyag)) return;
       const m = anyag as THREE.MeshStandardMaterial;
-      if (m.name.startsWith("Body")) ki.push(m);
+      if (m.name.endsWith("_body")) ki.push(m);
     });
     return ki;
   }
@@ -1029,8 +1124,24 @@ export class SceneView {
       return;
     }
     if (meglevo) return;
-    this.healingCars.set(key, { anyagok: this.bodyMaterials(root), alapSzin });
+    const anyagok = this.bodyMaterials(root);
+    // HANGOS HIBA ures listanal. Pontosan ez torte el korabban a
+    // szinezest: a modellek anyag-nevei megvaltoztak, a szuro nem
+    // talalt semmit, es a gyogyulas ettol ugy nezett ki, mintha nem is
+    // lenne latvanya. Egy ures lista feldolgozasa "sikeres" marad --
+    // ezert kell kimondani.
+    if (anyagok.length === 0 && !this.healTintWarned) {
+      this.healTintWarned = true;
+      console.warn(
+        "[latvany] A gyogyulas zold szinezese nem talal karosszeria-anyagot " +
+          '("_body" vegu nev). A modell anyag-nevei valtoztak meg?',
+      );
+    }
+    this.healingCars.set(key, { anyagok, alapSzin });
   }
+
+  /** Csak EGYSZER panaszkodunk: kepkockankent ezret irna a konzolra. */
+  private healTintWarned = false;
 
   /**
    * A gyogyulo autok szinenek lüktetese.
@@ -1049,6 +1160,16 @@ export class SceneView {
         this.healTmp.setHex(car.alapSzin);
         m.color.copy(this.healTmp.lerp(this.healSzin, arany));
       }
+    }
+
+    // A JEL is lüktet, a karosszeriaval AZONOS utemben: igy a ketto egy
+    // jelensegnek latszik, nem ket kulon dolognak. Vegig jol lathato
+    // marad (0,55 alatt nem megy), csak "lelegzik" -- a mozgast a szem
+    // a kep szelen is elkapja, egy allo jel ott elveszne.
+    const lathato = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(now / 90));
+    for (const car of this.remoteCars.values()) {
+      if (!car.healTag.visible) continue;
+      (car.healTag.material as THREE.SpriteMaterial).opacity = lathato;
     }
   }
 
@@ -1199,6 +1320,153 @@ export class SceneView {
     return sprite;
   }
 
+  /**
+   * GYOGYULAS-JEL: zold kereszt az auto folott.
+   *
+   * MIERT KELL a karosszeria zold lüktetese MELLE: az egy szin-
+   * valtozas, es a szin tavolrol a legbizonytalanabb jel -- a kocsi par
+   * pixelre zsugorodik, es a nap meg a por is szinez. Egy FORMA
+   * viszont billboardkent tavolsagfuggetlen.
+   *
+   * MIERT KERESZT, es nem szoveg: a jatek harom nyelvi jelolest hasznal
+   * a palyan (nev, HP-szam, sebesseg), ennel tobb olvasnivalo harc
+   * kozben mar nem fer bele. A kereszt egy pillantasbol azonosithato.
+   *
+   * A tabla EGYSZER rajzolodik meg (a kep nem valtozik); a lüktetest az
+   * anyag atlatszosaga adja, lasd updateHealing.
+   */
+  private createHealTag(): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const kar = 15; // a kereszt szaranak fele-hossza
+      const vastag = 15; // a szar vastagsaga
+      const k = canvas.width / 2;
+      ctx.beginPath();
+      ctx.rect(k - kar, k - vastag / 2, kar * 2, vastag);
+      ctx.rect(k - vastag / 2, k - kar, vastag, kar * 2);
+      // Sotet korvonal: vilagos egbolt es sotet epulet elott is
+      // megmarad a forma -- kulon hatterdoboz nelkul, ami takarna.
+      ctx.strokeStyle = "rgba(1, 4, 9, 0.85)";
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.fillStyle = "#3fb950";
+      ctx.fill();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        // Ugyanaz, mint a HP-savnal: akadaly mogul is latszik. A
+        // gyogyulas eppen akkor a legfontosabb informacio a tamadonak,
+        // amikor a celpont fedezekbe huzodott.
+        depthTest: false,
+      }),
+    );
+    // Nagyobb, mint elsore gondolna az ember: a nevtabla 3,4 m szeles,
+    // ehhez kepest ez egy kis jel -- de a lenyeg, hogy TAVOLROL is
+    // kivehető maradjon a formaja, ne csak egy zold pont legyen.
+    sprite.scale.set(1.15, 1.15, 1);
+    sprite.renderOrder = 999;
+    sprite.visible = false;
+    return sprite;
+  }
+
+  /**
+   * SEBZES-SZAM: lebego "-24" az auto folott.
+   *
+   * Ugyanaz a billboard-technika, mint a nevtablanal. A tartalom
+   * valtozik (a szam), ezert a vasznat talalatkor ujrarajzoljuk --
+   * lasd drawDamageTag.
+   */
+  private createDamageTag(): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 64;
+    const texture = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        // Fedezek mogul is: eppen az a helyzet erdekes, amikor a
+        // celpont egy lada moge huzodott, es tudni akarjuk, fogott-e.
+        depthTest: false,
+      }),
+    );
+    sprite.scale.set(1.6, 0.8, 1);
+    sprite.renderOrder = 1000;
+    sprite.visible = false;
+    return sprite;
+  }
+
+  private drawDamageTag(sprite: THREE.Sprite, mennyi: number): void {
+    const texture = (sprite.material as THREE.SpriteMaterial).map;
+    if (!texture) return;
+    const canvas = texture.image as HTMLCanvasElement;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = "bold 40px ui-monospace, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const szoveg = `-${Math.round(mennyi)}`;
+    // Sotet korvonal hatterdoboz helyett: a szam a HP-sav es a nevtabla
+    // kozott lebeg fel, ott egy doboz csak takarna.
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(1, 4, 9, 0.9)";
+    ctx.strokeText(szoveg, canvas.width / 2, canvas.height / 2);
+    ctx.fillStyle = "#ff7b72";
+    ctx.fillText(szoveg, canvas.width / 2, canvas.height / 2);
+    texture.needsUpdate = true;
+  }
+
+  /**
+   * Egy tavoli auto sebzes-szamanak inditasa (vagy novelese).
+   *
+   * OSSZEADODIK, ha meg latszik az elozo: egy gepfegyver-sorozat alatt
+   * masodpercenkent tobb talalat is er, es harom egymason ulo "-4"
+   * olvashatatlanabb, mint egy novekvo "-12". Az ido ilyenkor
+   * ujraindul, tehat a szam a sorozat vegetol szamitva tunik el.
+   */
+  addDamageNumber(id: string, mennyi: number, now: number): void {
+    const car = this.remoteCars.get(id);
+    if (!car || mennyi <= 0) return;
+    const elozo =
+      car.damage && now - car.damage.startedAt < DAMAGE_NUMBER_MS
+        ? car.damage.mennyi
+        : 0;
+    car.damage = { mennyi: elozo + mennyi, startedAt: now };
+    this.drawDamageTag(car.damageTag, car.damage.mennyi);
+    car.damageTag.visible = true;
+  }
+
+  /**
+   * A sebzes-szamok emelkedese es elhalvanyulasa.
+   *
+   * A HELYET is itt allitjuk, nem az auto koveteseben: a szam nem az
+   * autohoz tapad, hanem elszakad tole -- eppen ez teszi eszrevehetove.
+   */
+  updateDamageNumbers(now: number): void {
+    for (const car of this.remoteCars.values()) {
+      if (!car.damage) continue;
+      const eltelt = now - car.damage.startedAt;
+      const lathato = damageNumberOpacity(eltelt);
+      if (lathato <= 0) {
+        car.damage = null;
+        car.damageTag.visible = false;
+        continue;
+      }
+      (car.damageTag.material as THREE.SpriteMaterial).opacity = lathato;
+      car.damageTag.position.y =
+        car.damageTagBaseY + damageNumberRise(eltelt);
+    }
+  }
+
   private drawNameTag(sprite: THREE.Sprite, name: string): void {
     const texture = (sprite.material as THREE.SpriteMaterial).map;
     if (!texture) return;
@@ -1296,6 +1564,11 @@ export class SceneView {
       car.shownHp = 0;
       car.hpBar.visible = false;
       car.nameTag.visible = false;
+      // A gyogyulas-jel is: a szerver ugyan leallitja a gyogyulast
+      // halalkor, de a jel a kovetkezo snapshotig kint ragadna.
+      car.healTag.visible = false;
+      // A sebzes-szam MARADHAT: eppen a halalos talalat merteke a
+      // legerdekesebb szam, es a roncs is ott all meg egy pillanatig.
     }
     // A roncs csak a robbanas utan tunik el. Enelkul a kocsi ugyanabban
     // a kepkockaban pattant ki a vilagbol, amelyikben meghalt -- a
@@ -1808,6 +2081,12 @@ export class SceneView {
     // Nevtabla a HP-sav folott, ugyanezzel a logikaval.
     const nameTag = this.createNameTag();
     this.scene.add(nameTag);
+    // Gyogyulas-jel a nevtabla folott -- alaphelyzetben rejtve.
+    const healTag = this.createHealTag();
+    this.scene.add(healTag);
+    // Sebzes-szam a HP-sav folott -- alaphelyzetben rejtve.
+    const damageTag = this.createDamageTag();
+    this.scene.add(damageTag);
 
     // A FESTES a felepites utan kerul ra: a modell alap-skinnel jon.
     this.applySkin(wrapper, carId, skin);
@@ -1823,6 +2102,10 @@ export class SceneView {
       weapon: DEFAULT_WEAPON,
       hpBar,
       nameTag,
+      healTag,
+      damageTag,
+      damage: null,
+      damageTagBaseY: 0,
       shownName: "",
       shownHp: -1,
       diedAt: null,
@@ -1852,7 +2135,7 @@ export class SceneView {
     this.scene.remove(car.wrapper);
     // A HP-sav kulon all a jelenetben, ezert kulon is kell eltavolitani,
     // es a sajat texturajat/anyagat felszabaditani.
-    for (const sprite of [car.hpBar, car.nameTag]) {
+    for (const sprite of [car.hpBar, car.nameTag, car.healTag, car.damageTag]) {
       this.scene.remove(sprite);
       const material = sprite.material as THREE.SpriteMaterial;
       material.map?.dispose();
@@ -1918,6 +2201,17 @@ export class SceneView {
       state.position.y + nameTagHeight(car.carId),
       state.position.z,
     );
+    car.healTag.position.set(
+      state.position.x,
+      state.position.y + healTagHeight(car.carId),
+      state.position.z,
+    );
+    // A sebzes-szam VIZSZINTESEN koveti az autot, fuggolegesen viszont
+    // sajat eletet el (lasd updateDamageNumbers).
+    car.damageTagBaseY =
+      state.position.y + hpBarHeight(car.carId) + DAMAGE_NUMBER_OFFSET;
+    car.damageTag.position.x = state.position.x;
+    car.damageTag.position.z = state.position.z;
 
     for (let i = 0; i < car.wheels.length; i++) {
       const wheel = car.wheels[i];

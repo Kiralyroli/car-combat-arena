@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import {
   checkPlausibility,
   PROTOCOL_VERSION,
+  toGameModeId,
   type ClientMessage,
   type ServerMessage,
 } from "@cca/shared";
@@ -198,7 +199,10 @@ export class WsServer {
       }
       room = found;
     } else {
-      room = this.rooms.create();
+      // A JATEKMOD csak UJ szoba nyitasakor szamit. Meglevo szobaba
+      // lepve a szoba modja marad ervenyben -- egy meccs kozben nem
+      // valthat modot a jatek a bent levok alatt.
+      room = this.rooms.create(toGameModeId(message.mode));
     }
 
     const playerId = randomUUID();

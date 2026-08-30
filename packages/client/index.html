@@ -329,6 +329,44 @@
         color: #e6edf3;
       }
 
+      /*
+         SAJAT SEBZES-SZAM a HP-sav folott.
+         A palyan levo szamokkal AZONOS a viselkedese (emelkedik es
+         elhalvanyul) es a szine -- ugyanaz az esemeny ket helyen, ne
+         kelljen ketfele jelet megtanulni.
+
+         A savhoz igazitva, nem a sor kozepehez: a jatekos a savot nezi.
+      */
+      #player-hud .gauge.hp { position: relative; }
+      #player-hud #hp-damage {
+        position: absolute;
+        left: 62px;
+        bottom: 100%;
+        margin-bottom: 2px;
+        font-size: 20px;
+        font-weight: 700;
+        color: #ff7b72;
+        text-shadow: 0 2px 8px rgba(1, 4, 9, 0.95);
+        pointer-events: none;
+        opacity: 0;
+      }
+      /* A talalat pillanataban indul ujra -- lasd PlayerHud.showDamage. */
+      #player-hud #hp-damage.uj {
+        animation: sebzes-szam 1.1s ease-out forwards;
+      }
+      @keyframes sebzes-szam {
+        0% { opacity: 1; transform: translateY(6px); }
+        60% { opacity: 1; transform: translateY(-6px); }
+        100% { opacity: 0; transform: translateY(-12px); }
+      }
+      /* Mozgas nelkul is lathato marad, csak nem uszik el. */
+      @media (prefers-reduced-motion: reduce) {
+        @keyframes sebzes-szam {
+          0%, 60% { opacity: 1; transform: none; }
+          100% { opacity: 0; transform: none; }
+        }
+      }
+
       #player-hud .speedo {
         display: flex;
         align-items: baseline;
@@ -469,11 +507,23 @@
        * mintha le lenne tiltva -- kulonosen az elenk (zold/cian) also
        * savok mellett. A jatek allapota nem masodlagos informacio.
        */
-      /* --- Eredmenyjelzo (jobb felso sarok) --- */
-      #scoreboard {
+      /* --- Jobb felso oszlop: eredmenyjelzo + kilovés-lista --- */
+      #right-column {
         position: fixed;
         top: 14px;
         right: 14px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+        pointer-events: none;
+        user-select: none;
+      }
+      /* Dev modban a jobb oldalt a csuszka-panel all -- arrebb toljuk. */
+      body.dev #right-column { right: 336px; }
+
+      /* --- Eredmenyjelzo --- */
+      #scoreboard {
         min-width: 190px;
         padding: 10px 12px;
         background: rgba(1, 4, 9, 0.72);
@@ -484,8 +534,6 @@
         pointer-events: none;
         user-select: none;
       }
-      /* Dev modban a jobb oldalt a csuszka-panel all -- arrebb toljuk. */
-      body.dev #scoreboard { right: 336px; }
       #scoreboard .head {
         font-size: 11px;
         letter-spacing: 0.14em;
@@ -514,6 +562,74 @@
       #scoreboard .row.out .nm,
       #scoreboard .row.out .lv { color: #6e7681; text-decoration: line-through; }
       #scoreboard .lv { color: #f0a020; letter-spacing: 2px; }
+      /*
+         KILOVES-SZAM az eletek helyett: idore meno modban ez az allas.
+         Ugyanaz a hely a soron, mert ugyanazt a kerdest valaszolja meg
+         ("hogy all ez a jatekos") -- csak mas modban mas a merteke.
+      */
+      #scoreboard .kills {
+        color: #f0a020;
+        font-variant-numeric: tabular-nums;
+        min-width: 22px;
+        text-align: right;
+      }
+
+      /* --- Kilovés-lista (az eredmenyjelzo alatt) --- */
+      /*
+         MIERT az eredmenyjelzo ALATT: a ketto ugyanarrol szol (ki all
+         hogyan), es a szem igy egy helyen talalja meg a meccs allasat
+         es azt, hogy mi vezetett ide.
+
+         Legfeljebb ot sor latszik (lasd KillFeed.MAX): egy hosszabb
+         lista mar a palyat takarna, es a regi sorok ugysem
+         hasznalhatoak semmire -- a kilovés-lista a MOSTROL szol.
+      */
+      #kill-feed {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        font: 12px/1.4 ui-monospace, monospace;
+      }
+      #kill-feed .sor {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 9px;
+        background: rgba(1, 4, 9, 0.72);
+        border: 1px solid #4d5866;
+        border-radius: 6px;
+        white-space: nowrap;
+        /* Az UJ sor beuszik: a mozgas hivja fel ra a figyelmet, akkor
+           is, ha a jatekos eppen a palya masik vegere nez. */
+        animation: kill-sor 180ms ease-out;
+      }
+      @keyframes kill-sor {
+        from { opacity: 0; transform: translateX(14px); }
+        to { opacity: 1; transform: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #kill-feed .sor { animation: none; }
+      }
+      #kill-feed .nev { color: #e6edf3; }
+      /*
+         A SAJAT nevunk kiemelve: egy pillantasbol latszik, mi tortent
+         VELUNK.
+
+         KET OSZTALLYAL (.nev.en), nem eggyel: azonos specificitasnal a
+         KESOBBI szabaly nyer, tehat a .nev szine csendben felulirta a
+         kiemelest -- a sajat nevunk ugyanolyan feher volt, mint a
+         tobbieke. Igy a kiemeles a szabalyok sorrendjetol fuggetlen.
+      */
+      #kill-feed .nev.en { color: #f0a020; font-weight: bold; }
+      /* A fegyver neve halvanyabb: az OSSZEKOTO jel, nem a lenyeg. */
+      #kill-feed .mivel {
+        color: #8b949e;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+      }
+      /* Sajat hiba: nincs kilovo, ezert nincs mit kiemelni. */
+      #kill-feed .maga { color: #8b949e; font-size: 11px; }
 
       /* --- Lobby --- */
       #lobby {
@@ -563,6 +679,8 @@
       }
       #lobby .title { font-size: 19px; color: #e6edf3; margin-bottom: 6px; }
       #lobby .lbl { font-size: 11px; letter-spacing: 0.14em; color: #9aa7b5; }
+      /* Halkabb kiegeszites a cimke mellett (pl. "csak uj szobahoz"). */
+      #lobby .lbl .megj { color: #6e7681; letter-spacing: 0.04em; text-transform: none; }
       #lobby .sep { height: 1px; background: #21262d; margin: 6px 0; }
       #lobby .or {
         font-size: 11px;
@@ -1043,6 +1161,22 @@
       #match-banner .lives { color: #f0a020; letter-spacing: 3px; font-size: 17px; }
       #match-banner .out { color: #ff6b62; font-weight: bold; }
       #match-banner .phase { color: #e6edf3; }
+      /*
+         HATRALEVO IDO az idore meno modban: tabularis szamok, hogy a
+         visszaszamlalas ne rangassa a savot minden masodpercben.
+      */
+      #match-banner .phase.ido {
+        font-variant-numeric: tabular-nums;
+        font-size: 19px;
+        font-weight: bold;
+      }
+      /* A MOD neve halvanyabb: allando informacio, nem valtozo allapot. */
+      #match-banner .mod {
+        color: #8b949e;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
 
       #match-result {
         position: fixed;
@@ -1081,8 +1215,20 @@
       mondja -- azt a kepernyo kozepen kell latni, oda, ahova a jatekos
       amugy is nez.
     -->
-    <!-- Eredmenyjelzo: ki hany elettel all, eletszam szerint rendezve. -->
-    <div id="scoreboard" hidden></div>
+    <!--
+      A JOBB FELSO OSZLOP: eredmenyjelzo, alatta a kilovés-lista.
+
+      Egy kozos, pozicionalt oszlop, nem ket kulon rogzitett elem: az
+      eredmenyjelzo magassaga a jatekosszamtol fugg (ketto es nyolc sor
+      kozott), tehat a kilovés-lista fix tavolsaga alatta hol
+      atfedesbe, hol nagy uresjaratba kerulne.
+    -->
+    <div id="right-column">
+      <!-- Eredmenyjelzo: ki hany elettel (vagy kilovessel) all. -->
+      <div id="scoreboard" hidden></div>
+      <!-- Kilovés-lista: ki, mivel, kit lott ki. Minden jatekmodban. -->
+      <div id="kill-feed" hidden></div>
+    </div>
 
     <!--
       Nev megadasa indulaskor. A jatek mar fut mogotte (vezetni lehet),
@@ -1138,6 +1284,26 @@
         </div>
 
         <div class="sep"></div>
+
+        <!--
+          JATEKMOD: CSAK az uj szobara vonatkozik.
+
+          Ezert all kozvetlenul az "Uj szoba" gomb folott, es ezert
+          mondja ki a felirata is: aki egy meglevo szobaba lep be, annak
+          a szoba modja lesz ervenyes -- a lista soraiban ott is all,
+          melyik szoba milyen modban megy.
+        -->
+        <label class="lbl">Játékmód <span class="megj">— csak új szobához</span></label>
+        <div id="mode-pick" class="weapons">
+          <button type="button" class="weapon" data-mode="lastCarStanding">
+            <span class="wname">Utolsó túlélő</span>
+            <span class="wdesc">3 élet, aki talpon marad, nyer</span>
+          </button>
+          <button type="button" class="weapon" data-mode="deathmatch">
+            <span class="wname">Kilövés</span>
+            <span class="wdesc">3 perc, a legtöbb kilövés nyer</span>
+          </button>
+        </div>
 
         <button id="lobby-create" type="button" class="primary">Uj szoba</button>
 
@@ -1360,10 +1526,21 @@
     -->
     <div id="player-hud" hidden>
       <div class="stack">
+        <!--
+          A SAJAT sebzes-szamunk a HP-sav FOLOTT lebeg (lasd
+          #hp-damage). A sav azt mutatja, mennyi maradt; ez azt, mennyit
+          vitt el az iment kapott talalat -- 100-bol 8 pont fogyasa a
+          savon szabad szemmel alig latszik, pedig harc kozben eppen ez
+          a kulonbseg szamit.
+
+          A HP-sor ezert `position: relative`: a szam fole van tuzve,
+          es igy nem tolja el a HUD tobbi sorat, amikor megjelenik.
+        -->
         <div class="gauge hp">
           <span class="cap">HP</span>
           <span class="bar"><i id="hp-fill"></i></span>
           <span class="num" id="hp-num">--</span>
+          <span id="hp-damage" aria-hidden="true"></span>
         </div>
         <div class="gauge boost">
           <span class="cap">BOOST</span>

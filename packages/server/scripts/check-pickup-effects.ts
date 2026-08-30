@@ -13,6 +13,8 @@
  */
 import {
   BOOST_RESPAWN_MS,
+  FIXED_DT,
+  healPerMs,
   HEALTH_RESPAWN_MS,
   HEALTH_RESTORE,
   MAX_HP,
@@ -20,6 +22,24 @@ import {
   pickupIndicesOf,
 } from "@cca/shared";
 import { Room } from "../src/rooms/room";
+
+/**
+ * A felvett elet vegiglepetese.
+ *
+ * A pickup FOKOZATOSAN gyogyit, ugyanabban az utemben, mint a
+ * kepesseg (lasd stepHealing): egyetlen tick alig valtoztat, a hatast
+ * csak a teljes idotartam vegiglepetesevel lehet merni.
+ */
+function gyogyulasVegig(room: Room, from: number, hp: number): number {
+  let now = from;
+  const tartamMs = hp / healPerMs();
+  const lepesek = Math.ceil(tartamMs / (FIXED_DT * 1000)) + 2;
+  for (let i = 0; i < lepesek; i++) {
+    room.stepHealing(FIXED_DT, now);
+    now += FIXED_DT * 1000;
+  }
+  return now;
+}
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -45,19 +65,46 @@ function main(): void {
 
   const T0 = 10_000;
 
-  // --- Az elet-pickup gyogyit ---
+  // --- Az elet-pickup gyogyit, de NEM AZONNAL ---
+  //
+  // Az azonnali gyogyulas egy "mentogomb" volt: a halalos loves elott
+  // athajtva rajta a jatekos egy pillanat alatt eltuntette az addigi
+  // sebzest. A pickup ugyanugy fokozatos, mint a kepesseg -- tehat a
+  // felvetel PILLANATABAN meg nem tortenhet semmi a HP-val.
   {
     const { room, player } = playerOn(HEALTH, 30);
     room.collectPickups(T0);
     check(
-      "az elet-pickup visszatolt",
-      player.hp === 30 + HEALTH_RESTORE,
-      `30 -> ${player.hp} HP (+${HEALTH_RESTORE})`,
+      "a felvetel pillanataban meg nem no a HP",
+      player.hp === 30,
+      `${player.hp} HP, es ${Math.round(player.healLeft)} gyogyulas uton`,
     );
     check(
       "a felvett pickup eltunik",
       room.pickupsAvailable(T0)[HEALTH] === false,
       "mar nem felveheto",
+    );
+
+    // FELUTON: a gyogyulasnak MERHETOEN el kell indulnia, de meg nem
+    // lehet kesz. Enelkul egy "vegen egyben odaadom" megoldas is
+    // atmenne a teszten -- pedig az ugyanugy mentogomb lenne.
+    const felut = gyogyulasVegig(room, T0, HEALTH_RESTORE / 2);
+    check(
+      "feluton mar tobb, de meg nem a teljes",
+      player.hp > 30 && player.hp < 30 + HEALTH_RESTORE,
+      `${player.hp} HP (30 es ${30 + HEALTH_RESTORE} kozott)`,
+    );
+
+    gyogyulasVegig(room, felut, HEALTH_RESTORE);
+    check(
+      "a vegere a teljes eletet visszatolti",
+      player.hp === 30 + HEALTH_RESTORE,
+      `30 -> ${player.hp} HP (+${HEALTH_RESTORE})`,
+    );
+    check(
+      "es utana megall (nincs vegtelen gyogyulas)",
+      player.healLeft === 0,
+      `${player.healLeft} maradek`,
     );
   }
 
@@ -65,10 +112,30 @@ function main(): void {
   {
     const { room, player } = playerOn(HEALTH, MAX_HP - 5);
     room.collectPickups(T0);
+    gyogyulasVegig(room, T0, HEALTH_RESTORE);
     check(
       "a gyogyulas nem lepi tul a maximumot",
       player.hp === MAX_HP,
       `${MAX_HP - 5} -> ${player.hp} HP`,
+    );
+  }
+
+  // --- MAR UTON LEVO gyogyulassal nem szedjuk fel a masodikat ---
+  //
+  // A HP lemarad attol, amit a jatekos mar megkapott: enelkul a frissen
+  // felvett elet mellett a masodik is elfogyna ugy, hogy a nagyobb
+  // resze karba vesz.
+  {
+    const { room, player } = playerOn(HEALTH, MAX_HP - 5);
+    room.collectPickups(T0);
+    const masodik = pickupIndicesOf("health")[1];
+    const point = PICKUP_POINTS[masodik];
+    player.state = { ...player.state, position: [point.x, 1, point.z] };
+    room.collectPickups(T0 + 100);
+    check(
+      "a mar gyogyulo jatekos nem viszi el a masodik eletet",
+      room.pickupsAvailable(T0 + 100)[masodik] === true,
+      `${player.hp} HP + ${Math.round(player.healLeft)} uton`,
     );
   }
 

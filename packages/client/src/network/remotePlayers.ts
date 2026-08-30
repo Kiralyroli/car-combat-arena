@@ -3,6 +3,7 @@ import {
   DEFAULT_CAR,
   DEFAULT_SKIN,
   DEFAULT_WEAPON,
+  hpLoss,
   INTERP_DELAY_MS,
   type CarId,
   type PlayerSnapshot,
@@ -158,12 +159,37 @@ export class RemotePlayers {
   /** Kinek fulladt le eppen a fegyvere (lasd PlayerSnapshot.overheated). */
   private readonly overheated = new Set<string>();
 
+  /**
+   * Mennyi eletet vesztett a jatekos a legutobbi kiolvasas ota.
+   *
+   * A SEBZES-SZAM ebbol all elo (lasd SceneView.addDamageNumber).
+   *
+   * MIERT A HP-KULONBSEGBOL, es nem a szervertol kapott sebzes-
+   * esemenybol: eletet HAT-FELE dolog visz el (rakéta, gepfegyver,
+   * robbanas, utkozes, kerek-serules, lezuhanas), es mind mas
+   * utvonalon. Egyetlen kimaradt esemeny csendes hiany lenne a
+   * kijelzon; a HP viszont MINDEN utat magaba foglal, es minden
+   * snapshotban ott van.
+   *
+   * OSSZEGZUNK ket kiolvasas kozott: egy gepfegyver-sorozat 20 Hz-en
+   * tobb talalatot is bezsufol egy snapshotba, es harom egymasra
+   * csuszo "-4" olvashatatlanabb, mint egy "-12".
+   */
+  private readonly damageAcc = new Map<string, number>();
+
+  /** Ki hany jatekost lott ki ebben a meccsben (eredmenyjelzo). */
+  private readonly kills = new Map<string, number>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
 
   nameOf(id: string): string {
     return this.names.get(id) ?? "";
+  }
+
+  killsOf(id: string): number {
+    return this.kills.get(id) ?? 0;
   }
 
   livesOf(id: string): number {
@@ -176,6 +202,19 @@ export class RemotePlayers {
 
   isHealing(id: string): boolean {
     return this.healingIds.has(id);
+  }
+
+  /**
+   * Mennyit sebzodott a jatekos a legutobbi lekerdezes ota (0 = semmit).
+   *
+   * KIOLVASSA es nullazza: a hivo (a kepkockahurok) egyszer latja meg
+   * az esemenyt, es o dönt rola, mit rajzol. Igy egy kihagyott kepkocka
+   * sem veszit el sebzest -- a kovetkezoben megjon osszegezve.
+   */
+  consumeDamage(id: string): number {
+    const mennyi = this.damageAcc.get(id) ?? 0;
+    if (mennyi > 0) this.damageAcc.delete(id);
+    return mennyi;
   }
 
   carOf(id: string): CarId {
@@ -218,6 +257,8 @@ export class RemotePlayers {
     this.weapons.delete(id);
     this.heats.delete(id);
     this.overheated.delete(id);
+    this.damageAcc.delete(id);
+    this.kills.delete(id);
   }
 
   clear(): void {
@@ -231,14 +272,22 @@ export class RemotePlayers {
     this.weapons.clear();
     this.heats.clear();
     this.overheated.clear();
+    this.damageAcc.clear();
+    this.kills.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
   ingest(players: PlayerSnapshot[], receivedAt: number): void {
     for (const player of players) {
+      this.damageAcc.set(
+        player.id,
+        (this.damageAcc.get(player.id) ?? 0) +
+          hpLoss(this.hp.get(player.id), player.hp),
+      );
       this.hp.set(player.id, player.hp);
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
+      this.kills.set(player.id, player.kills);
       this.cars.set(player.id, player.car);
       this.skins.set(player.id, player.skin);
       this.weapons.set(player.id, player.weapon);
@@ -247,7 +296,9 @@ export class RemotePlayers {
       else this.overheated.delete(player.id);
       if (player.protected) this.protectedIds.add(player.id);
       else this.protectedIds.delete(player.id);
-      if (player.ability === "heal" && player.abilityActive) {
+      // A GYOGYULAS sajat jelzes: a palyan felvett elet is indit ilyet,
+      // olyan jatekosnal is, aki nem gyogyito kepesseget valasztott.
+      if (player.healing) {
         this.healingIds.add(player.id);
       } else {
         this.healingIds.delete(player.id);

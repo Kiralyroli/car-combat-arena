@@ -65,14 +65,14 @@ function collide(f: Fixture, now: number): void {
  * A gyogyulas vegiglepetese.
  *
  * A gyogyitas FOKOZATOS: a szerver tickenkent ad vissza egy tortnyi
- * eletet (lasd stepAbilities). Egy egyszeri hivas tehat alig valtoztat
+ * eletet (lasd stepHealing). Egy egyszeri hivas tehat alig valtoztat
  * -- a hatast csak a teljes idotartam vegiglepetesevel lehet merni.
  */
 function gyogyulasVegig(f: Fixture, from: number): number {
   let now = from;
   const lepesek = Math.ceil(ABILITIES.heal.durationMs / (FIXED_DT * 1000)) + 2;
   for (let i = 0; i < lepesek; i++) {
-    f.room.stepAbilities(FIXED_DT, now);
+    f.room.stepHealing(FIXED_DT, now);
     now += FIXED_DT * 1000;
   }
   return now;
@@ -184,7 +184,7 @@ function main(): void {
     f.room.useAbility("b", now);
 
     // AZONNAL alig valtozik: ez a lenyeg -- a gyogyitas nem mentogomb.
-    f.room.stepAbilities(FIXED_DT, now);
+    f.room.stepHealing(FIXED_DT, now);
     check(
       "a gyogyitas NEM azonnal tortenik",
       f.b.hp < 30 + ABILITIES.heal.heal / 2,
@@ -255,7 +255,7 @@ function main(): void {
     const now = vedelemUtan(T0);
     f.b.hp = 20;
     f.room.useAbility("b", now);
-    f.room.stepAbilities(FIXED_DT, now);
+    f.room.stepHealing(FIXED_DT, now);
     const kozben = f.b.hp;
 
     f.b.deadSince = now + 100;

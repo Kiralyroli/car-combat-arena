@@ -33,6 +33,8 @@
     "check:raycast": "tsx scripts/check-raycast.ts",
     "check:freelook": "tsx scripts/check-freelook.ts",
     "check:abilities": "tsx scripts/check-abilities.ts",
+    "check:damage-numbers": "tsx scripts/check-damage-numbers.ts",
+    "check:modes": "tsx scripts/check-modes.ts",
     "check:carbox": "tsx scripts/check-carbox.ts",
     "check:camera": "tsx scripts/check-camera.ts"
   },

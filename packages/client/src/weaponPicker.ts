@@ -3,6 +3,8 @@ import {
   carModel,
   skinsOf,
   toAbilityId,
+  toGameModeId,
+  type GameModeId,
   toCarId,
   toSkin,
   toWeaponId,
@@ -291,5 +293,22 @@ export class AbilityPicker extends LoadoutPicker<AbilityId> {
     onChange: (ability: AbilityId) => void,
   ) {
     super(containerId, "ability", toAbilityId, initial, onChange);
+  }
+}
+
+/**
+ * JATEKMOD-valaszto a lobbyban -- ugyanaz a viselkedes, mas adat.
+ *
+ * CSAK uj szoba nyitasakor szamit: meglevo szobaba lepve a szoba modja
+ * marad ervenyben (lasd JoinMessage.mode). A lobby felirata es a
+ * szobalista sorai is kimondjak ezt.
+ */
+export class GameModePicker extends LoadoutPicker<GameModeId> {
+  constructor(
+    containerId: string,
+    initial: GameModeId,
+    onChange: (mode: GameModeId) => void,
+  ) {
+    super(containerId, "mode", toGameModeId, initial, onChange);
   }
 }

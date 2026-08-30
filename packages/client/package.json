@@ -21,6 +21,7 @@
     "check:timeline": "tsx scripts/check-interp-timeline.ts",
     "check:boost": "tsx scripts/check-boost-tank.ts",
     "check:scoreboard": "tsx scripts/check-scoreboard.ts",
+    "check:heal": "tsx scripts/check-heal.ts",
     "check:respawn": "tsx scripts/check-respawn.ts",
     "check:cars-e2e": "tsx scripts/check-cars.ts",
     "check:mg": "tsx scripts/check-machinegun.ts",

@@ -3,6 +3,10 @@ import {
   DEFAULT_SKIN,
   DEFAULT_ABILITY,
   DEFAULT_WEAPON,
+  DEFAULT_GAME_MODE,
+  hpLoss,
+  type KillEvent,
+  type GameModeId,
   PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   SNAPSHOT_HZ,
@@ -53,6 +57,13 @@ export interface NetworkEvents {
    * mellett nyolc jatekosnal az kozel szaz csomag lenne masodpercenkent.
    */
   onTracers?: (tracers: TracerSnapshot[]) => void;
+  /**
+   * KILOVESEK a legutobbi snapshotbol -- a kilovés-lista epul beloluk.
+   *
+   * Ugyanugy a snapshotba csomagolva jonnek, mint a nyomjelzok:
+   * esemenyek, nem allapot. A kliens kirajzolja es elfelejti oket.
+   */
+  onKills?: (kills: KillEvent[]) => void;
   onError?: (code: string, message: string) => void;
   onClose?: () => void;
 }
@@ -122,6 +133,34 @@ export class NetworkClient {
   ownProtected = false;
 
   /**
+   * Gyogyulunk-e eppen -- a SZERVER szerint.
+   *
+   * NEM az ownAbility/ownAbilityActive parosbol kovetkeztetve:
+   * gyogyulast a palyan felvett elet is indit, olyan jatekosnal is, aki
+   * pajzsot valasztott (lasd PlayerSnapshot.healing).
+   */
+  ownHealing = false;
+
+  /** Hany jatekost lottunk ki EBBEN a meccsben (a szerver szerint). */
+  ownKills = 0;
+
+  /**
+   * Mennyi eletet vesztettunk a legutobbi kiolvasas ota.
+   *
+   * Ugyanabbol a szabalybol, mint a tavoli autok folotti szam (lasd
+   * hpLoss): a HUD ezt mutatja a sajat HP-savunk folott. A hivo
+   * KIOLVASSA es nullazza -- lasd consumeOwnDamage.
+   */
+  private ownDamageAcc = 0;
+
+  /** Mennyit sebzodtunk a legutobbi lekerdezes ota (0 = semmit). */
+  consumeOwnDamage(): number {
+    const mennyi = this.ownDamageAcc;
+    this.ownDamageAcc = 0;
+    return mennyi;
+  }
+
+  /**
    * A SAJAT autonk a szerver szerint.
    *
    * Nem a beallitott ertek: a szerver mast adhat, ha a kert kocsit a
@@ -168,13 +207,15 @@ export class NetworkClient {
   pickupsAvailable: boolean[] = [];
 
   /**
-   * A meccs allapota a szerver szerint (Last Car Standing).
+   * A meccs allapota a szerver szerint (fazis, mod, allas).
    * Csatlakozas elott varakozonak tekintjuk.
    */
   match: MatchSnapshot = {
     phase: "waiting",
+    mode: DEFAULT_GAME_MODE,
     survivors: 0,
     winnerId: null,
+    timeLeftMs: 0,
     restartInMs: 0,
   };
 
@@ -257,7 +298,12 @@ export class NetworkClient {
     this.transport?.send({ type: "listRooms" });
   }
 
-  /** Belepes egy szobaba; kod nelkul a szerver ujat nyit. */
+  /**
+   * Belepes egy szobaba; kod nelkul a szerver ujat nyit.
+   *
+   * A JATEKMOD csak az UJ szobara vonatkozik: meglevo szobaba lepve a
+   * szoba modja marad ervenyben (lasd JoinMessage.mode).
+   */
   join(
     roomCode: string | undefined,
     name: string,
@@ -265,6 +311,7 @@ export class NetworkClient {
     car?: CarId,
     ability?: AbilityId,
     skin?: string,
+    mode?: GameModeId,
   ): void {
     this.transport?.send({
       type: "join",
@@ -275,6 +322,7 @@ export class NetworkClient {
       car,
       ability,
       skin,
+      mode,
     });
   }
 
@@ -429,12 +477,18 @@ export class NetworkClient {
         if (message.tracers.length > 0) {
           this.events.onTracers?.(message.tracers);
         }
+        if (message.kills.length > 0) {
+          this.events.onKills?.(message.kills);
+        }
 
         // A sajat HP-nkat a szerver mondja meg (o donti el a sebzest --
         // terv 15.4), ezert a snapshotbol vesszuk ki, mielott kiszurnenk
         // magunkat belole.
         const own = message.players.find((p) => p.id === this.playerId);
         if (own) {
+          // A SEBZES-SZAM a valtozasbol all elo, tehat a regi ertek
+          // meg kell ide -- ezert az ertekadas ELOTT.
+          this.ownDamageAcc += hpLoss(this.hp, own.hp);
           this.hp = own.hp;
           this.boostGrants = own.boostGrants;
           this.ownWeapon = own.weapon;
@@ -445,6 +499,8 @@ export class NetworkClient {
           this.heat = own.heat;
           this.overheated = own.overheated;
           this.ownProtected = own.protected;
+          this.ownHealing = own.healing;
+          this.ownKills = own.kills;
           this.ownCar = own.car;
           this.ownSkin = own.skin;
           this.lives = own.lives;

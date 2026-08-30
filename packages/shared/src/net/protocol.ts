@@ -17,6 +17,7 @@
 
 import type { AbilityId } from "../abilities";
 import type { MatchPhase } from "../match";
+import type { GameModeId, KillCause } from "../gameModes";
 import type { CarId } from "../carModels";
 import type { WeaponId } from "../weapons";
 /** Halozati snapshot-rata (Hz). A fizika ettol fuggetlenul 60 Hz -- lasd 15.3. */
@@ -55,8 +56,13 @@ export const INTERP_DELAY_MS = 100;
  * valasztanak, a sajat texturajukkal. A regi kliens szint varna, es
  * ismeretlen erteknel mindenkit ugyanolyannak latna -- vagyis nem
  * lehetne megkulonboztetni a jatekosokat.
+ *
+ * 11: JATEKMODOK es KILOVES-LISTA. A regi kliens nem tudna modot
+ * valasztani, es -- ami rosszabb -- a deathmatch visszaszamlalojat sem
+ * latna: eletekre varna egy olyan meccsben, ahol nem fogynak, es a
+ * meccs vege szamara varatlanul jonne.
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -142,6 +148,13 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
   lives: number;
   /** Melyik fegyverrel jatszik -- a HUD es az eredmenyjelzo mutatja. */
   weapon: WeaponId;
+  /**
+   * Hany jatekost lott ki EBBEN a meccsben.
+   *
+   * Mindket modban megy: a deathmatch ebbol dol el, a Last Car
+   * Standingben pedig az eredmenyjelzon latszik, ki mennyit tett hozza.
+   */
+  kills: number;
   /** Melyik kepesseget valasztotta ehhez az elethez. */
   ability: AbilityId;
   /**
@@ -172,6 +185,20 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * ertelme.
    */
   abilityActiveMs: number;
+  /**
+   * Gyogyul-e eppen (folyamatosan tolti vissza az eletet).
+   *
+   * KULON MEZO, es NEM az `ability === "heal" && abilityActive`
+   * parosbol kovetkeztetve: gyogyulast KET forras indit -- a kepesseg
+   * ES a palyan felvett elet --, es a masodikhoz a jatekosnak nem is
+   * kell gyogyito kepesseget valasztania. A kovetkeztetes tehat eppen
+   * az esetek felet hagyna ki.
+   *
+   * MINDENKIRE megy, nem csak magunkra: a tamadonak latnia kell, hogy a
+   * celpont eppen visszatoltodik -- ez donti el, hogy erdemes-e tovabb
+   * nyomni a tamadast. Ezert villog a gyogyulo auto zolden.
+   */
+  healing: boolean;
   /**
    * A gepfegyver hoszintje (0..100), agyunal mindig 0.
    *
@@ -282,6 +309,14 @@ export interface JoinMessage {
   car?: CarId;
   /** Valasztott festes; ismeretlen ertek eseten az auto elso festese. */
   skin?: string;
+  /**
+   * A kert JATEKMOD -- CSAK UJ szoba nyitasakor szamit.
+   *
+   * Meglevo szobaba lepve a szoba modja az ervenyes: egy meccs kozben
+   * nem valthat modot alattunk a jatek. A vegleges mod a snapshotbol
+   * derul ki (MatchSnapshot.mode), tehat egy forras van ra.
+   */
+  mode?: GameModeId;
 }
 
 /**
@@ -423,6 +458,22 @@ export interface JoinedMessage {
  */
 export interface MatchSnapshot {
   phase: MatchPhase;
+  /**
+   * Melyik jatekmod megy a szobaban.
+   *
+   * MINDEN snapshotban ott van, nem csak belepeskor: a kliens ebbol
+   * dönti el, mit mutasson (visszaszamlalo vagy eletek), es egy kesobb
+   * csatlakozo kliensnek sem kell kulon lekerdeznie.
+   */
+  mode: GameModeId;
+  /**
+   * Mennyi van hatra a meccsbol (ms); 0, ha a mod nem idore megy.
+   *
+   * A SZERVER szamolja, minden snapshotban: a kliens sajat
+   * visszaszamlaloja elcsuszna tole, es a jatekos ket kulonbozo
+   * "hatralevo idot" latna a kepernyon es a valosagban.
+   */
+  timeLeftMs: number;
   /** Hany jatekos van meg talpon (eletben levo eletekkel). */
   survivors: number;
   /** A gyoztes azonositoja, vagy null (meg megy a meccs, vagy dontetlen). */
@@ -447,6 +498,29 @@ export interface TracerSnapshot {
   to: [number, number, number];
   /** Talalt-e autot -- ebbol jon a becsapodas-jelzes. */
   hit: boolean;
+}
+
+/**
+ * Egy KILOVES -- ESEMENY, nem allapot.
+ *
+ * A kilovés-lista epul belole: "ki, mivel, kit". Minden modban megy: a
+ * Last Car Standingben is fontos informacio, hogy ki fogy a mezonybol,
+ * es kinek koszonhetoen.
+ */
+export interface KillEvent {
+  /** A tamado azonositoja; null, ha senki nem kapta meg az erdemet. */
+  killerId: string | null;
+  /** A tamado neve; ures, ha nincs tamado (sajat hiba). */
+  killerName: string;
+  victimId: string;
+  victimName: string;
+  /**
+   * Mi vitte el; null, ha nem volt tamado.
+   *
+   * A ket null EGYUTT jar: a kilovés-lista ilyenkor "sajat hiba"-kent
+   * mutatja a sort.
+   */
+  cause: KillCause | null;
 }
 
 /** Egy repulo rakéta allapota a snapshotban. */
@@ -478,6 +552,8 @@ export interface RoomListing {
   code: string;
   players: number;
   maxPlayers: number;
+  /** Melyik jatekmodban megy -- a lobbyban lathato legyen, mibe lepunk be. */
+  mode: GameModeId;
   /** A meccs allapota -- lathato legyen, hogy epp megy-e a jatek. */
   phase: MatchPhase;
 }
@@ -507,6 +583,17 @@ export interface SnapshotMessage {
    * tortentek vannak benne, es a kliens kirajzolas utan elfelejti.
    */
   tracers: TracerSnapshot[];
+  /**
+   * A legutobbi snapshot ota tortent KILOVESEK (kilovés-lista).
+   *
+   * ESEMENY-lista, mint a nyomjelzoke: a szerver a snapshotba csomagolja
+   * es elfelejti, a kliens kirajzolja a jobb felso sarokba.
+   *
+   * A NEVEK is benne vannak, nem csak az azonositok: a lista akkor is
+   * helyes marad, ha a szereplo kozben kilepett a szobabol -- egy
+   * azonositobol addigra mar nem lenne mibol nevet keresni.
+   */
+  kills: KillEvent[];
   /**
    * A pickupok allapota, INDEX SZERINT a PICKUP_POINTS-hoz igazitva.
    * Csak azt kuldjuk, hogy eppen felveheto-e -- a pozicio allando, azt

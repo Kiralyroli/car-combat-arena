@@ -11,12 +11,21 @@ import {
   type RoomListing,
   toCarId,
   toSkin,
+  toGameModeId,
+  DEFAULT_GAME_MODE,
+  GAME_MODES,
+  type GameModeId,
   type CarId,
   type CarLook,
   type WeaponId,
 } from "@cca/shared";
 import { CarPreview } from "./carPreview";
-import { AbilityPicker, CarSkinPicker, WeaponPicker } from "./weaponPicker";
+import {
+  AbilityPicker,
+  CarSkinPicker,
+  GameModePicker,
+  WeaponPicker,
+} from "./weaponPicker";
 
 /**
  * Lobby: nev megadasa es szoba-valasztas (terv 5. lepcso 1. pont).
@@ -35,6 +44,7 @@ import { AbilityPicker, CarSkinPicker, WeaponPicker } from "./weaponPicker";
 const STORAGE_KEY = "cca.playerName";
 const WEAPON_STORAGE_KEY = "cca.weapon";
 const ABILITY_STORAGE_KEY = "cca.ability";
+const MODE_STORAGE_KEY = "cca.mode";
 const CAR_STORAGE_KEY = "cca.car";
 
 /** Milyen surun kerjuk ujra a szoba-listat, amig a lobby nyitva van. */
@@ -49,6 +59,13 @@ export interface LobbyChoice {
   car: CarId;
   /** A valasztott festes a kocsin. */
   skin: string;
+  /**
+   * A kert JATEKMOD -- CSAK uj szoba nyitasakor szamit.
+   *
+   * Meglevo szobaba lepve a szoba modja marad ervenyben; a valaszto
+   * felirata is ezt mondja ki a lobbyban.
+   */
+  mode: GameModeId;
 }
 
 export class Lobby {
@@ -61,6 +78,7 @@ export class Lobby {
   private readonly error: HTMLElement;
   private readonly weapons: WeaponPicker;
   private readonly abilities: AbilityPicker;
+  private readonly modes: GameModePicker;
   private readonly cars: CarSkinPicker;
 
   /**
@@ -109,6 +127,9 @@ export class Lobby {
       "ability-pick",
       readStoredAbility(),
       (ability) => storeAbility(ability),
+    );
+    this.modes = new GameModePicker("mode-pick", readStoredMode(), (mode) =>
+      storeMode(mode),
     );
     this.cars = new CarSkinPicker(
       "car-pick",
@@ -209,6 +230,7 @@ export class Lobby {
     this.nameInput.value = readStoredName();
     this.weapons.set(readStoredWeapon());
     this.abilities.set(readStoredAbility());
+    this.modes.set(readStoredMode());
     this.cars.set(readStoredCar());
     this.error.hidden = message === undefined;
     this.error.textContent = message ?? "";
@@ -271,9 +293,12 @@ export class Lobby {
           : room.phase === "ended"
             ? "meccs vege"
             : "varakozik";
+      // A MOD is ott all: a jatekos igy tudja, mibe lep be -- a lobby
+      // mod-valasztoja ugyanis csak UJ szobara vonatkozik.
+      const modNev = GAME_MODES[room.mode].nev;
       meta.textContent = full
-        ? `TELE (${room.players}/${room.maxPlayers})`
-        : `${room.players}/${room.maxPlayers} - ${phase}`;
+        ? `TELE (${room.players}/${room.maxPlayers}) - ${modNev}`
+        : `${room.players}/${room.maxPlayers} - ${phase} - ${modNev}`;
 
       button.append(code, meta);
       if (!full) button.addEventListener("click", () => this.choose(room.code));
@@ -302,6 +327,7 @@ export class Lobby {
       ability: this.abilities.value,
       car: this.cars.value.car,
       skin: this.cars.value.skin,
+      mode: this.modes.value,
     });
     this.resolve = null;
   }
@@ -407,6 +433,30 @@ function storeWeapon(weapon: WeaponId): void {
  * Aki egyszer eldontotte, ne kelljen minden belepesnel ujra
  * rakattintania.
  */
+/**
+ * A legutobb valasztott JATEKMOD.
+ *
+ * Ugyanaz a megfontolas, mint a fegyvernel es a kepessegnel: aki
+ * egyszer eldontotte, ne kelljen minden belepesnel ujra rakattintania.
+ */
+function readStoredMode(): GameModeId {
+  try {
+    return toGameModeId(
+      localStorage.getItem(MODE_STORAGE_KEY) ?? DEFAULT_GAME_MODE,
+    );
+  } catch {
+    return DEFAULT_GAME_MODE;
+  }
+}
+
+function storeMode(mode: GameModeId): void {
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    // Privat mod vagy letiltott tarolas -- lasd storeWeapon.
+  }
+}
+
 function readStoredAbility(): AbilityId {
   try {
     return toAbilityId(

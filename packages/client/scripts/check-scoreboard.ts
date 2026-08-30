@@ -20,16 +20,23 @@ function check(label: string, ok: boolean, detail: string): void {
   if (!ok) failures++;
 }
 
-const row = (name: string, lives: number): ScoreRow => ({
+const row = (name: string, lives: number, kills = 0): ScoreRow => ({
   id: name,
   name,
   lives,
+  kills,
   // A kinezet a sorrendet nem befolyasolja -- ez a teszt a rendezest meri.
   car: "Jeep",
 });
 const order = (rows: ScoreRow[]): string =>
   sortScoreRows(rows)
     .map((r) => `${r.name}(${r.lives})`)
+    .join(" > ");
+
+/** Ugyanez KILOVES szerint -- az idore meno mod rendezese. */
+const killOrder = (rows: ScoreRow[]): string =>
+  sortScoreRows(rows, true)
+    .map((r) => `${r.name}(${r.kills})`)
     .join(" > ");
 
 function main(): void {
@@ -98,6 +105,29 @@ function main(): void {
     original[0].name === "Anna" && original[1].name === "Bela",
     "valtozatlan",
   );
+
+  // --- IDORE MENO MOD: a KILOVES a rendezes alapja ---
+  //
+  // Deathmatchben mindenkinek ugyanannyi elete van vegig, tehat az
+  // eletek szerinti rendezes semmit nem mondana az allasrol.
+  {
+    const dm = [row("Anna", 3, 2), row("Bela", 3, 7), row("Cili", 3, 5)];
+    check(
+      "kiloves szerint a legtobbet szerzo van legfelul",
+      sortScoreRows(dm, true)[0].name === "Bela",
+      killOrder(dm),
+    );
+    check(
+      "azonos kilovesnel a nev dönt (stabil sorrend)",
+      killOrder([row("Zoli", 3, 4), row("Anna", 3, 4)]) === "Anna(4) > Zoli(4)",
+      killOrder([row("Zoli", 3, 4), row("Anna", 3, 4)]),
+    );
+    check(
+      "az eletek szerinti rendezes MAS sorrendet ad ugyanezen",
+      order(dm) !== killOrder(dm).replace(/(d+)/g, ""),
+      `eletek: ${order(dm)} / kilovesek: ${killOrder(dm)}`,
+    );
+  }
 
   console.log(
     failures === 0 ? "\n=== Minden teszt OK ===" : `\n=== ${failures} teszt ELBUKOTT ===`,

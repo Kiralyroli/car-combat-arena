@@ -1,4 +1,9 @@
-import { generateRoomCode, type RoomListing } from "@cca/shared";
+import {
+  DEFAULT_GAME_MODE,
+  generateRoomCode,
+  type GameModeId,
+  type RoomListing,
+} from "@cca/shared";
 import { Room } from "./room";
 
 /**
@@ -20,13 +25,14 @@ export class RoomManager {
     return this.rooms.get(code.toUpperCase());
   }
 
-  create(): Room {
+  /** Uj szoba. A JATEKMOD itt dol el, es a szoba eleteig nem valtozik. */
+  create(mode: GameModeId = DEFAULT_GAME_MODE): Room {
     // Nagyon valoszinutlen, de a kod-utkozest kezelni kell: addig
     // generalunk, amig szabadot nem talalunk.
     let code = generateRoomCode();
     while (this.rooms.has(code)) code = generateRoomCode();
 
-    const room = new Room(code);
+    const room = new Room(code, mode);
     this.rooms.set(code, room);
     return room;
   }
@@ -49,6 +55,7 @@ export class RoomManager {
         players: room.playerCount,
         maxPlayers,
         phase: room.matchPhase,
+        mode: room.mode,
       }))
       .sort((a, b) => b.players - a.players || a.code.localeCompare(b.code));
   }
