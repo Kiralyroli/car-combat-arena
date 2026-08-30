@@ -85,7 +85,6 @@ function main(): void {
   // beirt szamokbol: kulonben egy modell-csere utan a teszt akkor is
   // "jo" maradna, ha kozben mast merne.
   const felSzeles = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.x;
-  const felHossz = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.z;
   const felMagas = CAR_GEOMETRY[DEFAULT_CAR].halfExtents.y;
   /** Oldalt eddig er a sugarral felfujt doboz. */
   const oldalHatar = felSzeles + ROCKET_RADIUS;

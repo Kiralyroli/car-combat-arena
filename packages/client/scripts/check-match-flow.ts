@@ -38,17 +38,20 @@ async function resultOf(page: Page): Promise<{
   sajatSor: string | null;
   gyoztesSor: string | null;
 }> {
+  // SEMMILYEN belso fuggvenyt nem deklaralunk a lapon futo kodban.
+  // A tsx (esbuild) a nevesitett fuggveny-kifejezeseket egy `__name`
+  // segedhivasba csomagolja -- az a bongeszoben nem letezik, es a
+  // teljes evaluate "ReferenceError: __name is not defined"-dal bukik.
   return (await page.evaluate(() => {
     const el = document.getElementById("match-result");
-    const q = (s: string) => el?.querySelector(s)?.textContent ?? null;
     return {
       lathato: !!el && !el.hidden,
-      cim: q(".title") ?? "",
-      gyoztesNev: q(".nyertes") ?? "",
+      cim: el?.querySelector(".title")?.textContent ?? "",
+      gyoztesNev: el?.querySelector(".nyertes")?.textContent ?? "",
       // A fejlec is .row, azt nem szamoljuk sornak.
       sorok: el?.querySelectorAll(".rows .row:not(.head)").length ?? 0,
-      sajatSor: q(".rows .row.self"),
-      gyoztesSor: q(".rows .row.winner"),
+      sajatSor: el?.querySelector(".rows .row.self")?.textContent ?? null,
+      gyoztesSor: el?.querySelector(".rows .row.winner")?.textContent ?? null,
     };
   })) as {
     lathato: boolean;
