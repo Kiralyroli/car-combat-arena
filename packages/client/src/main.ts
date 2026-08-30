@@ -1191,29 +1191,33 @@ async function main(): Promise<void> {
     );
     hud.update(backend.getTelemetry(), currWheels, fps, net.ping, net.hp, boostTank.fraction);
     netStat.update(fps, net.ping);
+    // A MEZONY egyszer all ossze, es KET helyre megy: a jobb felso
+    // allasra es a meccs vegi eredmenyjelzore. Ket kulon osszeallitasbol
+    // ket kulonbozo sorrend johetne ki ugyanarra a meccsre.
+    const allas = [
+      // A SAJAT sorunk a halozati rtegbol jon (a szerver tisztitott
+      // neve es a szerver szerinti eletszam).
+      ...(net.playerId && net.ownName
+        ? [
+            {
+              id: net.playerId,
+              name: net.ownName,
+              lives: net.lives ?? 0,
+              kills: net.ownKills,
+              car: net.ownCar,
+            },
+          ]
+        : []),
+      ...net.remotes.ids().map((id) => ({
+        id,
+        name: net.remotes.nameOf(id),
+        lives: net.remotes.livesOf(id),
+        kills: net.remotes.killsOf(id),
+        car: net.remotes.carOf(id),
+      })),
+    ];
     scoreboard.update(
-      [
-        // A SAJAT sorunk a halozati rtegbol jon (a szerver tisztitott
-        // neve es a szerver szerinti eletszam).
-        ...(net.playerId && net.ownName
-          ? [
-              {
-                id: net.playerId,
-                name: net.ownName,
-                lives: net.lives ?? 0,
-                kills: net.ownKills,
-                car: net.ownCar,
-              },
-            ]
-          : []),
-        ...net.remotes.ids().map((id) => ({
-          id,
-          name: net.remotes.nameOf(id),
-          lives: net.remotes.livesOf(id),
-          kills: net.remotes.killsOf(id),
-          car: net.remotes.carOf(id),
-        })),
-      ],
+      allas,
       net.playerId,
       // A MOD donti el, mit jelent az "allas": eletet vagy kilovest.
       net.match.mode,
@@ -1223,6 +1227,8 @@ async function main(): Promise<void> {
       net.lives,
       net.match.winnerId === null ? null : net.match.winnerId === net.playerId,
       net.ownKills,
+      allas,
+      net.playerId,
     );
     // UJ MECCS, tiszta lista: az elozo meccs kilovesei nem az uj
     // meccshez tartoznak, es a vege utan kiirt sorok ott ragadnanak.

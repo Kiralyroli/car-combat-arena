@@ -23,6 +23,43 @@ const CLIENT_URL = process.env.CLIENT_URL ?? "http://localhost:5173";
 /** A tesztkliensek neve -- a ?name= egyben atugorja a nev-parbeszedet. */
 const testName = "Meccs";
 
+/**
+ * Amit a MECCS VEGI eredmenyjelzon lat a jatekos.
+ *
+ * A DOM-bol olvassuk, nem a halozati allapotbol: a lanc vege eppen a
+ * kirajzolas, es az tud csendben elszakadni ugy, hogy a szerver
+ * allapota hibatlan.
+ */
+async function resultOf(page: Page): Promise<{
+  lathato: boolean;
+  cim: string;
+  gyoztesNev: string;
+  sorok: number;
+  sajatSor: string | null;
+  gyoztesSor: string | null;
+}> {
+  return (await page.evaluate(() => {
+    const el = document.getElementById("match-result");
+    const q = (s: string) => el?.querySelector(s)?.textContent ?? null;
+    return {
+      lathato: !!el && !el.hidden,
+      cim: q(".title") ?? "",
+      gyoztesNev: q(".nyertes") ?? "",
+      // A fejlec is .row, azt nem szamoljuk sornak.
+      sorok: el?.querySelectorAll(".rows .row:not(.head)").length ?? 0,
+      sajatSor: q(".rows .row.self"),
+      gyoztesSor: q(".rows .row.winner"),
+    };
+  })) as {
+    lathato: boolean;
+    cim: string;
+    gyoztesNev: string;
+    sorok: number;
+    sajatSor: string | null;
+    gyoztesSor: string | null;
+  };
+}
+
 function argOrEnv(name: string, envName: string): number {
   const arg = process.argv.find((x) => x.startsWith(`--${name}=`));
   if (arg) return Number(arg.split("=")[1]);
@@ -254,6 +291,52 @@ async function main(): Promise<void> {
     "B ugyanazt a gyoztest latja",
     endedOnB.winnerId === ended.winnerId,
     `${endedOnB.winnerId}`,
+  );
+
+  // --- EREDMENYJELZO: mit LAT a jatekos a meccs vegen ---
+  //
+  // A gyoztes azonositoja onmagaban nem eredmenyjelzo: a jatekos a
+  // kepernyot nezi. Itt az derul ki, hogy a lanc a DOM-ig elmegy --
+  // cim, a teljes mezony, es a sajat sor megtalalhatosaga.
+  const eredmenyA = await resultOf(a);
+  check(
+    "a meccs vegen megjelenik az eredmenyjelzo",
+    eredmenyA.lathato,
+    eredmenyA.lathato ? "kirajzolva" : "rejtve maradt",
+  );
+  check(
+    "a gyoztes GYOZTEL cimet lat",
+    eredmenyA.cim === "GYOZTEL",
+    `"${eredmenyA.cim}"`,
+  );
+  check(
+    "a tablan MINDKET jatekos ott van",
+    eredmenyA.sorok === 2,
+    `${eredmenyA.sorok} sor`,
+  );
+  check(
+    "a sajat sorunk ki van emelve",
+    eredmenyA.sajatSor !== null,
+    eredmenyA.sajatSor === null ? "nincs .self sor" : `"${eredmenyA.sajatSor}"`,
+  );
+  check(
+    "a gyoztes sora meg van jelolve",
+    eredmenyA.gyoztesSor !== null,
+    eredmenyA.gyoztesSor === null
+      ? "nincs .winner sor"
+      : `"${eredmenyA.gyoztesSor}"`,
+  );
+
+  const eredmenyB = await resultOf(b);
+  check(
+    "a vesztes VESZTETTEL cimet lat",
+    eredmenyB.cim === "VESZTETTEL",
+    `"${eredmenyB.cim}"`,
+  );
+  check(
+    "es a vesztes a GYOZTES NEVET is latja",
+    eredmenyB.gyoztesNev.length > 0,
+    `"${eredmenyB.gyoztesNev}"`,
   );
 
   console.log(

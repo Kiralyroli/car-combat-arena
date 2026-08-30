@@ -1196,6 +1196,81 @@
       #match-result .win { color: #3fb950; }
       #match-result .lose { color: #f85149; }
       #match-result .sub { color: #7d8590; }
+      /* A gyoztes neve a cim alatt -- csak ha nem mi vagyunk az. */
+      #match-result .nyertes { color: #e3b341; font-size: 18px; }
+
+      /*
+         A MECCS VEGI TABLA.
+
+         Miert kell a "gyoztel / vesztettel" MELLE: a jatekost az is
+         erdekli, hol vegzett es mennyivel maradt le. A jobb felso allas
+         ilyenkor mar a kovetkezo meccs elokeszuletet mutatja.
+
+         Fix oszlopszelesseg, tabularis szamok: a nevek kulonbozo
+         hosszuak, es a szamoknak egymas alatt kell allniuk, kulonben a
+         tabla nem osszehasonlithato -- pedig eppen azert van.
+      */
+      #match-result .rows {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 420px;
+        padding: 12px 14px;
+        background: rgba(1, 4, 9, 0.66);
+        border: 1px solid #4d5866;
+        border-radius: 8px;
+        font-size: 15px;
+      }
+      #match-result .rows .row {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        padding: 3px 6px;
+        border-radius: 4px;
+        text-align: left;
+      }
+      #match-result .rows .row .h {
+        flex: 0 0 26px;
+        color: #8b949e;
+        font-variant-numeric: tabular-nums;
+      }
+      #match-result .rows .row .nm { flex: 1; }
+      /* Az auto neve a jatekos neve elott -- ugyanaz, mint a jobb felso allason. */
+      #match-result .rows .row .nm .carnev {
+        color: #8b949e;
+        font-size: 11px;
+        margin-right: 8px;
+      }
+      #match-result .rows .row .kl {
+        flex: 0 0 58px;
+        text-align: right;
+        color: #f0a020;
+        font-variant-numeric: tabular-nums;
+      }
+      #match-result .rows .row .lv {
+        flex: 0 0 76px;
+        text-align: right;
+        color: #f0a020;
+        letter-spacing: 2px;
+      }
+      /* A fejlec halvany: cimke, nem adat. */
+      #match-result .rows .row.head {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        color: #7d8590;
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 5px;
+        margin-bottom: 2px;
+      }
+      #match-result .rows .row.head .kl,
+      #match-result .rows .row.head .lv,
+      #match-result .rows .row.head .nm { color: #7d8590; }
+      /* A SAJAT sorunk kiemelve -- ezt keresi elsore a szem. */
+      #match-result .rows .row.self { background: rgba(240, 160, 32, 0.12); }
+      #match-result .rows .row.self .nm { color: #f0a020; font-weight: bold; }
+      /* A gyoztes sora zold -- a cimmel egy nyelven beszel. */
+      #match-result .rows .row.winner .nm { color: #3fb950; font-weight: bold; }
+      #match-result .rows .row.winner.self .nm { color: #3fb950; }
     </style>
   </head>
   <body>

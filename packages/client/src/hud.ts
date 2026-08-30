@@ -582,6 +582,14 @@ export class MatchHud {
     isOwnWin: boolean | null,
     /** Sajat kilovesek -- az idore meno modban ez a sajat allasunk. */
     kills = 0,
+    /**
+     * A TELJES mezony a vegeredmenyhez.
+     *
+     * Ugyanaz a lista, amibol a jobb felso allas is epul: a meccs vegen
+     * a jatekos ne egy MASIK sorrendet lasson, mint amit vegig kovetett.
+     */
+    rows: readonly ScoreRow[] = [],
+    ownId: string | null = null,
   ): void {
     // Csak VALTOZASKOR nyulunk a DOM-hoz: ez a ket elem minden frame-ben
     // frissulne, pedig masodpercenkent legfeljebb egyszer valtozik
@@ -592,7 +600,8 @@ export class MatchHud {
     const hatra = Math.ceil(match.timeLeftMs / 1000);
     const key =
       `${match.phase}|${match.mode}|${lives}|${kills}|${match.survivors}|` +
-      `${match.winnerId}|${seconds}|${hatra}|${isOwnWin}`;
+      `${match.winnerId}|${seconds}|${hatra}|${isOwnWin}|` +
+      rows.map((r) => `${r.id}:${r.kills}:${r.lives}`).join(",");
     if (key === this.lastKey) return;
     this.lastKey = key;
 
@@ -632,19 +641,118 @@ export class MatchHud {
       return;
     }
 
-    // Eredmenyjelzo. A "dontetlen" nem elmeleti eset: ha az utolso ketto
-    // egyszerre semmisul meg, senki nem marad talpon.
-    const title =
-      isOwnWin === null
-        ? '<span class="title">DONTETLEN</span>'
-        : isOwnWin
-          ? '<span class="title win">GYOZTEL</span>'
-          : '<span class="title lose">VESZTETTEL</span>';
-
     this.result.hidden = false;
-    this.result.innerHTML =
-      `${title}<div class="sub">uj meccs ${seconds} masodperc mulva</div>`;
+    this.renderResult(match, isOwnWin, seconds, rows, ownId, idore);
   }
+
+  /**
+   * A MECCS VEGI EREDMENYJELZO: sajat kimenetel + a teljes mezony.
+   *
+   * Miert a teljes lista, es nem csak a "gyoztel / vesztettel": egy
+   * meccs vegen a jatekost az is erdekli, HOL vegzett, es mennyivel
+   * maradt le. A jobb felso allas ilyenkor mar nem eleg -- ott a
+   * kovetkezo meccs elokeszulete latszik, es a sor egy pillanat mulva
+   * ujraindul.
+   *
+   * A sorrend UGYANAZ, mint a jobb felso allase (sortScoreRows): a
+   * jatekos nem ket kulonbozo sorrendet kovet.
+   */
+  private renderResult(
+    match: MatchSnapshot,
+    isOwnWin: boolean | null,
+    seconds: number,
+    rows: readonly ScoreRow[],
+    ownId: string | null,
+    idore: boolean,
+  ): void {
+    this.result.textContent = "";
+
+    // A "dontetlen" nem elmeleti eset: ha az utolso ketto egyszerre
+    // semmisul meg, senki nem marad talpon -- idore meno modban pedig
+    // egyszeruen holtverseny lehet.
+    const cim = document.createElement("div");
+    cim.className =
+      isOwnWin === null ? "title" : isOwnWin ? "title win" : "title lose";
+    cim.textContent =
+      isOwnWin === null ? "DONTETLEN" : isOwnWin ? "GYOZTEL" : "VESZTETTEL";
+    this.result.appendChild(cim);
+
+    // A GYOZTES NEVE kulon sorban: dontetlennel es sajat gyozelemnel
+    // kimarad -- ott a cim maga megmondja, mi tortent.
+    const gyoztes = rows.find((r) => r.id === match.winnerId);
+    if (gyoztes && !isOwnWin) {
+      const nyertes = document.createElement("div");
+      // SAJAT osztalynev, nem a tabla-sor "winner"-je: azonos nevvel a
+      // sor is felvenne ennek a sornak a stilusat (nagyobb betu, mas
+      // szin), pedig a ketto ket kulon dolog.
+      nyertes.className = "nyertes";
+      // SZOVEGKENT: a nev egy masik jatekostol jon.
+      nyertes.textContent = `${gyoztes.name} nyert`;
+      this.result.appendChild(nyertes);
+    }
+
+    const sorted = sortScoreRows(rows, idore);
+    if (sorted.length > 0) {
+      const tabla = document.createElement("div");
+      tabla.className = "rows";
+
+      // Az ELET oszlop CSAK a tulelés-modban all ki: idore meno modban
+      // korlatlan az ujraszuletes, ott egy ures oszlop csak helyet
+      // foglalna a tabla szelen.
+      const fej = document.createElement("div");
+      fej.className = "row head";
+      fej.append(cella("h", ""), cella("nm", "jatekos"), cella("kl", "kiloves"));
+      if (!idore) fej.append(cella("lv", "elet"));
+      tabla.appendChild(fej);
+
+      sorted.forEach((row, i) => {
+        const sor = document.createElement("div");
+        sor.className = "row";
+        if (row.id === ownId) sor.classList.add("self");
+        if (row.id === match.winnerId) sor.classList.add("winner");
+
+        sor.append(
+          cella("h", `${i + 1}.`),
+          // Az AUTO NEVE a jatekos neve elott -- ugyanaz a kapcsolat,
+          // mint a jobb felso allason: ebbol tudni, melyik kocsi volt.
+          cella("nm", row.name, carLabel(row.car)),
+          cella("kl", String(row.kills)),
+        );
+        // A KIESES csak a tulelés-modban ertelmes.
+        if (!idore) {
+          sor.append(
+            cella("lv", row.lives > 0 ? "●".repeat(row.lives) : "KIESETT"),
+          );
+        }
+        tabla.appendChild(sor);
+      });
+      this.result.appendChild(tabla);
+    }
+
+    const also = document.createElement("div");
+    also.className = "sub";
+    also.textContent = `uj meccs ${seconds} masodperc mulva`;
+    this.result.appendChild(also);
+  }
+}
+
+/**
+ * Egy cella az eredmenyjelzo tablajaban.
+ *
+ * SZOVEGKENT toltjuk fel, nem innerHTML-lel: a nev egy MASIK jatekostol
+ * jon, tehat jelolest tartalmazhatna.
+ */
+function cella(osztaly: string, szoveg: string, elotag?: string): HTMLElement {
+  const el = document.createElement("span");
+  el.className = osztaly;
+  if (elotag !== undefined) {
+    const kicsi = document.createElement("span");
+    kicsi.className = "carnev";
+    kicsi.textContent = elotag;
+    el.appendChild(kicsi);
+  }
+  el.appendChild(document.createTextNode(szoveg));
+  return el;
 }
 
 /** Egy sor az eredmenyjelzon. */
