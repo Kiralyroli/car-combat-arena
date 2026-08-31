@@ -680,7 +680,20 @@ export interface ChooseSpawnMessage {
 
 export interface ErrorMessage {
   type: "error";
-  code: "bad_protocol" | "room_full" | "room_not_found" | "bad_message";
+  code:
+    | "bad_protocol"
+    | "room_full"
+    | "room_not_found"
+    | "bad_message"
+    /**
+     * Uzenet-ratakorlat: a kliens tul sok uzenetet kuldott, es a
+     * szerver bontja a kapcsolatot.
+     *
+     * A protokoll-verziot NEM emeli: a kliens a hibakodot csak
+     * tovabbadja a szovegevel egyutt (nem sorolja fel az eseteket),
+     * tehat a regi kliens is helyesen jeleniti meg.
+     */
+    | "rate_limit";
   message: string;
 }
 

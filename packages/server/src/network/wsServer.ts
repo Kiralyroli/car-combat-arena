@@ -3,11 +3,13 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "node:http";
 import {
   checkPlausibility,
+  PING_INTERVAL_MS,
   PROTOCOL_VERSION,
   toGameModeId,
   type ClientMessage,
   type ServerMessage,
 } from "@cca/shared";
+import { RateLimiter } from "./rateLimit";
 import { MAX_PLAYERS_PER_ROOM } from "../rooms/room";
 import type { Room } from "../rooms/room";
 import type { RoomManager } from "../rooms/roomManager";
@@ -33,15 +35,54 @@ import type { RoomManager } from "../rooms/roomManager";
  */
 const MAX_CONSECUTIVE_REJECTS = 10;
 
+/**
+ * A leghosszabb elfogadott uzenet (bajt).
+ *
+ * A legnagyobb valodi uzenet az allapot-frissites, az is csak par szaz
+ * bajt. A `ws` a ennel nagyobb kereteket mar a JSON.parse ELOTT
+ * eldobja (1009-es kod), tehat egy nagy csomagokkal terhelo kliens nem
+ * jut el a szerver CPU-jaig. Bőven a valodi meret fole tesszuk, hogy a
+ * protokoll novekedese ne fusson bele csendben.
+ */
+const MAX_MESSAGE_BYTES = 16 * 1024;
+
+/**
+ * Ennyi eldobott uzenet utan bontjuk a kapcsolatot.
+ *
+ * Nehany eldobas lehet ideiglenes torlodas is, ezert nem az elso
+ * tullepesnel bontunk. A tartos aradat viszont mar nem ugy nez ki, mint
+ * egy jatszo kliens.
+ */
+const MAX_DROPPED_MESSAGES = 200;
+
 interface Connection {
   socket: WebSocket;
   playerId: string | null;
   room: Room | null;
+  /** Uzenet-ratakorlat -- lasd rateLimit.ts. */
+  limiter: RateLimiter;
+  /**
+   * Elindult-e mar a bontas (ratakorlat miatt).
+   *
+   * A `close()` csak KEZDEMENYEZI a bontast; a mar uton levo uzenetek
+   * meg megerkeznek. E nelkul a jelzo nelkul azokat is szamoltuk es
+   * naplaztuk volna -- a naplo tele lett tobb ezres szamokkal egyetlen
+   * mar lekapcsolt kapcsolatrol.
+   */
+  closing: boolean;
+  /**
+   * Mikor ment ki a legutobbi keses-meres (performance.now), vagy null,
+   * ha eppen nincs valaszra varo meres.
+   */
+  pingSentAt: number | null;
 }
 
 export class WsServer {
   private readonly wss: WebSocketServer;
   private readonly rooms: RoomManager;
+  /** Az elo kapcsolatok -- a keses-meres jar rajtuk vegig. */
+  private readonly connections = new Set<Connection>();
+  private readonly pingTimer: NodeJS.Timeout;
 
   /**
    * A WebSocket egy MEGLEVO HTTP-szerverre csatlakozik, nem sajat
@@ -50,18 +91,64 @@ export class WsServer {
    */
   constructor(rooms: RoomManager, server: Server) {
     this.rooms = rooms;
-    this.wss = new WebSocketServer({ server });
+    this.wss = new WebSocketServer({ server, maxPayload: MAX_MESSAGE_BYTES });
     this.wss.on("connection", (socket) => this.handleConnection(socket));
+
+    // A meres onmagaban ne tartsa eletben a folyamatot: a szerver
+    // tetlensegkor felfuggesztheti magat, es egy jaro timer ezt
+    // csendben megakadalyozna.
+    this.pingTimer = setInterval(() => this.measureLatency(), PING_INTERVAL_MS);
+    this.pingTimer.unref?.();
   }
 
   close(): void {
+    clearInterval(this.pingTimer);
     this.wss.close();
   }
 
+  /**
+   * Keses-meres minden kapcsolaton -- a visszatekereshez.
+   *
+   * SZANDEKOSAN a WebSocket sajat ping/pong KERETEIT hasznaljuk, nem a
+   * jatek-protokoll ping uzenetet: a keretekre a bongeszo halozati
+   * retege valaszol, a lap JavaScriptje nem lat bele es nem is
+   * kesleltetheti. Igy a mert ertek olyan szam, amit a modositott
+   * jatek-kliens nem tud felfele hazudni -- eppen ezert alkalmas arra,
+   * hogy a bevallott kesest vele vagjuk (lasd Room.rewindMsFor).
+   *
+   * Egyszerre EGY meres fut kapcsolatonkent: ha az elozore meg nem
+   * erkezett valasz, nem inditunk ujat -- kulonben nem lehetne tudni,
+   * melyik pong melyik pinghez tartozik.
+   */
+  private measureLatency(): void {
+    for (const conn of this.connections) {
+      if (conn.socket.readyState !== conn.socket.OPEN) continue;
+      if (conn.pingSentAt !== null) continue;
+      conn.pingSentAt = performance.now();
+      try {
+        conn.socket.ping();
+      } catch {
+        conn.pingSentAt = null;
+      }
+    }
+  }
+
   private handleConnection(socket: WebSocket): void {
-    const conn: Connection = { socket, playerId: null, room: null };
+    const conn: Connection = {
+      socket,
+      playerId: null,
+      room: null,
+      limiter: new RateLimiter(performance.now()),
+      closing: false,
+      pingSentAt: null,
+    };
+    this.connections.add(conn);
 
     socket.on("message", (raw) => {
+      // Ratakorlat MEG a JSON.parse ELOTT: eppen az a koltseg, amitol
+      // vedeni akarjuk a szervert.
+      if (!this.allow(conn)) return;
+
       let message: ClientMessage;
       try {
         message = JSON.parse(String(raw)) as ClientMessage;
@@ -76,10 +163,50 @@ export class WsServer {
       this.handleMessage(conn, message);
     });
 
+    // A keres-valasz par a kesest adja. A jatekos meg nem biztos, hogy
+    // szobaban van (a lobbyban is megy a meres) -- ezert kell a
+    // letezes-ellenorzes.
+    socket.on("pong", () => {
+      if (conn.pingSentAt === null) return;
+      const rtt = performance.now() - conn.pingSentAt;
+      conn.pingSentAt = null;
+      if (conn.room && conn.playerId) conn.room.noteRtt(conn.playerId, rtt);
+    });
+
     socket.on("close", () => this.handleDisconnect(conn));
     // Halozati hiba eseten is le kell bontani, kulonben "szellem" auto
     // maradna a szobaban.
     socket.on("error", () => this.handleDisconnect(conn));
+  }
+
+  /**
+   * Belefer-e meg egy uzenet a kapcsolat keretebe?
+   *
+   * A dontest a RateLimiter hozza; itt csak a KOVETKEZMENY van --
+   * naplozas, es tartos aradatnal a kapcsolat bontasa.
+   */
+  private allow(conn: Connection): boolean {
+    // Mar bontas alatt: a meg befuto uzenetekkel nincs dolgunk.
+    if (conn.closing) return false;
+    if (conn.limiter.take(performance.now())) return true;
+
+    const dropped = conn.limiter.dropped;
+    if (dropped === 1 || dropped % 100 === 0) {
+      console.warn(
+        `[ws] ${conn.playerId?.slice(0, 8) ?? "ismeretlen"} ratakorlat ` +
+          `(${dropped} eldobott uzenet)`,
+      );
+    }
+    if (dropped >= MAX_DROPPED_MESSAGES) {
+      conn.closing = true;
+      send(conn.socket, {
+        type: "error",
+        code: "rate_limit",
+        message: "Tul sok uzenet",
+      });
+      conn.socket.close();
+    }
+    return false;
   }
 
   private handleMessage(conn: Connection, message: ClientMessage): void {
@@ -310,6 +437,11 @@ export class WsServer {
   }
 
   private handleDisconnect(conn: Connection): void {
+    // FELTETEL NELKUL, es a korai visszateres ELOTT: a lobbyban ragadt
+    // (szobahoz sosem tartozo) kapcsolat kulonben orokre bent maradna a
+    // halmazban, es a keses-meres vegtelenul jarna rajta.
+    this.connections.delete(conn);
+
     if (!conn.room || !conn.playerId) return;
 
     const { room, playerId } = conn;

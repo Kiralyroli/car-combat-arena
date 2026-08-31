@@ -19,7 +19,8 @@
     "check:pointblank": "tsx scripts/check-pointblank.ts",
     "check:shotmesh": "tsx scripts/check-shotmesh.ts",
     "check:ability": "tsx scripts/check-ability.ts",
-    "check:mode-flow": "tsx scripts/check-mode-flow.ts"
+    "check:mode-flow": "tsx scripts/check-mode-flow.ts",
+    "check:cheat": "tsx scripts/check-cheat.ts"
   },
   "dependencies": {
     "@cca/shared": "*",

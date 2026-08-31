@@ -252,6 +252,21 @@ export interface ServerPlayer {
    * Ebbol szamoljuk, mennyire regi vilagot lat -- lasd rewindMs.
    */
   ackTick: number | null;
+  /**
+   * A szerver altal MERT kesesek (ms), a legutobbi mintak.
+   *
+   * Miert kell, ha az `ackTick` is a kesest irja le? Mert az `ackTick`-et
+   * a KLIENS kuldi: aki egyszeruen nem novelte, annak a visszatekerese
+   * felkuszott a MAX_REWIND_MS-ig, es 400 ms-mal korabbi celpontokra
+   * lohetett -- oda, ahonnan a masik mar rég elment, es ahol kiterni
+   * sem tudott. Ez a mezo a szerver sajat merese (WebSocket ping/pong,
+   * a bongeszo halozati retege valaszol ra), tehat a jatek-kliens nem
+   * tudja felfele hazudni; ezzel a mert ertekkel VAGJUK a bevallott
+   * kesest (lasd rewindMsFor).
+   *
+   * Ures tomb = meg nincs meres (a kapcsolat elso pillanatai).
+   */
+  rttSamples: number[];
   /** Pozicio-elozmeny a visszatekereshez (legregibb elol). */
   history: PoseSample[];
 }
@@ -276,6 +291,26 @@ const MAX_REWIND_MS = 400;
 
 /** Ennyi ideig tartjuk a pozicio-elozmenyt (ms). */
 const HISTORY_MS = 600;
+
+/**
+ * Ennyi legutobbi RTT-mintabol vesszuk a LEGNAGYOBBAT.
+ *
+ * Nem atlagot: a halozati keses ingadozik, es egy szerencsesen alacsony
+ * minta miatt nem szabad szuk visszatekeressel bunteti a becsuletes
+ * jatekost -- az abbol eredo melle-lovesnek semmi jele nem lenne.
+ * A maximum "megbocsato" irany, es egy csalot igy is a valos keseshez
+ * kot. Masodpercenkent egy minta, tehat ez kb. negy masodperc ablak.
+ */
+const RTT_SAMPLES = 4;
+
+/**
+ * Rahagyas a mert kesesre (ms).
+ *
+ * A meres (WebSocket ping/pong) es a jatek-uzenetek utja nem pontosan
+ * ugyanaz -- kulon sorban allhatnak --, ezert a mert erteket nem
+ * szigoruan, hanem ezzel a rahagyassal hasznaljuk felso korlatnak.
+ */
+const RTT_TOLERANCE_MS = 40;
 
 /** Rendezett parkulcs, hogy (a,b) es (b,a) ugyanaz legyen. */
 function pairKey(a: string, b: string): string {
@@ -377,6 +412,7 @@ export class Room {
       weapon: toWeaponId(weapon),
       mg: idleMachinegun(),
       ackTick: null,
+      rttSamples: [],
       history: [],
     };
     this.players.set(id, player);
@@ -991,12 +1027,21 @@ export class Room {
   /**
    * Kiloves-keres feldolgozasa.
    *
-   * A szerver ellenorzi a hutest es azt, hogy a jatekos el -- a kliens
-   * sem az iranyt, sem a poziciot nem adhatja meg (lasd FireMessage).
+   * A szerver ellenorzi a FEGYVERT, a hutest es azt, hogy a jatekos el
+   * -- a kliens sem az iranyt, sem a poziciot nem adhatja meg (lasd
+   * FireMessage).
    */
   tryFire(id: string, target: [number, number, number], now: number): boolean {
     const player = this.players.get(id);
     if (!player || player.deadSince !== null) return false;
+    // A RAKETA az AGYU fegyvere, es a jatekos egyszerre egyet valaszt.
+    //
+    // E nelkul az ellenorzes nelkul egy modositott kliens gepfegyverrel
+    // csatlakozhatott (folyamatos, szerver-utemezett hitscan), es
+    // KOZBEN raketat is lohetett, mert a `fire` uzenetnek nem volt
+    // fegyver-feltetele. A ket fegyver kozotti valasztas igy nem
+    // valasztas volt, hanem a becsuletes jatekos hatranya.
+    if (player.weapon !== "cannon") return false;
     if (now - player.lastFiredAt < ROCKET_COOLDOWN_MS) return false;
     // Hibas celpont (NaN, vegtelen) ne jusson a szimulacioba.
     if (!target.every((v) => Number.isFinite(v))) return false;
@@ -1150,6 +1195,20 @@ export class Room {
   }
 
   /**
+   * A szerver altal MERT kesés feljegyzese (ms).
+   *
+   * A meres a szallitasi retegben tortenik (lasd wsServer), mert ott van
+   * a kapcsolat; a szoba csak tarolja es hasznalja -- igy a
+   * visszatekeres headless tesztelheto marad.
+   */
+  noteRtt(id: string, rttMs: number): void {
+    const player = this.players.get(id);
+    if (!player || !Number.isFinite(rttMs) || rttMs < 0) return;
+    player.rttSamples.push(rttMs);
+    while (player.rttSamples.length > RTT_SAMPLES) player.rttSamples.shift();
+  }
+
+  /**
    * Pozicio-elozmeny rogzitese -- minden tickben, minden jatekosra.
    *
    * Ez az alapja a visszatekeresnek: ide jegyezzuk fel, mit HITT a
@@ -1222,15 +1281,37 @@ export class Room {
   /**
    * Mennyivel latja a jatekos a multat (ms)?
    *
-   * Ket resze van: a halozati ut (ezt a visszajelzett tick korabol
-   * tudjuk -- a szerver SAJAT feljegyzese alapjan, nem a kliens
-   * allitasa szerint), es az interpolacios kesleltetes, amivel a kliens
-   * szandekosan a jelen mogott rendereli a tobbieket.
+   * Ket resze van: a halozati ut, es az interpolacios kesleltetes,
+   * amivel a kliens szandekosan a jelen mogott rendereli a tobbieket.
+   *
+   * A halozati utat KET forrasbol vesszuk, es a SZUKEBBET hasznaljuk:
+   *
+   *  - amit a kliens vall be (`ackTick`): melyik snapshotot dolgozta
+   *    fel utoljara. Ez a pontosabb szam -- de a kliens kuldi.
+   *  - amit a szerver MER (`rttSamples`): a valodi oda-vissza ut.
+   *
+   * A ketto normalis esetben egyutt mozog. Aki viszont szandekosan REGI
+   * tickre hivatkozik ("lag switch"), annal a bevallott keses elszalad
+   * a mert mellol, es a jatekos a MAX_REWIND_MS-ig, 400 ms-mal korabbi
+   * celpontokra lohetne -- oda, ahol a masik mar nem tud kiterni. A
+   * vagas ezt zarja le: legfeljebb annyit tekerunk vissza, amennyi
+   * keses tenyleg van.
+   *
+   * Ha meg NINCS meres (a kapcsolat elso masodperce), a bevallott
+   * ertek marad. Szuk ablak, es a szigorubb valasztas -- a nulla
+   * visszatekeres -- ott melle-loveseket okozna a becsuletes jatekosnak
+   * is, eppen csatlakozas utan.
    */
   private rewindMsFor(player: ServerPlayer, tick: number): number {
     const staleTicks =
       player.ackTick === null ? 0 : Math.max(0, tick - player.ackTick);
-    const networkMs = staleTicks * FIXED_DT * 1000;
+    let networkMs = staleTicks * FIXED_DT * 1000;
+
+    if (player.rttSamples.length > 0) {
+      const measured = Math.max(...player.rttSamples);
+      networkMs = Math.min(networkMs, measured + RTT_TOLERANCE_MS);
+    }
+
     return Math.min(MAX_REWIND_MS, networkMs + INTERP_DELAY_MS);
   }
 
