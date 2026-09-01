@@ -18,6 +18,7 @@ import {
   wheelExplosionDamage,
   wheelWorldPosition,
   WHEEL_MAX_HP,
+  maxHpOf,
   WHEEL_REGEN_DELAY_MS,
   damageWheel,
   type ClientState,
@@ -95,7 +96,10 @@ function main(): void {
 
     check(
       "az utkozes sebez, es jelzi is",
-      a.hp < 100 && a.lastDamagedAt === now,
+      // A SAJAT maximumahoz merve. A beegetett 100-zal ez az allitas
+      // VAKON atment volna: a 80 HP-s izomauto sertetlenul is
+      // "kevesebb, mint 100".
+      a.hp < maxHpOf(a.car) && a.lastDamagedAt === now,
       `${a.hp} HP, ora: ${a.lastDamagedAt === now ? "ujraindult" : "NEM indult ujra"}`,
     );
 
@@ -227,7 +231,9 @@ function main(): void {
         const shot = fireAndLocate([bumm[0] + oldalt, bumm[2]], fele);
         const victim = shot.victim!;
 
-        const bodyHurt = victim.hp < 100;
+        // A SAJAT autoja maximumahoz merve: a "sertetlen" nem 100,
+        // hanem autonkent 80 es 130 kozott van (carStats.ts).
+        const bodyHurt = victim.hp < maxHpOf(victim.car);
         const wheelHurt = victim.wheels.some((w) => w.hp < WHEEL_MAX_HP);
         check(
           "a robbanas a kerekeket eri, a karosszeriat nem",

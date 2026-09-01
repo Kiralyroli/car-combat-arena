@@ -1,6 +1,6 @@
 import { CAR_GEOMETRY } from "./carGeometry";
 import { DEFAULT_CAR, type CarId } from "./carModels";
-import { rotateVec } from "./math";
+import { clamp, rotateVec } from "./math";
 import type { ClientState } from "./net/protocol";
 
 /**
@@ -17,7 +17,19 @@ import type { ClientState } from "./net/protocol";
  * fizika.
  */
 
-/** Kezdo (es maximalis) karosszeria-HP. */
+/**
+ * ALAP karosszeria-HP -- a kozos kiindulopont.
+ *
+ * A TENYLEGES eletero autonkent mas (carStats.ts `maxHpOf`): 80-tol
+ * 130-ig. Ez a szam a hangolt kozep, amihez a tobbi meret (sebzes per
+ * m/s, robbanas, gepfegyver) igazodik -- ezert maradt a helyen, es
+ * ezert nem "a legnagyobb" vagy "a legkisebb".
+ *
+ * AHOL EGY KONKRET JATEKOS ELETEREJE KELL (kezdo HP, gyogyulas-plafon,
+ * HP-sav skalaja), OTT EZ A SZAM HIBAS: `maxHpOf(player.car)` kell
+ * helyette. Ez a fajta tevedes csendes -- a rohamkocsi savja sosem
+ * lenne tele, es a gyogyitas 100-nal megallna.
+ */
 export const MAX_HP = 100;
 
 /**
@@ -192,6 +204,41 @@ export function collisionDamage(approach: number): number {
 const ATTACKER_DAMAGE_FACTOR = 0.5;
 const VICTIM_DAMAGE_FACTOR = 1.5;
 
+/**
+ * A TOMEG-KULONBSEG hatasa a sebzes-elosztasra.
+ *
+ * A nehezebb auto jobban jarjon egy koccanasnal -- ezert valasztja
+ * valaki a rohamkocsit. De MERSEKELTEN: a fizikai lokest a Rapier mar
+ * ingyen adja (a nehez test kilöki a konnyut, lasd rapier.ts
+ * setMass). Ha a sebzes is TELJES erovel jutalmazna a tomeget, a nehez
+ * auto rammelese egyertelmuen a legjobb strategia lenne -- ket rendszer
+ * fizetne ugyanazert a dontesert.
+ *
+ * A negyzetgyok tompit (1,37-szeres tomegarany -> 1,17-szeres sebzes),
+ * a korlat pedig kizarja, hogy egy jovobeli, szelsosegesebb auto
+ * felboritsa az egeszet.
+ */
+const MASS_DAMAGE_EXPONENT = 0.5;
+const MASS_DAMAGE_MIN = 0.8;
+const MASS_DAMAGE_MAX = 1.25;
+
+/**
+ * Ennyiszeresét kapja a sebzesnek az, akinek `own` a tomeg-szorzoja, a
+ * `other` tomegu autoval szemben.
+ *
+ * SZAMKENT kapja a tomeget, nem CarId-kent: igy a combat.ts nem
+ * importalja a carStats.ts-t, es nem alakul ki korkoros fuggoseg
+ * (carStats -> combat -> carStats).
+ */
+function massDamageFactor(own: number, other: number): number {
+  if (!(own > 0) || !(other > 0)) return 1;
+  return clamp(
+    Math.pow(other / own, MASS_DAMAGE_EXPONENT),
+    MASS_DAMAGE_MIN,
+    MASS_DAMAGE_MAX,
+  );
+}
+
 export interface DamageSplit {
   a: number;
   b: number;
@@ -210,7 +257,12 @@ export interface DamageSplit {
  * ugras a ket eset kozott -- egy hajszallal nagyobb sebesseg nem
  * fordithatja at hirtelen az egesz sebzest.
  */
-export function splitCollisionDamage(a: ClientState, b: ClientState): DamageSplit {
+export function splitCollisionDamage(
+  a: ClientState,
+  b: ClientState,
+  massA = 1,
+  massB = 1,
+): DamageSplit {
   const total = collisionDamage(approachSpeed(a, b));
   if (total <= 0) return { a: 0, b: 0 };
 
@@ -243,8 +295,12 @@ export function splitCollisionDamage(a: ClientState, b: ClientState): DamageSpli
   // teljes eletu jatekost majdnem kivegezne. A merés ezt meg is
   // mutatta (egyetlen rammeles 100 HP-t vitt).
   return {
-    a: capDamage(total * damageFactorFor(aggressionA)),
-    b: capDamage(total * damageFactorFor(1 - aggressionA)),
+    a: capDamage(
+      total * damageFactorFor(aggressionA) * massDamageFactor(massA, massB),
+    ),
+    b: capDamage(
+      total * damageFactorFor(1 - aggressionA) * massDamageFactor(massB, massA),
+    ),
   };
 }
 

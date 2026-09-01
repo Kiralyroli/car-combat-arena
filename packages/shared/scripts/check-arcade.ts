@@ -11,6 +11,15 @@
  * azt allitja, hogy a kocsi AZT csinalja, amit az ARCADE blokk iger --
  * nem azt, hogy egy adott hangolas orokre all.
  *
+ * MELYIK AUTOVAL MERUNK: a CROSSOVERREL. Az autok tulajdonsagai
+ * elternek (carStats.ts), es a crossover az, aminek MINDEN szorzoja
+ * pontosan 1,0 -- vagyis egyedul rajta igaz, hogy az ARCADE szamai a
+ * tenyleges vezetest irjak le. Az alapertelmezett autoval (izomauto,
+ * +15% sebesseg) ugyanez a meres 124 km/h-t mutatna a beallitott 108
+ * helyett, es a teszt hibat jelezne ott, ahol nincs.
+ *
+ * A TOBBI auto elteresét a check-car-stats.ts meri, kulon.
+ *
  * MEROSAVOK. Minden meres szabad terepet igenyel, es ezt KULON
  * ELLENORIZZUK is (lasd `Run.minSpeed`). Elso nekifutasra ugyanis
  * pontosan ez romlott el: a gyorsulas-meres nekiment az eszaki falnak,
@@ -23,6 +32,7 @@
 import { RapierBackend } from "../src/physics/rapier";
 import { ARCADE, BARE_ARENA, FIXED_DT } from "../src/config";
 import { NEUTRAL_INPUT, type DriveInput } from "../src/types";
+import type { CarId } from "../src/index";
 
 /**
  * Hosszu, akadalymentes sav: x = 30 mellett minden akadaly elkerul
@@ -36,6 +46,9 @@ const LANE = { x: 30, y: 2.5, z: 35 };
  * hogy a falat vagy a ladakat elerne.
  */
 const CIRCLE = { x: 25, y: 2.5, z: 20 };
+
+/** Az az auto, amelynek minden stat-szorzoja pontosan 1,0. */
+const MERO_AUTO: CarId = "Crossover";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -51,6 +64,8 @@ function yawOf(q: readonly number[]): number {
 async function fresh(at: { x: number; y: number; z: number }): Promise<RapierBackend> {
   const backend = new RapierBackend();
   await backend.init({ arena: BARE_ARENA });
+  // A MERO-AUTO: minden szorzoja 1,0 (lasd a fajl fejlecet).
+  backend.setCar(MERO_AUTO);
   backend.reset(at);
   // Leeres es megnyugvas, mielott barmit mernenk.
   for (let i = 0; i < 90; i++) backend.step(FIXED_DT, NEUTRAL_INPUT);

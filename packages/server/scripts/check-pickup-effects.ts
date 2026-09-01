@@ -17,7 +17,8 @@ import {
   healPerMs,
   HEALTH_RESPAWN_MS,
   HEALTH_RESTORE,
-  MAX_HP,
+  maxHpOf,
+  type CarId,
   PICKUP_POINTS,
   pickupIndicesOf,
 } from "@cca/shared";
@@ -51,14 +52,30 @@ const HEALTH = pickupIndicesOf("health")[0];
 const BOOST = pickupIndicesOf("boost")[0];
 
 /** Egy jatekos, a megadott pickup tetejere allitva. */
-function playerOn(index: number, hp: number): { room: Room; player: ReturnType<Room["add"]> } {
+/**
+ * A HP FUGGVENYKENT is megadhato.
+ *
+ * Az eletero autonkent mas (carStats.ts, 80-tol 130-ig), es azt, hogy
+ * a szoba melyik autot osztja ki, a teszt nem donti el. A "teli mínusz
+ * ot" tehat csak a KIOSZTAS UTAN szamolhato ki -- egy kozos 100-as
+ * konstanssal ez a meres csendben ertelmetlenne valt (a 80 HP-s
+ * izomautonak "95 HP-t" allitottunk be, amit a gyogyulas mar nem
+ * novelhetett).
+ */
+function playerOn(
+  index: number,
+  hp: number | ((teli: number) => number),
+): { room: Room; player: ReturnType<Room["add"]> } {
   const room = new Room("TEST");
   const player = room.add("a", () => {}, "A", "cannon");
   const point = PICKUP_POINTS[index];
   player.state = { ...player.state, position: [point.x, 1, point.z] };
-  player.hp = hp;
+  player.hp = typeof hp === "function" ? hp(maxHpOf(player.car)) : hp;
   return { room, player };
 }
+
+/** Egy jatekos teli eletereje -- a SAJAT autoja szerint. */
+const teli = (p: { car: CarId }): number => maxHpOf(p.car);
 
 function main(): void {
   console.log("=== Pickupok hatasa ===\n");
@@ -110,13 +127,13 @@ function main(): void {
 
   // --- De nem tobbet a maximumnal ---
   {
-    const { room, player } = playerOn(HEALTH, MAX_HP - 5);
+    const { room, player } = playerOn(HEALTH, (t) => t - 5);
     room.collectPickups(T0);
     gyogyulasVegig(room, T0, HEALTH_RESTORE);
     check(
       "a gyogyulas nem lepi tul a maximumot",
-      player.hp === MAX_HP,
-      `${MAX_HP - 5} -> ${player.hp} HP`,
+      player.hp === teli(player),
+      `${teli(player) - 5} -> ${player.hp} HP`,
     );
   }
 
@@ -126,7 +143,7 @@ function main(): void {
   // felvett elet mellett a masodik is elfogyna ugy, hogy a nagyobb
   // resze karba vesz.
   {
-    const { room, player } = playerOn(HEALTH, MAX_HP - 5);
+    const { room, player } = playerOn(HEALTH, (t) => t - 5);
     room.collectPickups(T0);
     const masodik = pickupIndicesOf("health")[1];
     const point = PICKUP_POINTS[masodik];
@@ -144,7 +161,7 @@ function main(): void {
   // Ez a lenyeges kulonbseg a boosthoz kepest: a szerver ismeri a HP-t,
   // tehat meg tudja allapitani, hogy a felvetel ertelmetlen lenne.
   {
-    const { room, player } = playerOn(HEALTH, MAX_HP);
+    const { room, player } = playerOn(HEALTH, (t) => t);
     room.collectPickups(T0);
     check(
       "teli elettel a pickup a palyan marad",
@@ -158,7 +175,7 @@ function main(): void {
   // NEM feledekenyseg: a tartaly a KLIENSNEL van (terv 15.4), a szerver
   // nem tudja, mennyi van benne -- tehat nem is dönthet helyette.
   {
-    const { room, player } = playerOn(BOOST, MAX_HP);
+    const { room, player } = playerOn(BOOST, (t) => t);
     room.collectPickups(T0);
     check(
       "a boostot a szerver nem tudja visszatartani",

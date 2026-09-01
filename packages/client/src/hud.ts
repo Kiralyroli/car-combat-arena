@@ -6,6 +6,9 @@ import {
   OVERHEAT_FLASH_MS,
   type CarId,
   carLabel,
+  statText,
+  maxHpOf,
+  DEFAULT_CAR,
   GAME_MODES,
   isTimed,
   type GameModeId,
@@ -301,6 +304,24 @@ export class PlayerHud {
     }, OVERHEAT_FLASH_MS);
   }
 
+  /**
+   * A SAJAT autonk maximalis eletereje.
+   *
+   * Autonkent mas (carStats.ts), ezert nem lehet a HP-t szazalekkent
+   * kezelni -- amit a korabbi valtozat csinalt (`Math.min(100, hp)`).
+   * Egy 130 HP-s rohamkocsi savja igy TELE allna 100-nal, es a
+   * maradek 30 elet lathatatlanul fogyna el.
+   *
+   * KULON `setCar`, nem az `update` egy ujabb parametere: az update
+   * mar tizenket pozicios argumentumnal tart, es az auto ritkan
+   * valtozik (belepeskor egyszer).
+   */
+  private maxHp = maxHpOf(DEFAULT_CAR);
+
+  setCar(car: CarId): void {
+    this.maxHp = maxHpOf(car);
+  }
+
   constructor() {
     this.root = must("player-hud");
     this.hpFill = must("hp-fill");
@@ -433,7 +454,11 @@ export class PlayerHud {
       abilityActiveMs,
     );
     // HP. Halozat nelkul nincs ertelmes erteke (a szerver dönti el).
-    const hpPercent = hp === null ? 0 : Math.max(0, Math.min(100, hp));
+    // A SAV a sajat auto maximumahoz merve telik (lasd setCar), a SZAM
+    // viszont a nyers HP marad: a jatekosnak azt kell latnia, hany
+    // elete van, nem azt, hogy hany szazalekon all.
+    const hpPercent =
+      hp === null ? 0 : Math.max(0, Math.min(1, hp / this.maxHp)) * 100;
     this.hpFill.style.width = `${hpPercent}%`;
     this.hpFill.style.backgroundColor =
       hpPercent > 60 ? "#3fb950" : hpPercent > 25 ? "#d29922" : "#f85149";
@@ -1224,5 +1249,61 @@ export function showError(message: string): void {
     el.style.padding = "24px";
     el.style.textAlign = "center";
     el.textContent = message;
+  }
+}
+
+/**
+ * ERTESITES ARROL, HOGY MAS AUTOT KAPTUNK, MINT AMIT KERTUNK.
+ *
+ * A szoba a kinezet egyediseget maga osztja ki (assignCar): ha egy
+ * karosszeria OSSZES festese foglalt, masik kocsira valt. Amig a
+ * valasztas tisztan latvany volt, ez eszrevetlen maradhatott. Amiota a
+ * karosszeria TULAJDONSAGOKAT is jelent (carStats.ts), nem maradhat:
+ * aki gyors, torekeny kocsit kert, es lassu tankot kapott, azt a
+ * vezetes elso masodperceben ereznie kell -- de tudnia is kell, MIERT.
+ *
+ * KLIENS-OLDALI OSSZEHASONLITAS, nem uj halozati mezo: a kliens tudja,
+ * mit kert, es a szervertol megkapja, mit kapott. Egy uj protokoll-mezo
+ * ugyanezt mondana el, csak verzio-emelessel.
+ */
+export class CarNotice {
+  private readonly el: HTMLElement;
+  private lejar: number | null = null;
+
+  /**
+   * Meddig latszik (ms).
+   *
+   * Hosszabb, mint a kiloves-ertesito: ez ket mondat, es a belepes
+   * elso masodperceiben erkezik, amikor a jatekos meg tajekozodik.
+   */
+  private static readonly ELETTARTAM_MS = 6000;
+
+  constructor() {
+    this.el = must("car-notice");
+  }
+
+  /**
+   * Akkor mutat valamit, ha a ketto elter -- kulonben nem csinal semmit.
+   *
+   * A festes-csere NEM szamit: az tisztan latvany, es a jatekos ugyis
+   * latja a sajat kocsijan.
+   */
+  show(kert: CarId, kapott: CarId, now: number): void {
+    if (kert === kapott) return;
+    this.el.innerHTML = `
+      <div class="cim">Másik autót kaptál</div>
+      <div>A(z) ${carLabel(kert)} minden festése foglalt volt,
+      ezért ${carLabel(kapott)} lett — ${statText(kapott)}.</div>
+    `;
+    this.el.hidden = false;
+    this.lejar = now + CarNotice.ELETTARTAM_MS;
+  }
+
+  /** Kepkockankent: a lejart ertesites eltuntetese. */
+  update(now: number): void {
+    if (this.lejar !== null && now >= this.lejar) {
+      this.lejar = null;
+      this.el.hidden = true;
+    }
   }
 }

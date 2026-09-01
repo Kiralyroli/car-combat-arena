@@ -16,7 +16,7 @@
  * Futtatas: npm run check:spawn-protection
  */
 import {
-  MAX_HP,
+  maxHpOf,
   SPAWN_POINTS,
   RESPAWN_DELAY_MS,
   SPAWN_PROTECTION_MS,
@@ -25,6 +25,14 @@ import {
   type ServerMessage,
 } from "@cca/shared";
 import { Room, type ServerPlayer } from "../src/rooms/room";
+
+/**
+ * EGY JATEKOS teli eletereje -- autonkent mas (carStats.ts).
+ *
+ * Kozos 100-zal ez a meres hamisan bukna el: a jatekosok 80 HP-s
+ * izomautoval indulnak, tehat a "sertetlen" allapot 80, nem 100.
+ */
+const teli = (p: ServerPlayer): number => maxHpOf(p.car);
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -97,7 +105,7 @@ function killA(f: Fixture, from: number): number {
   let now = from;
   for (let i = 0; i < 40 && f.a.hp > 0; i++) {
     collide(f, now);
-    f.b.hp = MAX_HP;
+    f.b.hp = teli(f.b);
     now += 400;
   }
   return now;
@@ -132,7 +140,7 @@ function main(): void {
     collide(f, T0 + 500);
     check(
       "vedett autok utkozese nem sebez",
-      f.a.hp === MAX_HP && f.b.hp === MAX_HP,
+      f.a.hp === teli(f.a) && f.b.hp === teli(f.b),
       `A: ${f.a.hp} HP, B: ${f.b.hp} HP`,
     );
 
@@ -141,7 +149,7 @@ function main(): void {
     collide(f, T0 + SPAWN_PROTECTION_MS + 500);
     check(
       "a vedelem lejarta utan viszont sebez",
-      f.a.hp < MAX_HP && f.b.hp < MAX_HP,
+      f.a.hp < teli(f.a) && f.b.hp < teli(f.b),
       `A: ${f.a.hp} HP, B: ${f.b.hp} HP`,
     );
   }

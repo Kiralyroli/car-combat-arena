@@ -908,6 +908,49 @@
       .cars .wname { font-size: 13px; letter-spacing: 0.04em; }
       .weapons .wdesc,
       .cars .wdesc { font-size: 10px; line-height: 1.35; color: #7d8590; }
+      /*
+        AZ AUTO ERTEKELESE, CSILLAGBAN: sebesseg es elet.
+
+        Vilagosabb es kiemeltebb, mint a leiras: a leiras a sziluettrol
+        szol (izles), ez viszont a JATEKMENETROL (dontes). Amiota a
+        karosszeria tulajdonsagokat is jelent (carStats.ts), ez a resz a
+        valaszto lenyege.
+
+        A ket sor RACSBAN all, nem egymas melle irt szovegkent: igy a
+        csillagok mind a negy gombon UGYANOTT kezdodnek, es a negy auto
+        egyetlen pillantassal osszehasonlithato -- ez az egesz kijelzo
+        ertelme. Balra zart cimke, tole fuggetlenul indulo csillagsor.
+      */
+      .cars .wstat {
+        margin-top: 4px;
+        display: grid;
+        gap: 1px;
+        font-size: 10px;
+        line-height: 1.4;
+        justify-content: center;
+      }
+      .cars .statsor {
+        display: grid;
+        grid-template-columns: 58px auto;
+        align-items: baseline;
+        text-align: left;
+      }
+      .cars .statnev { color: #7d8590; }
+      /*
+        A csillagok BETUKOZE tagabb: a "★★★☆☆" osszefolyna, es eppen a
+        szamlalasuk lenne nehez. A monospace pedig azt biztositja, hogy a
+        tele es az ures csillag ugyanannyi helyet foglaljon -- kulonben a
+        sorok hossza a TARTALOMTOL fuggne.
+      */
+      .cars .starok {
+        font-family: ui-monospace, Consolas, monospace;
+        letter-spacing: 1px;
+      }
+      .cars .starok .tele { color: #e3b341; }
+      /* Az ures csillag legyen HALVANY, de ne tunjon el: a sor hossza
+         adja a mercet ("harom az otbol"), tehat lathatonak kell
+         maradnia. */
+      .cars .starok .ures { color: #4a5058; }
       .weapons .weapon[aria-pressed="true"] .wname,
       .cars .weapon[aria-pressed="true"] .wname { color: #e3b341; }
       #room-list {
@@ -1261,6 +1304,40 @@
           0%, 70% { opacity: 1; transform: translateX(-50%); }
           100% { opacity: 0; transform: translateX(-50%); }
         }
+      }
+
+      /*
+        AUTO-CSERE ERTESITO.
+
+        Akkor jelenik meg, ha a szoba mas kocsit osztott ki, mint amit
+        kertunk (minden festese foglalt volt). Amiota a karosszeria
+        TULAJDONSAGOKAT is jelent, ez nem szinvaltas, hanem masik
+        jatek -- a jatekosnak tudnia kell rola, mielott nekimegy
+        valakinek egy nala nehezebb kocsival.
+
+        Feljebb ul, mint a kiloves-ertesito (22% vs 30%): a ketto
+        elvileg nem egyszerre jon (ez a belepeskor, az meccs kozben),
+        de ha megis, ne fedjek egymast.
+      */
+      #car-notice {
+        position: fixed;
+        top: 22%;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 420px;
+        padding: 10px 16px;
+        border-radius: 8px;
+        border: 1px solid rgba(227, 179, 65, 0.5);
+        background: rgba(13, 17, 23, 0.85);
+        color: #e6edf3;
+        font: 15px/1.4 ui-monospace, monospace;
+        text-align: center;
+        pointer-events: none;
+        user-select: none;
+      }
+      #car-notice .cim {
+        color: #e3b341;
+        font-weight: bold;
       }
 
       #match-result {
@@ -1692,6 +1769,8 @@
       A tartalmat a KillNotice rajzolja ki (lasd hud.ts).
     -->
     <div id="kill-notice" hidden></div>
+
+    <div id="car-notice" hidden></div>
 
     <div id="match-result" hidden></div>
 

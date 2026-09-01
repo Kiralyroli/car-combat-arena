@@ -1,4 +1,6 @@
 import { ARCADE } from "../config";
+import { carTuning, type CarTuning } from "../carStats";
+import type { CarId } from "../carModels";
 import { clamp, lerp } from "../math";
 import type { DriveInput } from "../types";
 
@@ -44,6 +46,15 @@ export interface ArcadeContext {
    * 1 = mind a negy kerek ep, 0 = egy hasznalhato sincs.
    */
   grip: number;
+  /**
+   * MELYIK AUTOT vezetjuk.
+   *
+   * Innen jonnek az autonkenti vezetesi szamok (carStats.ts): a
+   * csucssebesseg, a gyorsulas es a fordulas autonkent mas. Elhagyva az
+   * alapertelmezett auto szamait kapjuk -- igy a regi hivok es a
+   * meresek valtozatlanul mukodnek.
+   */
+  car?: CarId;
 }
 
 /**
@@ -72,22 +83,32 @@ export function approach(
  * `turnRampSpeed`-ig felfut a teljes ertekre, csucssebessegnel pedig
  * `turnFactorAtTopSpeed`-re esik vissza.
  */
-export function turnFactor(forwardSpeed: number): number {
+export function turnFactor(
+  forwardSpeed: number,
+  tuning: CarTuning = carTuning(),
+): number {
   const speed = Math.abs(forwardSpeed);
-  const ramp = clamp(speed / ARCADE.turnRampSpeed, 0, 1);
-  const span = Math.max(1e-3, ARCADE.maxSpeed - ARCADE.turnRampSpeed);
-  const over = clamp((speed - ARCADE.turnRampSpeed) / span, 0, 1);
-  return ramp * lerp(1, ARCADE.turnFactorAtTopSpeed, over);
+  const ramp = clamp(speed / tuning.turnRampSpeed, 0, 1);
+  // A SAJAT csucssebessegehez merjuk, nem a kozoshoz: a visszaeses a
+  // "sajat tempom hany szazalekan megyek" kerdestol fugg. Kozos
+  // nevezovel a lassabb auto sosem erne el a teljes visszaesest, a
+  // gyorsabb pedig mar a csucsa elott belefutna.
+  const span = Math.max(1e-3, tuning.maxSpeed - tuning.turnRampSpeed);
+  const over = clamp((speed - tuning.turnRampSpeed) / span, 0, 1);
+  return ramp * lerp(1, tuning.turnFactorAtTopSpeed, over);
 }
 
 /** Celsebesseg az orr iranyaban, a gaz allasabol (m/s). */
-export function targetForwardSpeed(input: DriveInput): number {
+export function targetForwardSpeed(
+  input: DriveInput,
+  tuning: CarTuning = carTuning(),
+): number {
   if (input.throttle > 0) {
-    const top = input.boost ? ARCADE.boostMaxSpeed : ARCADE.maxSpeed;
+    const top = input.boost ? tuning.boostMaxSpeed : tuning.maxSpeed;
     return top * Math.min(1, input.throttle);
   }
   if (input.throttle < 0) {
-    return -ARCADE.maxReverseSpeed * Math.min(1, -input.throttle);
+    return -tuning.maxReverseSpeed * Math.min(1, -input.throttle);
   }
   return 0;
 }
@@ -100,6 +121,7 @@ function longitudinalRate(
   forward: number,
   target: number,
   input: DriveInput,
+  tuning: CarTuning,
 ): number {
   if (input.throttle === 0) return ARCADE.coastDecel;
 
@@ -116,7 +138,7 @@ function longitudinalRate(
   // csak hagyjuk lecsengeni -- kulonben minden lokes azonnal eltunne.
   if (Math.abs(forward) > Math.abs(target)) return ARCADE.coastDecel;
 
-  return input.boost && input.throttle > 0 ? ARCADE.boostAccel : ARCADE.accel;
+  return input.boost && input.throttle > 0 ? tuning.boostAccel : tuning.accel;
 }
 
 /**
@@ -132,6 +154,7 @@ export function stepArcade(
   ctx: ArcadeContext,
 ): ArcadeMotion {
   const grip = clamp(ctx.grip, 0, 1);
+  const tuning = carTuning(ctx.car);
 
   // --- 1. Hosszanti: gaz es fek ---
   // Levegoben nincs mibe kapaszkodni, a lendulet valtozatlan marad.
@@ -144,8 +167,9 @@ export function stepArcade(
     // a celsebesseget erte el, csak kicsit lassabban. Egy raketatalalat
     // igy nem jelentett volna semmit -- pedig a kerek kilovese a jatek
     // egyik alapmechanikaja.
-    const target = targetForwardSpeed(input) * lerp(0.45, 1, grip);
-    const rate = longitudinalRate(forward, target, input) * lerp(0.25, 1, grip);
+    const target = targetForwardSpeed(input, tuning) * lerp(0.45, 1, grip);
+    const rate =
+      longitudinalRate(forward, target, input, tuning) * lerp(0.25, 1, grip);
     forward = approach(forward, target, rate * dt);
   }
 
@@ -153,7 +177,9 @@ export function stepArcade(
   // Ez az egyetlen hely, ahol a "tapadas" letezik a modellben.
   let lateral = motion.lateral;
   if (ctx.grounded) {
-    const limit = input.handbrake ? ARCADE.driftLateralGrip : ARCADE.lateralGrip;
+    const limit = input.handbrake
+      ? tuning.driftLateralGrip
+      : tuning.lateralGrip;
     lateral = approach(lateral, 0, limit * grip * dt);
   }
 
@@ -167,8 +193,8 @@ export function stepArcade(
   // forgas BALRA viszi az orrot, tehat a "jobbra" input negativ yaw.
   const targetYaw =
     -input.steer *
-    ARCADE.maxYawRate *
-    turnFactor(forward) *
+    tuning.maxYawRate *
+    turnFactor(forward, tuning) *
     direction *
     drift *
     authority;

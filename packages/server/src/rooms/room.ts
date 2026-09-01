@@ -35,7 +35,8 @@ import {
   healthyWheels,
   wheelExplosionDamage,
   wheelWorldPosition,
-  MAX_HP,
+  maxHpOf,
+  carStats,
   SPAWN_POINTS,
   SPAWN_PROTECTION_MS,
   pickSpawnIndex,
@@ -96,8 +97,18 @@ export const MAX_PLAYERS_PER_ROOM = 8;
 /** Miert bontjuk a kapcsolatot -- a kliens ebbol ir szoveget. */
 export type KickCode = "kicked" | "invalid_data";
 
-/** Kezdo HP. A sebzes-rendszer a 4. lepcsoben jon (terv 8. fejezet). */
-const START_HP = MAX_HP;
+/**
+ * Kezdo (es maximalis) HP EGY JATEKOSNAK.
+ *
+ * AUTONKENT MAS (carStats.ts): 80-tol 130-ig. Korabban egyetlen kozos
+ * konstans volt -- azt szandekosan toroltuk, mert a kozos szam
+ * hasznalata itt CSENDES hiba lenne: a rohamkocsi 100 HP-vel szuletne,
+ * a gyogyulasa 100-nal allna meg, es a jatekos sosem tudna meg, miert
+ * nem kapja meg a valasztott auto elonyet.
+ */
+function startHp(player: { car: CarId }): number {
+  return maxHpOf(player.car);
+}
 
 /**
  * Egy jatekos a szerver oldalan.
@@ -470,6 +481,11 @@ export class Room {
     skin?: string,
   ): ServerPlayer {
     const spawn = this.allocateSpawn(null);
+    // A KINEZETET a SZOBA osztja ki, es a kiosztott auto donti el a
+    // kezdo eleterot -- ezert kell ELOBB megtudni, mivel jatszik.
+    const look = assignCar({ car: toCarId(car), skin: toSkin(toCarId(car), skin) }, [
+      ...this.players.values(),
+    ]);
     const player: ServerPlayer = {
       id,
       // A nevet a SZERVER tisztitja: a kliens barmit kuldhet.
@@ -479,9 +495,7 @@ export class Room {
       spawnIndex: spawn.index,
       // A KINEZETET a SZOBA osztja: a kliens keresebol csak akkor lesz
       // valosag, ha a paros (karosszeria + festes) meg szabad.
-      ...assignCar({ car: toCarId(car), skin: toSkin(toCarId(car), skin) }, [
-        ...this.players.values(),
-      ]),
+      ...look,
       protectedUntil: 0,
       // A kepesseget is a SZERVER ellenorzi: ismeretlen ertek eseten
       // az alapertelmezett.
@@ -496,7 +510,7 @@ export class Room {
       deathPosition: null,
       spawnChosenManually: false,
       planKey: "",
-      hp: START_HP,
+      hp: maxHpOf(look.car),
       wheels: healthyWheels(),
       lastSeq: -1,
       lastStateAt: performance.now(),
@@ -643,8 +657,16 @@ export class Room {
         // egy meterre van a masiktol.
         if (!carsOverlap(a.state, b.state, a.car, b.car)) continue;
 
-        // Aki nekiment a masiknak, kevesebbet kap -- lasd splitCollisionDamage.
-        const damage = splitCollisionDamage(a.state, b.state);
+        // Aki nekiment a masiknak, kevesebbet kap -- es a NEHEZEBB
+        // auto is jobban jar (lasd splitCollisionDamage). A tomeget
+        // szamkent adjuk at: a combat.ts szandekosan nem ismeri az
+        // autokat.
+        const damage = splitCollisionDamage(
+          a.state,
+          b.state,
+          carStats(a.car).mass,
+          carStats(b.car).mass,
+        );
         if (damage.a <= 0 && damage.b <= 0) continue;
 
         a.hp = Math.max(0, a.hp - damage.a);
@@ -709,7 +731,10 @@ export class Room {
         //
         // A boostnal ez nem tehetó meg: a tartaly a KLIENSNEL van (terv
         // 15.4), a szerver nem tudja, mennyi van benne.
-        if (pickup.kind === "health" && player.hp + player.healLeft >= MAX_HP) {
+        if (
+          pickup.kind === "health" &&
+          player.hp + player.healLeft >= startHp(player)
+        ) {
           continue;
         }
 
@@ -1054,7 +1079,7 @@ export class Room {
       // TELI eletnel megall. A maradek elvesz -- de a jelzes (healing)
       // is elalszik vele, kulonben az auto tovabb villogna zolden ugy,
       // hogy kozben mar semmi nem tortenik.
-      if (player.hp >= MAX_HP) {
+      if (player.hp >= startHp(player)) {
         player.healLeft = 0;
         player.healAcc = 0;
         continue;
@@ -1069,7 +1094,7 @@ export class Room {
       const egesz = Math.floor(player.healAcc);
       if (egesz > 0) {
         player.healAcc -= egesz;
-        player.hp = Math.min(MAX_HP, player.hp + egesz);
+        player.hp = Math.min(startHp(player), player.hp + egesz);
       }
       void now;
     }
@@ -1125,7 +1150,7 @@ export class Room {
     const spawn = this.allocateSpawn(player);
     player.spawnIndex = spawn.index;
     player.state = spawn.state;
-    player.hp = MAX_HP;
+    player.hp = startHp(player);
     // Rovid serthetetlenseg. Nem kenyelmi funkcio: az arenaban nincs
     // biztonsagos spawn-pont (mind lotavon belul van), tehat enelkul a
     // frissen szuletett jatekos vedtelen -- es itt minden halal egy

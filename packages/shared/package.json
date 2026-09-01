@@ -21,6 +21,7 @@
     "check:rocket": "tsx scripts/check-rocket.ts",
     "check:wheels": "tsx scripts/check-wheels.ts",
     "check:arcade": "tsx scripts/check-arcade.ts",
+    "check:car-stats": "tsx scripts/check-car-stats.ts",
     "check:cars": "tsx scripts/check-cars.ts",
     "check:arena": "tsx scripts/check-arena.ts",
     "check:spawn": "tsx scripts/check-spawn.ts",

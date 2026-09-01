@@ -2,6 +2,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import {
   CAR_GEOMETRY,
   DEFAULT_CAR,
+  carMass,
   type CarGeometry,
   type CarId,
 } from "../index";
@@ -251,6 +252,15 @@ export class RapierBackend implements VehicleBackend {
    * derul ki (lasd setCar).
    */
   private geometria: CarGeometry = CAR_GEOMETRY[DEFAULT_CAR];
+  /**
+   * MELYIK autot vezetjuk.
+   *
+   * Nem ugyanaz, mint a geometria: abbol a MERET jon, ebbol a
+   * TULAJDONSAGOK (tomeg, csucssebesseg, gyorsulas, fordulas -- lasd
+   * carStats.ts). Kulon mezo, mert a geometria egy mert adat, a stat
+   * pedig jatek-balansz: a kettonek nem szabad egymasbol kovetkeznie.
+   */
+  private car: CarId = DEFAULT_CAR;
   /** A sajat auto utkozo-alakzata -- csereenél el kell tavolitani. */
   private chassisCollider: RAPIER.Collider | null = null;
 
@@ -384,7 +394,7 @@ export class RapierBackend implements VehicleBackend {
    * Ha a burok valamiert nem allna elo, marad a doboz.
    */
     this.chassisCollider = this.world.createCollider(
-      RapierBackend.sajatCollider(this.geometria),
+      RapierBackend.sajatCollider(this.geometria, this.car),
       this.chassis,
     );
 
@@ -402,7 +412,10 @@ export class RapierBackend implements VehicleBackend {
    * utana -- eppen az a fajta csendes elteres, ami ellen a mert
    * geometria keszult.
    */
-  private static sajatCollider(geo: CarGeometry): RAPIER.ColliderDesc {
+  private static sajatCollider(
+    geo: CarGeometry,
+    car: CarId,
+  ): RAPIER.ColliderDesc {
     return (
       RAPIER.ColliderDesc.convexHull(geo.hull) ??
       RAPIER.ColliderDesc.cuboid(
@@ -411,7 +424,10 @@ export class RapierBackend implements VehicleBackend {
         geo.halfExtents.z,
       )
     )
-      .setMass(CHASSIS.mass)
+      // AUTONKENT MAS TOMEG (carStats.ts). Ez az a hely, ahol a
+      // "nehez auto lelöki a konnyut" ingyen adodik: a lendulet-atadast
+      // a motor szamolja, nem kell hozza kulon szabaly.
+      .setMass(carMass(car))
       // ALACSONY surlodas (0.4 -> 0.2). A karosszeria csak akkor er
       // talajt vagy falat, ha a felfuggesztes kifogyott, vagy ha az
       // auto felborult -- ilyenkor a magas surlodas BEAKASZTANA a
@@ -475,6 +491,7 @@ export class RapierBackend implements VehicleBackend {
     const next = stepArcade(this.motion, input, dt, {
       grounded,
       grip: this.gripScale(),
+      car: this.car,
     });
     this.motion = next;
 
@@ -832,8 +849,13 @@ export class RapierBackend implements VehicleBackend {
    */
   setCar(car: CarId): void {
     const uj = CAR_GEOMETRY[car];
-    if (!uj || uj === this.geometria) return;
+    // Az AUTOT nezzuk, nem a geometriat: a meret mellett a TOMEG es a
+    // vezetes szamai is valtoznak (carStats.ts). Ha csak a geometriat
+    // hasonlitanank, egy azonos meretu, de mas tulajdonsagu auto
+    // csendben a regi tomeggel maradna.
+    if (!uj || car === this.car) return;
     this.geometria = uj;
+    this.car = car;
     if (!this.chassis) return;
 
     if (this.chassisCollider) {
@@ -841,7 +863,7 @@ export class RapierBackend implements VehicleBackend {
       this.chassisCollider = null;
     }
     this.chassisCollider = this.world.createCollider(
-      RapierBackend.sajatCollider(uj),
+      RapierBackend.sajatCollider(uj, car),
       this.chassis,
     );
   }
@@ -868,9 +890,11 @@ export class RapierBackend implements VehicleBackend {
         geo.halfExtents.z,
       )
     )
-      // Ugyanaz a tomeg, mint a sajat autonknak -- igy az utkozes
-      // lendulet-atadasa realis aranyu.
-      .setMass(CHASSIS.mass)
+      // Ugyanaz a tomeg, mint amennyi EZE az autoe a sajat kliensen --
+      // igy az utkozes lendulet-atadasa mindket kepernyon ugyanaz.
+      // Egy kozos tomeg itt azt jelentene, hogy a rohamkocsi a sajat
+      // kepernyojen lelöki a kisautot, a masikon viszont nem.
+      .setMass(carMass(car ?? DEFAULT_CAR))
       .setFriction(0.4)
       .setRestitution(0.1)
       .setCollisionGroups(COLLISION_REMOTE);

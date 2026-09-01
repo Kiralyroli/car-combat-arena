@@ -33,6 +33,38 @@ melyik szoba melyik módban megy).
 Mindkét módban a jobb felső sarokban fut a **kilövés-lista**: ki, mivel,
 kit lőtt ki.
 
+## Autók
+
+A négy karosszéria nem csak másképp néz ki, hanem **másképp is vezet**.
+Az autó a *mozgást* és a *tartósságot* adja; a sebzést a fegyver, a
+pillanatnyi túlélést a képesség -- így a három választás nem
+versenyez egymással.
+
+| Autó | Élet | Sebesség | Kanyar | Tömeg |
+|---|---|---|---|---|
+| Izomautó | 80 | +15% | ±0% | −5% |
+| Crossover | 100 | ±0% | ±0% | ±0% |
+| Terepjáró | 115 | −6% | −8% | +15% |
+| Rohamkocsi | 130 | −14% | −15% | +30% |
+
+A választóban **nem ezek a számok** állnak, hanem két csillagsor:
+*sebesség* és *élet*. A skála a mezőnyhöz igazodik (a leggyorsabb autó
+mindig öt csillag, a leglassabb egy), tehát a csillagok
+összehasonlítást mondanak, nem abszolút mércét -- és új autó
+felvételekor maguktól igazodnak. A tömeg és a kanyar a játékban
+változatlanul számít, csak a kijelzőre nem kerül fel: ugyanazt a két
+irányt erősítik, és öt csillagsor olvashatatlan lenne egy gombon.
+
+A táblázat egy
+helyen él (`packages/shared/src/carStats.ts`), és **szorzókat** ad a
+közös, behangolt vezetés-modellre (`ARCADE`) -- nem autónkénti külön
+paraméterkészletet. A Crossover mindenben pontosan 1,0, tehát a játék
+eddigi vezetése változatlanul elérhető.
+
+A tömeg két helyen hat: a fizikai lökésben (a nehéz autó lelöki a
+könnyűt -- ezt a Rapier adja) és mérsékelten az ütközés
+sebzés-elosztásában.
+
 ## Indítás
 
 ```bash
@@ -94,6 +126,16 @@ npm run check:all
 Fizikai regressziós tesztek (gyorsulás, stabilitás, sérülés,
 önfelegyenesedés, kanyarodás, tolatás), a spawn-pontok ellenőrzése és a
 szerver-oldali plauzibilitás-ellenőrzés -- headless, Node alatt futnak.
+
+```bash
+npm run check:car-stats
+```
+
+Az autónkénti tulajdonságok (lásd fent) **végigvezetett** mérése:
+csúcssebesség, 0--80 km/h, kanyarsugár autónként, plusz a tömeg hatása
+az ütközés sebzés-elosztására. A mérés a vezetett eredményt nézi, nem a
+táblázatot olvassa vissza -- és van benne egy balansz-őr is, ami elkapja,
+ha egy autó minden tengelyen a legjobbá válna.
 
 ```bash
 npm run check:net

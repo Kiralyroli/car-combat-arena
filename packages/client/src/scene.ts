@@ -26,7 +26,7 @@ import {
   EXPLOSION_RADIUS,
   PICKUP_HEIGHT,
   PICKUP_POINTS,
-  MAX_HP,
+  maxHpOf,
   WHEEL,
   WHEEL_LAYOUT,
   wheelRadiusFor,
@@ -1490,14 +1490,22 @@ export class SceneView {
     texture.needsUpdate = true;
   }
 
-  private drawHpBar(sprite: THREE.Sprite, hp: number): void {
+  /**
+   * A masik jatekos feje folotti HP-sav.
+   *
+   * A `maxHp` AZ O AUTOJAE, nem egy kozos szam (carStats.ts). Kozos
+   * skalaval a rohamkocsi savja sosem lenne tele (130/100), a torekeny
+   * izomautoe pedig 80%-nal "megtelne" -- vagyis a sav pont azt nem
+   * mutatna meg, amit kerdezunk tole: mennyi van meg EBBOL az autobol.
+   */
+  private drawHpBar(sprite: THREE.Sprite, hp: number, maxHp: number): void {
     const texture = (sprite.material as THREE.SpriteMaterial).map;
     if (!texture) return;
     const canvas = texture.image as HTMLCanvasElement;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const ratio = Math.max(0, Math.min(1, hp / MAX_HP));
+    const ratio = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
     const pad = 3;
     const w = canvas.width - pad * 2;
     const h = canvas.height - pad * 2;
@@ -1552,7 +1560,7 @@ export class SceneView {
       car.nameTag.visible = true;
       if (car.shownHp !== hp) {
         car.shownHp = hp;
-        this.drawHpBar(car.hpBar, hp);
+        this.drawHpBar(car.hpBar, hp, maxHpOf(car.carId));
       }
       return;
     }
@@ -2112,7 +2120,7 @@ export class SceneView {
       rollAngle: 0,
       prevPos: null,
     });
-    this.drawHpBar(hpBar, MAX_HP);
+    this.drawHpBar(hpBar, maxHpOf(carId), maxHpOf(carId));
   }
 
   removeRemoteCar(id: string): void {

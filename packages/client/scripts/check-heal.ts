@@ -22,7 +22,8 @@
 import { chromium, type Browser, type Page } from "playwright";
 import {
   HEALTH_RESTORE,
-  MAX_HP,
+  maxHpOf,
+  type CarId,
   PICKUP_POINTS,
   pickupIndicesOf,
 } from "@cca/shared";
@@ -61,6 +62,20 @@ async function openClient(
 }
 
 const hpOf = (page: Page) => page.evaluate("window.__spike.net.hp") as Promise<number>;
+
+/**
+ * A jatekos TELI eletereje -- a sajat autoja szerint (carStats.ts).
+ *
+ * A kliensTOL kerdezzuk meg, melyik autot kapta, nem talalgatjuk: az
+ * autot a SZERVER osztja ki (assignCar), tehat egy beirt konstans itt
+ * eloszor csak "neha" lenne rossz, aztan csendben mindig. Kozos 100-as
+ * maximummal ez a meres tenylegesen elbukott: a 80 HP-s izomauto
+ * teljesen felgyogyult, a teszt megis 100-at vart.
+ */
+async function teliHpOf(page: Page): Promise<number> {
+  const car = (await page.evaluate("window.__spike.net.ownCar")) as CarId;
+  return maxHpOf(car);
+}
 
 async function placeAt(page: Page, x: number, z: number): Promise<void> {
   await page.evaluate(
@@ -140,8 +155,9 @@ async function main(): Promise<void> {
   // pontossaga -- ha nem sikerult, ujra allunk fel es ujra probaljuk.
   // Ennyire kell levinni: maradjon hely a teljes +40-nek, es a
   // celpont ELJEN -- egy halott jatekos teli elettel szuletik ujra.
-  const KELL_HP = MAX_HP - HEALTH_RESTORE;
-  let sebzettHp = MAX_HP;
+  const TELI_HP = await teliHpOf(B.page);
+  const KELL_HP = TELI_HP - HEALTH_RESTORE;
+  let sebzettHp = TELI_HP;
   // A SEBZES-SZAMOK legutobb latott alakja a ket kepernyon (ures = sosem).
   let lattSzam = "";
   let lattSajat = "";
@@ -311,7 +327,7 @@ async function main(): Promise<void> {
   const vegHp = await hpOf(B.page);
   check(
     "a teljes eletet visszakapta",
-    vegHp === Math.min(MAX_HP, felvetelElott + HEALTH_RESTORE),
+    vegHp === Math.min(TELI_HP, felvetelElott + HEALTH_RESTORE),
     `${felvetelElott} -> ${vegHp} HP`,
   );
 

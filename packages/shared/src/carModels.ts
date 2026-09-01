@@ -17,6 +17,11 @@
  * festese ugyanazt a testet, ugyanazokat a kerekeket es ugyanazt a
  * talalati alakot hasznalja (lasd carGeometry.ts). A skin tisztan
  * latvany -- nem ad elonyt.
+ *
+ * A KAROSSZERIA VISZONT IGEN. A negy formanak sajat eletereje, tomege,
+ * csucssebessege, gyorsulasa es fordulasa van (carStats.ts): az
+ * izomauto gyors es torekeny, a rohamkocsi lassu es strapabiro. A
+ * valasztas tehat DONTES, nem izles.
  */
 
 export type CarId = "Muscle" | "Jeep" | "Crossover" | "Rescue";
@@ -39,16 +44,16 @@ export interface CarModel {
 /**
  * A negy karosszeria.
  *
- * A FIZIKA lenyegeben azonos: a meretek elternek (4,1 m-tol 4,9 m-ig),
- * de a vezetes, a tomeg es a sebzes ugyanaz -- kulonben a valasztas
- * nem izles kerdese lenne, hanem elony. A leirasok ezert a kinezetrol
- * szolnak, nem kepessegekrol.
+ * A leirasok a SZILUETTET mondjak, a szamokat a valaszto a
+ * carStats.ts-bol teszi melle (`statSummary`). Igy a ket forras nem
+ * tud elcsuszni egymastol: ha a tablazat valtozik, nem marad itt egy
+ * regi szoveg, ami mast allit.
  */
 export const CAR_MODELS: CarModel[] = [
   {
     id: "Muscle",
     label: "Izomautó",
-    leiras: "Alacsony, hosszú orrú",
+    leiras: "Alacsony, hosszú orrú — gyors, de törékeny",
     skins: [
       { id: "Sarga", label: "Sárga csík" },
       { id: "Feher", label: "Fehér" },
@@ -59,7 +64,7 @@ export const CAR_MODELS: CarModel[] = [
   {
     id: "Jeep",
     label: "Terepjáró",
-    leiras: "Szögletes, pótkerekes",
+    leiras: "Szögletes, pótkerekes — strapabíró",
     skins: [
       { id: "Fekete", label: "Fekete" },
       { id: "Feher", label: "Fehér" },
@@ -70,7 +75,7 @@ export const CAR_MODELS: CarModel[] = [
   {
     id: "Crossover",
     label: "Crossover",
-    leiras: "Modern, lekerekített",
+    leiras: "Modern, lekerekített — kiegyensúlyozott",
     skins: [
       { id: "Fekete", label: "Fekete" },
       { id: "Zold", label: "Zöld" },
@@ -82,7 +87,7 @@ export const CAR_MODELS: CarModel[] = [
   {
     id: "Rescue",
     label: "Rohamkocsi",
-    leiras: "Magas, villogós",
+    leiras: "Magas, villogós — nehéz és szívós, de lassú",
     skins: [
       { id: "Rendor", label: "Rendőr" },
       { id: "Mento", label: "Mentő" },
@@ -153,6 +158,18 @@ export interface CarLook {
  * van, ami boven eleg -- de a sorrend szamit, mert egy azonos formaju,
  * mas szinu par tavolrol nehezebben kulonboztetheto meg, mint ket
  * kulonbozo forma.
+ *
+ * A SORREND MOSTANTOL TOBB, MINT ESZTETIKA. Amiota a karosszeria
+ * TULAJDONSAGOKAT is jelent (carStats.ts), egy masik autora valtas nem
+ * "masik szin", hanem MASIK JATEK: a gyorsat kero jatekos lassu tankot
+ * kapna. Ezert marad az azonos forma + masik festes az elso valasz, es
+ * ezert csak a legvegso esetben valtunk kocsit -- ha egy forma OSSZES
+ * festese elfogyott (a rohamkocsinak peldaul csak harom van).
+ *
+ * Ha megis valtani kell, azt a jatekosnak MEG KELL TUDNIA. Ehhez nem
+ * kell uj halozati mezo: a kliens tudja, mit kert, es a belepeskor
+ * megkapja, mit kapott -- a ketto osszehasonlitasa a kliens dolga
+ * (lasd main.ts).
  */
 export function assignCar(
   kert: CarLook,

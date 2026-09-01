@@ -2,6 +2,9 @@ import {
   CAR_MODELS,
   carModel,
   skinsOf,
+  carStars,
+  STAR_COUNT,
+  statText,
   toAbilityId,
   toGameModeId,
   type GameModeId,
@@ -198,6 +201,15 @@ export class CarSkinPicker {
     kivalasztott: boolean,
     kattintas: () => void,
     kep?: string,
+    /**
+     * A CSILLAGOK (auto-gomboknal): sebesseg es elet.
+     *
+     * A REJTETT STAT TISZTESSEGTELEN STAT: amiota a karosszeria
+     * tulajdonsagokat is jelent (carStats.ts), a jatekosnak a
+     * VALASZTASKOR kell latnia, mit valaszt -- nem harom meccs utan
+     * kikovetkeztetnie.
+     */
+    statok?: CarId,
   ): HTMLButtonElement {
     const b = document.createElement("button");
     b.type = "button";
@@ -223,9 +235,47 @@ export class CarSkinPicker {
       d.textContent = leiras;
       b.append(d);
     }
+    if (statok) {
+      const csillagok = carStars(statok);
+      const st = document.createElement("span");
+      st.className = "wstat";
+      // A csillagokat NEM olvassuk fel: a kepernyoolvaso "fekete
+      // csillag"-kent mondana be mind a otot. A szoveges alak a
+      // gomb title-jeben van (lasd lentebb), ezert ez a blokk
+      // aria-hidden.
+      st.setAttribute("aria-hidden", "true");
+      for (const [cim, ertek] of [
+        ["Sebesség", csillagok.speed],
+        ["Élet", csillagok.hp],
+      ] as const) {
+        const sor = document.createElement("span");
+        sor.className = "statsor";
+        const nevEl = document.createElement("span");
+        nevEl.className = "statnev";
+        nevEl.textContent = cim;
+        // A TELE es az URES csillagok KULON elemben, hogy mas szint
+        // kaphassanak. Egyetlen, egyszinu "★★★☆☆" sorban a ket alak
+        // csak a kontur vastagsagaban ter el -- egy 10 pixeles
+        // betumereten ez nem olvashato, es pont az ertekeles veszne el.
+        const csEl = document.createElement("span");
+        csEl.className = "starok";
+        const tele = document.createElement("span");
+        tele.className = "tele";
+        tele.textContent = "★".repeat(ertek);
+        const ures = document.createElement("span");
+        ures.className = "ures";
+        ures.textContent = "☆".repeat(STAR_COUNT - ertek);
+        csEl.append(tele, ures);
+        sor.append(nevEl, csEl);
+        st.append(sor);
+      }
+      b.append(st);
+    }
     // A festes-kockakon a felirat rejtve van: a "title" mondja meg,
-    // mit valasztunk, ha valaki raviszi az egeret.
-    b.title = nev;
+    // mit valasztunk, ha valaki raviszi az egeret. Az autoknal a
+    // SZOVEGES alak all itt -- ez az, amit a kepernyoolvaso is ertelmesen
+    // mond be.
+    b.title = statok ? `${nev} — ${statText(statok)}` : nev;
     b.addEventListener("click", kattintas);
     return b;
   }
@@ -255,6 +305,7 @@ export class CarSkinPicker {
             240,
             150,
           ),
+          m.id,
         ),
       ),
     );

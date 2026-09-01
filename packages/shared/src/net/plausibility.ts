@@ -1,4 +1,5 @@
-import { ARENA, CHASSIS, SPAWN_POINTS } from "../config";
+import { ARCADE, ARENA, CHASSIS, SPAWN_POINTS } from "../config";
+import { MAX_SPEED_MULTIPLIER } from "../carStats";
 import type { ClientState } from "./protocol";
 
 /**
@@ -21,6 +22,16 @@ import type { ClientState } from "./protocol";
  */
 
 /**
+ * Rahagyas a legitim tobbletre (m/s).
+ *
+ * A rampa, a robbanas es a masik auto lokese a csucssebesseg FOLE
+ * viszi a kocsit, es az arkad modell szandekosan hagyja lecsengeni
+ * (coastDecel). A 16 m/s a korabbi, kezzel beallitott hatarbol jon
+ * (60 - 44), tehat a szurés szigorusaga valtozatlan.
+ */
+const SPEED_HEADROOM = 16;
+
+/**
  * Legnagyobb hihető sebesseg (m/s).
  *
  * A kocsi csucssebessege boosttal ARCADE.boostMaxSpeed (44 m/s, 158
@@ -31,8 +42,15 @@ import type { ClientState } from "./protocol";
  * Egy sebesseg-hack ennel nagysagrendekkel tobbet allitana, tehat a
  * laza hatar is kiszuri -- a szoros hatar viszont jatszhato
  * helyzetekben adna hamis riasztast.
+ *
+ * SZAMOLT SZAM, NEM BEIRT. Az autok csucssebessege autonkent mas
+ * (carStats.ts), es a hatarnak a LEGGYORSABBRA is igaznak kell lennie.
+ * Ha kezzel beirt szam maradna, egy jovobeli gyorsabb auto vezetese
+ * csalasnak latszana -- es a jatekos a tobbiek kepernyojen elkezdene
+ * akadozni, minden lathato ok nelkul.
  */
-export const MAX_PLAUSIBLE_SPEED = 60;
+export const MAX_PLAUSIBLE_SPEED =
+  ARCADE.boostMaxSpeed * MAX_SPEED_MULTIPLIER + SPEED_HEADROOM;
 
 /**
  * Extra rahagyas a pozicio-ugrasra (m).

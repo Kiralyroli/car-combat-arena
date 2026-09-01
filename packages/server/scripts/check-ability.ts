@@ -24,11 +24,23 @@ import {
   ABILITIES,
   FIXED_DT,
   IMPACT_COOLDOWN_MS,
-  MAX_HP,
+  maxHpOf,
   type ClientState,
   type ServerMessage,
 } from "@cca/shared";
-import { Room } from "../src/rooms/room";
+import { Room, type ServerPlayer } from "../src/rooms/room";
+
+/**
+ * EGY JATEKOS teli eletereje.
+ *
+ * Nem kozos konstans: az eletero autonkent 80 es 130 kozott van
+ * (carStats.ts), es a szobat a szerver osztja ki -- a teszt tehat nem
+ * tudja elore, ki mivel jatszik. A kozos 100-zal ez a meres csendben
+ * ertelmetlenne valt: a 80 HP-s izomautonak "95 HP-t" allitottunk be,
+ * amit a gyogyulas mar nem tudott novelni, es a teszt ugy bukott el,
+ * hogy a gyogyitassal semmi baj nem volt.
+ */
+const teli = (p: ServerPlayer): number => maxHpOf(p.car);
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -102,7 +114,7 @@ function main(): void {
     // ELOSZOR pajzs nelkul: enelkul nem tudnank, hogy az utkozes
     // egyaltalan sebez-e ebben a felallasban.
     collide(f, now);
-    const pajzsNelkul = MAX_HP - f.b.hp;
+    const pajzsNelkul = teli(f.b) - f.b.hp;
     check(
       "pajzs nelkul az utkozes sebez",
       pajzsNelkul > 0,
@@ -115,26 +127,26 @@ function main(): void {
     // volna. Merve: a pajzsot kivéve a kodbol a teszt tovabbra is
     // atment -- vagyis semmit nem ert.
     const pajzsKor = now + IMPACT_COOLDOWN_MS + 100;
-    f.b.hp = MAX_HP;
-    f.a.hp = MAX_HP;
+    f.b.hp = teli(f.b);
+    f.a.hp = teli(f.a);
     const sikerult = f.room.useAbility("b", pajzsKor);
     check("a pajzs elsul", sikerult, "useAbility -> true");
 
     collide(f, pajzsKor + 10);
     check(
       "a pajzs alatt nincs sebzes",
-      f.b.hp === MAX_HP,
-      `${f.b.hp} / ${MAX_HP} HP (${IMPACT_COOLDOWN_MS} ms-mal a korabbi utkozes utan)`,
+      f.b.hp === teli(f.b),
+      `${f.b.hp} / ${teli(f.b)} HP (${IMPACT_COOLDOWN_MS} ms-mal a korabbi utkozes utan)`,
     );
 
     // ...es a LEJARTA utan megint sebzodik.
     const utana = pajzsKor + ABILITIES.shield.durationMs + IMPACT_COOLDOWN_MS + 100;
-    f.b.hp = MAX_HP;
+    f.b.hp = teli(f.b);
     collide(f, utana);
     check(
       "a pajzs lejarta utan megint sebzodik",
-      f.b.hp < MAX_HP,
-      `${f.b.hp} / ${MAX_HP} HP`,
+      f.b.hp < teli(f.b),
+      `${f.b.hp} / ${teli(f.b)} HP`,
     );
   }
 
@@ -199,13 +211,13 @@ function main(): void {
     );
 
     // TELI elettel sem megy a maximum foles.
-    f.a.hp = MAX_HP - 5;
+    f.a.hp = teli(f.a) - 5;
     f.room.useAbility("a", vege);
     gyogyulasVegig(f, vege);
     check(
       "a gyogyitas nem lep a maximum fole",
-      f.a.hp === MAX_HP,
-      `${MAX_HP - 5} -> ${f.a.hp}`,
+      f.a.hp === teli(f.a),
+      `${teli(f.a) - 5} -> ${f.a.hp}`,
     );
   }
 
@@ -293,7 +305,7 @@ function main(): void {
     let now = vedelemUtan(T0);
     for (let i = 0; i < 40 && f.b.hp > 0; i++) {
       collide(f, now);
-      f.a.hp = MAX_HP;
+      f.a.hp = teli(f.a);
       now += 400;
     }
     f.room.stepMatch(now);

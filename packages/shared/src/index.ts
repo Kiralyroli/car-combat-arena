@@ -38,6 +38,7 @@ export * from "./carGeometry";
 export * from "./carSkins";
 export * from "./carSizes";
 export * from "./carModels";
+export * from "./carStats";
 export * from "./physics/arcade";
 export * from "./physics/rapier";
 export * from "./net/protocol";

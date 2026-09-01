@@ -43,6 +43,7 @@ import {
   Hud,
   KillFeed,
   KillNotice,
+  CarNotice,
   MatchHud,
   NetStat,
   PlayerHud,
@@ -327,6 +328,8 @@ async function main(): Promise<void> {
   const killFeed = new KillFeed();
   // ...es ami EPPEN VELUNK tortent, a kep kozepe folott.
   const killNotice = new KillNotice();
+  // Ha a szoba mas kocsit osztott ki, mint amit kertunk (lasd assignCar).
+  const carNotice = new CarNotice();
   /** A legutobb latott meccs-fazis -- az uj meccs felismeresehez. */
   let elozoFazis: MatchPhase = "waiting";
   const netStat = new NetStat();
@@ -727,7 +730,14 @@ async function main(): Promise<void> {
             // szerver a szoba modjat tartja (lasd JoinMessage.mode).
             choice.mode,
           );
-          if (failure === null) break;
+          if (failure === null) {
+            // A szoba mast is kioszthatott, mint amit kertunk (minden
+            // festes foglalt volt) -- es az mar MAS AUTO, mas
+            // eletervel es sebesseggel. Csak akkor mutat valamit, ha
+            // tenyleg elter (lasd CarNotice).
+            carNotice.show(choice.car, net.ownCar, performance.now());
+            break;
+          }
           message = failure;
         }
       } finally {
@@ -963,9 +973,12 @@ async function main(): Promise<void> {
     const ownAim = currentAim(currChassis);
     view.setOwnAim(ownAim.yaw, ownAim.pitch);
     view.setOwnCar(net.ownCar, net.ownSkin);
-    // A FIZIKAI TEST is az autohoz tartozik: az utkozo alak es a
-    // kerekhelyek autonkent mask. A hivas olcso, ha nem valtozott.
+    // A FIZIKAI TEST is az autohoz tartozik: az utkozo alak, a
+    // kerekhelyek ES A TOMEG autonkent mas. A hivas olcso, ha nem
+    // valtozott.
     backend.setCar?.(net.ownCar);
+    // A HP-sav skalaja is: 80 es 130 kozott van a mezony (carStats.ts).
+    playerHud.setCar(net.ownCar);
     // A sajat fegyverunk modellje is a halozati allapotbol jon: a
     // valasztast a SZERVER hagyja jova (elve nem lehet valtani), tehat
     // amit kirajzolunk, az a tenylegesen ervenyes fegyver.
@@ -1304,6 +1317,7 @@ async function main(): Promise<void> {
     // A kilovés-lista sorai es az ertesites maguktol jarnak le.
     killFeed.update(renderNow);
     killNotice.update(renderNow);
+    carNotice.update(renderNow);
 
     requestAnimationFrame(frame);
   }
