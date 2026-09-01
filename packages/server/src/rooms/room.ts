@@ -10,6 +10,15 @@ import {
   type AbilityId,
   type AbilityState,
 } from "@cca/shared";
+import { CheatMonitor, type ViolationKind } from "./cheatMonitor";
+import {
+  formatAimStats,
+  intendedTarget,
+  newAimStats,
+  recordShot,
+  totalShots,
+  type AimStats,
+} from "./aimStats";
 import { RocketSimulation, explosionDamageFor } from "../simulation/rockets";
 import { resolveHitscan } from "../simulation/machinegun";
 import {
@@ -67,6 +76,9 @@ import {
   INTERP_DELAY_MS,
   MACHINEGUN,
   muzzleWorldPosition,
+  weaponPivot,
+  aimMismatchRad,
+  MAX_AIM_MISMATCH_RAD,
   type MachinegunState,
   type TracerSnapshot,
   type WeaponId,
@@ -80,6 +92,9 @@ import {
 
 /** Terv 3. fejezet: minimum 2, idealis 4--8 jatekos. */
 export const MAX_PLAYERS_PER_ROOM = 8;
+
+/** Miert bontjuk a kapcsolatot -- a kliens ebbol ir szoveget. */
+export type KickCode = "kicked" | "invalid_data";
 
 /** Kezdo HP. A sebzes-rendszer a 4. lepcsoben jon (terv 8. fejezet). */
 const START_HP = MAX_HP;
@@ -269,6 +284,42 @@ export interface ServerPlayer {
   rttSamples: number[];
   /** Pozicio-elozmeny a visszatekereshez (legregibb elol). */
   history: PoseSample[];
+  /**
+   * Hanyszor tert el a kert loves iranya a bevallott celzastol.
+   *
+   * Nem jatek-adat: NEM megy at a halozaton, es nem jar erte buntetes
+   * -- csak a naplo utemezesehez es a diagnosztikahoz kell.
+   */
+  aimMismatches: number;
+  /**
+   * Szabalyszeges-pontszam, lecsengessel -- ez donti el a kidobast.
+   *
+   * Lasd cheatMonitor.ts: az alkalmi hiba (rossz halozat) sosem gyulik
+   * fel, a folyamatos hazugsag igen.
+   */
+  cheat: CheatMonitor;
+  /**
+   * Talalati arany tavolsag- es szogsebesseg-bontasban (lasd aimStats).
+   *
+   * NEM megy at a halozaton: ez diagnosztika a szerver naplojaba, nem
+   * jatek-adat. A jatekosok a sima talalati aranyt latjak.
+   */
+  aimStats: AimStats;
+  /**
+   * Hany lovest adott le, es abbol hany talalt EBBEN a meccsben.
+   *
+   * A "talalat" fegyverenkent mast jelent, es ez SZANDEKOS:
+   *  - gepfegyver: a sugar eltalalt egy jatekost,
+   *  - agyu: a robbanas sebzett legalabb egy MASIK jatekost.
+   *
+   * Kozos szamlalo-par, mert a jatekos egyszerre egy fegyverrel jatszik,
+   * es a szam arrol szol, hogy O mennyire talal.
+   *
+   * A meccs indulasakor nullazodik (lasd startMatch) -- ugyanugy, mint
+   * a kilovesek: az elozo meccs pontossaga nem ehhez tartozik.
+   */
+  shotsFired: number;
+  shotsHit: number;
 }
 
 /** Egy korabbi allapot a visszatekereshez. */
@@ -276,6 +327,20 @@ interface PoseSample {
   t: number;
   position: [number, number, number];
   rotation: [number, number, number, number];
+  /**
+   * A BEVALLOTT celzas ebben a pillanatban.
+   *
+   * Nem a visszatekereshez kell, hanem a kiloves-keres ellenorzesehez
+   * (lasd tryFire): a `fire` uzenet es a legutobbi allapot KET
+   * kulonbozo pillanatban keletkezik, ezert a kert irányt nem egyetlen
+   * mintahoz, hanem egy rovid ablak mintaihoz merjuk.
+   *
+   * A poziciot es a celzast EGYUTT kell venni, mintankent: mindketto
+   * ugyanabban a pillanatban volt igaz, es kozvetlen kozelrol (falnak
+   * lőve) mar a par centis pozicio-elteres is nagy szoget jelentene.
+   */
+  aimYaw: number;
+  aimPitch: number;
 }
 
 /**
@@ -291,6 +356,25 @@ const MAX_REWIND_MS = 400;
 
 /** Ennyi ideig tartjuk a pozicio-elozmenyt (ms). */
 const HISTORY_MS = 600;
+
+/**
+ * Ennyi minta alatt nem irjuk ki a celzas-statisztikat.
+ *
+ * Egy tizenket lovesbol szamolt szazalek nem mond semmit a jatekosrol
+ * -- viszont a naplaban ugy nezne ki, mintha mondana, es eppen az ilyen
+ * szam vezet felre.
+ */
+const MIN_STAT_SHOTS = 40;
+
+/**
+ * Ekkora idoablak mintaihoz merjuk a kiloves iranyat (ms).
+ *
+ * Fel-fel mintavetelnyi (SNAPSHOT_HZ = 20 Hz, tehat 50 ms) mindket
+ * iranyban, plusz rahagyas a halozati ingadozasra. Hosszabb ablak
+ * feleslegesen engedekeny lenne: eleg egyszer arrafele nezni, es utana
+ * fel masodpercig barhova lehetne loni.
+ */
+const AIM_MATCH_WINDOW_MS = 150;
 
 /**
  * Ennyi legutobbi RTT-mintabol vesszuk a LEGNAGYOBBAT.
@@ -340,6 +424,20 @@ export class Room {
    */
   readonly mode: GameModeId;
   private readonly players = new Map<string, ServerPlayer>();
+
+  /**
+   * KIDOBAS-KERES a szallitasi reteg fele.
+   *
+   * A szoba nem ismer socketet -- szandekosan (lasd wsServer fejleces
+   * kommentje: a jatiklogika a Transport mogott van, hogy WebRTC-re
+   * lehessen valtani). A kidobas viszont a KAPCSOLAT bontasa, amit csak
+   * a transport tud elvegezni. Ez a varrat koti ossze a kettot: a szoba
+   * megmondja, KIT es MIERT, a transport pedig elvegzi.
+   *
+   * A wsServer allitja be, amikor a jatekos belep a szobaba.
+   */
+  onKick: ((id: string, code: KickCode, message: string) => void) | null =
+    null;
 
   constructor(code: string, mode: GameModeId = DEFAULT_GAME_MODE) {
     this.code = code;
@@ -414,6 +512,14 @@ export class Room {
       ackTick: null,
       rttSamples: [],
       history: [],
+      aimMismatches: 0,
+      // A monitor orajat a BELEPESKOR inditjuk: e nelkul az elso
+      // szabalyszeges egy nulla ota eltelt oriasi idot latna, es a
+      // lecsenges azonnal elvinne a pontjait.
+      cheat: new CheatMonitor(performance.now()),
+      shotsFired: 0,
+      shotsHit: 0,
+      aimStats: newAimStats(),
     };
     this.players.set(id, player);
     return player;
@@ -433,6 +539,59 @@ export class Room {
 
   get(id: string): ServerPlayer | undefined {
     return this.players.get(id);
+  }
+
+  /**
+   * Ki a szoba nyitoja (host)?
+   *
+   * A BELEPES SORRENDJE donti el: a legregebben bent levo jatekos. Nem
+   * kulon mezoben tartjuk, hanem a Map sorrendjebol olvassuk -- igy nem
+   * kell kulon gondoskodni a tavozasarol, es nem lehet olyan allapot,
+   * ahol a host mar nincs is a szobaban. (A JavaScript Map megorzi a
+   * beszurasi sorrendet, es a `remove` csak torol.)
+   */
+  get hostId(): string | null {
+    for (const id of this.players.keys()) return id;
+    return null;
+  }
+
+  /**
+   * Szabad-e ennek a jatekosnak kirugnia amazt?
+   *
+   * Harom feltetel, es mindharom kell:
+   *  - a kero a host (kulonben barki kirughatna barkit),
+   *  - a celpont letezik,
+   *  - a host nem sajat magat rugja ki (nem hiba, csak ertelmetlen --
+   *    es a szoba host nelkul maradna egy pillanatra).
+   */
+  canKick(requesterId: string, targetId: string): boolean {
+    if (requesterId === targetId) return false;
+    if (this.hostId !== requesterId) return false;
+    return this.players.has(targetId);
+  }
+
+  /**
+   * Egy szabalyszeges konyvelese -- es ha betelt a pohar, kidobas.
+   *
+   * A DONTES a CheatMonitorban van (lecsengo pontszam), itt csak a
+   * kovetkezmeny. A naplo a MERT adatot is kiirja, hogy utolag latszon,
+   * mi alapjan dolt el -- egy indoklas nelkuli kidobas nem
+   * felulvizsgalhato.
+   */
+  noteViolation(id: string, kind: ViolationKind, now: number): void {
+    const player = this.players.get(id);
+    if (!player) return;
+    if (!player.cheat.note(kind, now)) return;
+
+    console.warn(
+      `[room ${this.code}] ${id.slice(0, 8)} KIDOBVA -- ${player.cheat.summary()}`,
+    );
+    this.onKick?.(
+      id,
+      "invalid_data",
+      "A szerver tobbszor ertelmezhetetlen adatot kapott a jatekodtol. " +
+        "Ha szakadozik a kapcsolatod, probald ujra.",
+    );
   }
 
   /**
@@ -711,6 +870,7 @@ export class Room {
     return {
       phase: this.phase,
       mode: this.mode,
+      hostId: this.hostId,
       survivors: survivorsOf([...this.players.values()]).length,
       winnerId: this.winnerId,
       timeLeftMs: this.timeLeftMs(now),
@@ -789,6 +949,12 @@ export class Room {
       // az elozo meccs allasa latszana az eredmenyjelzon.
       player.kills = 0;
       player.lastAttacker = null;
+      // A PONTOSSAG is meccsenkent ertendo: az elozo meccs lovesei nem
+      // ehhez tartoznak, es egy hosszu ules vegere ugysem mozdulna mar
+      // az arany.
+      player.shotsFired = 0;
+      player.shotsHit = 0;
+      player.aimStats = newAimStats();
       // A meccs kezdetekor MINDENKI AZONNAL jatekban van, a kiesettek is
       // (kulonben nezok maradnanak az uj meccsben is).
       this.respawnNow(player, now);
@@ -826,6 +992,33 @@ export class Room {
       `[room ${this.code}] MECCS VEGE (${GAME_MODES[this.mode].nev}) -- ` +
         (winner ? `gyoztes: ${winner.id.slice(0, 8)}` : "dontetlen"),
     );
+    this.logAimStats(players);
+  }
+
+  /**
+   * Celzas-statisztika a naplaba, a meccs vegen.
+   *
+   * NEM megy ki a jatekosoknak: ez diagnosztika, nem eredmeny. Amit
+   * keresunk benne, az a LAPOS sor -- ha valakinek a talalati aranya
+   * sem a tavolsaggal, sem a celpont szogsebessegevel nem romlik, az
+   * nem emberi teljesitmeny-gorbe.
+   *
+   * A KEVES mintat kihagyjuk: nehany lovesbol szamolt szazalek nem
+   * mond semmit, viszont ugy nezne ki, mintha mondana.
+   */
+  private logAimStats(players: readonly ServerPlayer[]): void {
+    for (const player of players) {
+      if (totalShots(player.aimStats) < MIN_STAT_SHOTS) continue;
+      const arany =
+        player.shotsFired === 0
+          ? 0
+          : Math.round((100 * player.shotsHit) / player.shotsFired);
+      console.log(
+        `[room ${this.code}] celzas ${player.id.slice(0, 8)} ` +
+          `(${player.weapon}): ${arany}% -- ${player.shotsHit}/${player.shotsFired}`,
+      );
+      for (const sor of formatAimStats(player.aimStats)) console.log(sor);
+    }
   }
 
   /**
@@ -1041,18 +1234,80 @@ export class Room {
     // KOZBEN raketat is lohetett, mert a `fire` uzenetnek nem volt
     // fegyver-feltetele. A ket fegyver kozotti valasztas igy nem
     // valasztas volt, hanem a becsuletes jatekos hatranya.
-    if (player.weapon !== "cannon") return false;
+    if (player.weapon !== "cannon") {
+      // A LEGSULYOSABB jel: a becsuletes kliens ezt sosem kuldi, mert a
+      // fegyver ellenorzese ott van a kattintas-kezelojeben is (lasd
+      // main.ts fireAtCrosshair). Ez nem gyanu, hanem bizonyitek.
+      this.noteViolation(id, "wrongWeapon", now);
+      return false;
+    }
     if (now - player.lastFiredAt < ROCKET_COOLDOWN_MS) return false;
     // Hibas celpont (NaN, vegtelen) ne jusson a szimulacioba.
     if (!target.every((v) => Number.isFinite(v))) return false;
+    // A kert loves iranya egyezzen a BEVALLOTT celzassal -- lasd
+    // aimCheck.ts. E nelkul a raketa pontosan a celpontra ment, mikozben
+    // a tetőn levő veto barmerre nezhetett.
+    if (!this.aimMatchesFire(player, target, now)) return false;
 
     const rocket = this.rockets.spawn(id, player.state, target, now, player.car);
     if (!rocket) return false;
 
     player.lastFiredAt = now;
+    player.shotsFired++;
     // Aki lo, az mar nem menekul, hanem harcol.
     player.protectedUntil = 0;
     return true;
+  }
+
+  /**
+   * Egyezik-e a kert loves iranya a bevallott celzassal?
+   *
+   * A `fire` uzenet es az allapot-frissitesek KULON erkeznek, es a
+   * celzas csak 20 Hz-en megy at -- a kattintas pillanatabeli celzast
+   * tehat nem ismerjuk pontosan. Ezert nem EGY mintahoz merunk, hanem
+   * egy rovid ablak OSSZES mintajahoz, es a LEGJOBB egyezest vesszuk:
+   * ha a celzas barmelyik kozeli pillanatban arra nezett, elfogadjuk.
+   *
+   * Mintankent egyutt vesszuk a poziciot es a celzast, mert a fegyver
+   * forgaspontja a kocsival egyutt mozog -- kozvetlen kozelrol mar egy
+   * fel meter is nagy szoget jelentene.
+   */
+  private aimMatchesFire(
+    player: ServerPlayer,
+    target: [number, number, number],
+    now: number,
+  ): boolean {
+    const candidates: {
+      position: [number, number, number];
+      rotation: [number, number, number, number];
+      aimYaw: number;
+      aimPitch: number;
+    }[] = [player.state];
+
+    for (const sample of player.history) {
+      if (now - sample.t <= AIM_MATCH_WINDOW_MS) candidates.push(sample);
+    }
+
+    for (const c of candidates) {
+      const origin = weaponPivot(c.position, c.rotation, "cannon", player.car);
+      const mismatch = aimMismatchRad(origin, target, c.aimYaw, c.aimPitch);
+      // A null "nem eldontheto" (pl. a celpont a forgasponton van) --
+      // ez NEM bizonyitek, tehat nem is utasitjuk el miatta.
+      if (mismatch === null) return true;
+      if (mismatch <= MAX_AIM_MISMATCH_RAD) return true;
+    }
+
+    // Csak ritkan naplozunk: egy tartosan hazudo kliens kulonben
+    // masodpercenkent irna a naplot.
+    player.aimMismatches++;
+    if (player.aimMismatches === 1 || player.aimMismatches % 20 === 0) {
+      console.warn(
+        `[room ${this.code}] ${player.id.slice(0, 8)} lovese nem egyezik a ` +
+          `bevallott celzassal (${player.aimMismatches}. alkalom)`,
+      );
+    }
+    this.noteViolation(player.id, "aimMismatch", now);
+    return false;
   }
 
   /**
@@ -1068,6 +1323,13 @@ export class Room {
       .map((p) => ({ id: p.id, state: p.state, car: p.car }));
 
     for (const explosion of this.rockets.step(dt, now, targets)) {
+      // Az AGYUNAL a "talalat" azt jelenti, hogy a robbanas sebzett
+      // legalabb egy MASIK jatekost -- nem azt, hogy a rakéta valamibe
+      // beleutkozott (falba mindig beleutkozik). Robbanasonkent
+      // LEGFELJEBB EGYSZER szamit, kulonben egy jol iranyzott loves ket
+      // ellenfel kozott 200%-os pontossagot adna.
+      let credited = false;
+
       for (const player of this.players.values()) {
         if (player.deadSince !== null) continue;
         if (this.isProtected(player, now)) continue;
@@ -1082,6 +1344,13 @@ export class Room {
 
         player.hp = Math.max(0, player.hp - damage);
         player.lastDamagedAt = now;
+        // A SAJAT robbanasunk sebzese nem talalat: aki magat loje meg,
+        // az nem celzott jol.
+        if (!credited && player.id !== explosion.ownerId) {
+          const owner = this.players.get(explosion.ownerId);
+          if (owner) owner.shotsHit++;
+          credited = true;
+        }
         this.creditAttacker(player, explosion.ownerId, "cannon", now);
         console.log(
           `[room ${this.code}] robbanas: ${player.id.slice(0, 8)} -${damage} HP (${player.hp})`,
@@ -1221,6 +1490,8 @@ export class Room {
         t: now,
         position: player.state.position,
         rotation: player.state.rotation,
+        aimYaw: player.state.aimYaw,
+        aimPitch: player.state.aimPitch,
       });
       while (
         player.history.length > 1 &&
@@ -1369,6 +1640,16 @@ export class Room {
         player.car,
       );
 
+      // KIRE celzott? A statisztikahoz kell tudni, milyen NEHEZ volt a
+      // loves -- ahhoz pedig azonositani kell a szandekolt celpontot.
+      // A szoras ELOTTI iranyhoz merunk: az a jatekos sajat celzasa.
+      const aimed = intendedTarget(
+        origin,
+        direction,
+        alive.filter((p) => p.id !== player.id),
+        player.state.velocity,
+      );
+
       for (let i = 0; i < result.shots; i++) {
         const spread = applySpread(
           direction,
@@ -1384,6 +1665,22 @@ export class Room {
           to: shot.to,
           hit: shot.hitId !== null,
         });
+
+        // A LEADOTT loves mindig szamit, a talalat csak ha volt.
+        player.shotsFired++;
+        if (shot.hitId !== null) player.shotsHit++;
+        // A bontott statisztikaba viszont CSAK az kerul be, ami tenyleg
+        // celzas volt: ha senki nem volt a celkereszt kozeleben, a
+        // jatekos nem celzott, hanem szort -- egy ilyen minta a
+        // "pontossag" sorokat hazugsagga hígitana.
+        if (aimed) {
+          recordShot(
+            player.aimStats,
+            aimed.distance,
+            aimed.angularSpeed,
+            shot.hitId !== null,
+          );
+        }
 
         if (shot.hitId === null) continue;
         const victim = this.players.get(shot.hitId);
@@ -1426,6 +1723,8 @@ export class Room {
         lives: player.lives,
         weapon: player.weapon,
         kills: player.kills,
+        shotsFired: player.shotsFired,
+        shotsHit: player.shotsHit,
         ability: player.ability,
         abilityActive: abilityActive(player.abilityState, now),
         abilityCooldownMs: abilityCooldownLeft(player.abilityState, now),

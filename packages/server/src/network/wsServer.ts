@@ -10,7 +10,7 @@ import {
   type ServerMessage,
 } from "@cca/shared";
 import { RateLimiter } from "./rateLimit";
-import { MAX_PLAYERS_PER_ROOM } from "../rooms/room";
+import { MAX_PLAYERS_PER_ROOM, type KickCode } from "../rooms/room";
 import type { Room } from "../rooms/room";
 import type { RoomManager } from "../rooms/roomManager";
 
@@ -130,6 +130,28 @@ export class WsServer {
       } catch {
         conn.pingSentAt = null;
       }
+    }
+  }
+
+  /**
+   * Egy jatekos kapcsolatanak bontasa, indoklassal.
+   *
+   * A SORREND szamit: eloszor megy ki a hibauzenet, es csak utana
+   * zarunk. Forditva a kliens csak egy magyarazat nelkuli bontast
+   * latna, es nem tudna, miert repult ki -- se a kirugott, se az, akit
+   * a halozata dobott ki.
+   *
+   * A szoba takaritasat (playerLeft, ures szoba) nem itt vegezzuk: a
+   * `close` amugy is kivaltja a handleDisconnect-et, es ket helyen
+   * karbantartani ugyanazt elobb-utobb elcsuszik.
+   */
+  private kick(playerId: string, code: KickCode, message: string): void {
+    for (const conn of this.connections) {
+      if (conn.playerId !== playerId) continue;
+      conn.closing = true;
+      send(conn.socket, { type: "error", code, message });
+      conn.socket.close();
+      return;
     }
   }
 
@@ -261,6 +283,33 @@ export class WsServer {
         }
         return;
 
+      case "kick":
+        // CSAK a host rughat ki, es nem sajat magat -- a szerver dönti
+        // el, nem a kliens (lasd Room.canKick). E nelkul barki
+        // kirughatna barkit, ami rosszabb lenne, mint a csalas.
+        if (conn.room && conn.playerId) {
+          if (conn.room.canKick(conn.playerId, message.playerId)) {
+            console.log(
+              `[room ${conn.room.code}] ${conn.playerId.slice(0, 8)} (host) ` +
+                `kirugta: ${message.playerId.slice(0, 8)}`,
+            );
+            this.kick(
+              message.playerId,
+              "kicked",
+              "A szoba nyitoja kirugott a jatekbol.",
+            );
+          } else {
+            // NEM naplozzuk hangosan: egy elkesett kereseben (a celpont
+            // kozben kilepett) nincs semmi gyanus.
+            send(conn.socket, {
+              type: "error",
+              code: "bad_message",
+              message: "Nincs jogod kirugni ezt a jatekost",
+            });
+          }
+        }
+        return;
+
       case "fire":
         // A kiloves iranyat es helyet a SZERVER szamolja a jatekos
         // allapotabol -- a kliens csak kerni tud (lasd FireMessage).
@@ -333,7 +382,14 @@ export class WsServer {
     }
 
     const playerId = randomUUID();
-    // A szoba nem ismeri a WebSocketet -- csak egy kuldo fuggvenyt kap.
+    // A szoba nem ismeri a WebSocketet -- csak egy kuldo fuggvenyt kap,
+    // es egy KIDOBAS-varratot. A kidobas a kapcsolat bontasa, amit csak
+    // a transport tud elvegezni; a dontes viszont a szobae.
+    //
+    // Minden belepesnel ujra beallitjuk (ugyanarra): egy szoba tobb
+    // kapcsolatot szolgal ki, es igy nem kell kulon eletciklust
+    // kovetni.
+    room.onKick = (id, code, text) => this.kick(id, code, text);
     const player = room.add(
       playerId,
       (msg) => send(conn.socket, msg),
@@ -417,6 +473,11 @@ export class WsServer {
         );
         player.state = message.state;
         player.consecutiveRejects = 0;
+        // A KIUT-nak ara van: aki folyamatosan ebben az allapotban van,
+        // annak elobb-utobb betelik a pohara (lasd cheatMonitor.ts).
+        // Ez a leggyengebb jel a haromból -- egy szakado kapcsolat is
+        // eloallitja --, ezert er a legkevesebbet, es ezert cseng le.
+        conn.room.noteViolation(conn.playerId, "resync", now);
         return;
       }
 

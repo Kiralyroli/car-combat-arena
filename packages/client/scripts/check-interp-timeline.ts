@@ -62,6 +62,8 @@ function player(t: number): PlayerSnapshot {
   abilityActiveMs: 0,
   healing: false,
   kills: 0,
+  shotsFired: 0,
+  shotsHit: 0,
   };
 }
 

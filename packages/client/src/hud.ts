@@ -701,7 +701,12 @@ export class MatchHud {
       // foglalna a tabla szelen.
       const fej = document.createElement("div");
       fej.className = "row head";
-      fej.append(cella("h", ""), cella("nm", "jatekos"), cella("kl", "kiloves"));
+      fej.append(
+        cella("h", ""),
+        cella("nm", "jatekos"),
+        cella("kl", "kiloves"),
+        cella("pt", "pontossag"),
+      );
       if (!idore) fej.append(cella("lv", "elet"));
       tabla.appendChild(fej);
 
@@ -717,6 +722,7 @@ export class MatchHud {
           // mint a jobb felso allason: ebbol tudni, melyik kocsi volt.
           cella("nm", row.name, carLabel(row.car)),
           cella("kl", String(row.kills)),
+          cella("pt", accuracyLabel(row.shotsFired, row.shotsHit)),
         );
         // A KIESES csak a tulelés-modban ertelmes.
         if (!idore) {
@@ -734,6 +740,33 @@ export class MatchHud {
     also.textContent = `uj meccs ${seconds} masodperc mulva`;
     this.result.appendChild(also);
   }
+}
+
+/**
+ * Ennyi loves alatt nem mutatunk aranyt.
+ *
+ * Ket lovesbol szamolt 100% nem teljesitmeny, hanem veletlen -- es
+ * eppen az ilyen szam melle all oda valaki azzal, hogy "de hat nezd".
+ * Kevés minta eseten inkabb ne alljon ott semmi.
+ */
+const MIN_SHOTS_FOR_ACCURACY = 10;
+
+/**
+ * A TALALATI ARANY szovege az eredmenyjelzon.
+ *
+ * A darabszam is ott van a szazalek mellett: e nelkul egy 12 lovesbol
+ * szamolt 75% ugyanolyan sulyunak latszana, mint egy 400 lovesbol
+ * szamolt -- pedig a ketto nem ugyanaz az allitas.
+ *
+ * EZ a tabla legfontosabb oszlopa a csalas szempontjabol: a szerver a
+ * tokeletes celzast nem tudja megakadalyozni (a celzas kliens-input),
+ * de egy kiugro arany a tobbi jatekos szamara lathato -- es privat
+ * szobas, ismerosok kozti jatekban ok az igazi kovetkezmeny.
+ */
+export function accuracyLabel(shotsFired: number, shotsHit: number): string {
+  if (shotsFired < MIN_SHOTS_FOR_ACCURACY) return "-";
+  const arany = Math.round((100 * shotsHit) / shotsFired);
+  return `${arany}% (${shotsFired})`;
 }
 
 /**
@@ -762,6 +795,9 @@ export interface ScoreRow {
   lives: number;
   /** Hany jatekost lott ki ebben a meccsben. */
   kills: number;
+  /** Leadott es talalo lovesek -- a meccs vegi talalati aranyhoz. */
+  shotsFired: number;
+  shotsHit: number;
   /** Az auto szine -- ez koti a nevsort a palyan latott kocsihoz. */
   car: CarId;
 }
@@ -803,9 +839,33 @@ export function sortScoreRows(
   );
 }
 
+/**
+ * Meddig marad elesitve a kirugo gomb (ms).
+ *
+ * Elég hosszu ahhoz, hogy a masodik kattintas kenyelmes legyen, es elég
+ * rovid ahhoz, hogy egy elfelejtett "biztos?" ne maradjon aktiv, amikor
+ * a jatekos mar reg mast csinal.
+ */
+const KICK_CONFIRM_MS = 4000;
+
 export class Scoreboard {
   private readonly el: HTMLElement;
   private lastKey = "";
+
+  /**
+   * Kit kerdezunk eppen vissza a kirugas elott, es meddig.
+   *
+   * KET KATTINTAS kell: az elso "biztos?"-ra valt, a masodik rug ki. Az
+   * allas a kepernyo jobb felso sarkaban van, ahol jatek kozben is jar
+   * az eger -- egy azonnal hato x-bol vissza-nem-vonhato balesetek
+   * lennenek. A megerosites nehany masodperc utan magatol leall, hogy
+   * ne maradjon elesitve egy gomb, amirol a jatekos mar elfeledkezett.
+   */
+  private armedId: string | null = null;
+  private armedUntil = 0;
+
+  /** Ide szol a kirugas-keres (a halozati rteget a hivo koti be). */
+  onKick: ((playerId: string) => void) | null = null;
 
   constructor() {
     this.el = must("scoreboard");
@@ -814,12 +874,30 @@ export class Scoreboard {
   /**
    * @param mode A jatekmod: ez donti el, MI az allas (elet vagy kiloves).
    */
-  update(rows: ScoreRow[], ownId: string | null, mode: GameModeId): void {
+  update(
+    rows: ScoreRow[],
+    ownId: string | null,
+    mode: GameModeId,
+    /** A szoba nyitoja vagyunk-e -- csak neki latszik a kirugo gomb. */
+    isHost = false,
+    now = performance.now(),
+  ): void {
     const idore = isTimed(mode);
     const sorted = sortScoreRows(rows, idore);
 
+    // Lejart a megerosites: a gomb visszaall alapallapotba.
+    if (this.armedId !== null && now >= this.armedUntil) this.armedId = null;
+
+    // A KULCS resze a host-allapot es az elesitett gomb is: e nelkul a
+    // "biztos?"-ra valtas nem rajzolodna ki (a sorok tartalma nem
+    // valtozott), es a gombok nem tunnenek el, ha a host atszall
+    // valaki masra.
     const key =
       mode +
+      "|" +
+      (isHost ? "H" : "-") +
+      "|" +
+      (this.armedId ?? "") +
       "|" +
       sorted.map((r) => `${r.id}:${r.name}:${r.lives}:${r.kills}:${r.car}`).join("|");
     if (key === this.lastKey) return;
@@ -871,6 +949,37 @@ export class Scoreboard {
       }
 
       line.append(dot, name, allas);
+
+      // KIRUGO GOMB -- csak a hostnak, es csak masokra.
+      //
+      // A gomb kattinthato, tehat NEM a vaszon kapja meg az esemenyt --
+      // ezert a lovest sem suti el (lasd aim.ts onGameSurface). Uj
+      // panelnel nincs mit atirni ott, ez a szabaly magatol ervenyes.
+      if (isHost && row.id !== ownId) {
+        const armed = this.armedId === row.id;
+        const gomb = document.createElement("button");
+        gomb.className = armed ? "kick armed" : "kick";
+        gomb.textContent = armed ? "biztos?" : "x";
+        gomb.title = armed
+          ? `${row.name} kirugasa -- kattints ujra`
+          : `${row.name} kirugasa`;
+        gomb.addEventListener("click", (e) => {
+          // Az esemeny ne jusson tovabb a vaszonig.
+          e.stopPropagation();
+          e.preventDefault();
+          if (this.armedId === row.id) {
+            this.armedId = null;
+            this.onKick?.(row.id);
+          } else {
+            this.armedId = row.id;
+            this.armedUntil = performance.now() + KICK_CONFIRM_MS;
+          }
+          // Azonnali visszajelzes: a kovetkezo update ujrarajzolja.
+          this.lastKey = "";
+        });
+        line.appendChild(gomb);
+      }
+
       this.el.appendChild(line);
     }
   }

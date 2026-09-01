@@ -180,6 +180,15 @@ export class RemotePlayers {
   /** Ki hany jatekost lott ki ebben a meccsben (eredmenyjelzo). */
   private readonly kills = new Map<string, number>();
 
+  /**
+   * Leadott es talalo lovesek -- a meccs vegi TALALATI ARANYHOZ.
+   *
+   * Ket kulon szam, nem eleve kiszamolt szazalek: az arany onmagaban
+   * hazug lehet (harom lovesbol 100%), ezert a darabszam is latszik.
+   */
+  private readonly shotsFired = new Map<string, number>();
+  private readonly shotsHit = new Map<string, number>();
+
   hpOf(id: string): number | null {
     return this.hp.get(id) ?? null;
   }
@@ -190,6 +199,14 @@ export class RemotePlayers {
 
   killsOf(id: string): number {
     return this.kills.get(id) ?? 0;
+  }
+
+  shotsFiredOf(id: string): number {
+    return this.shotsFired.get(id) ?? 0;
+  }
+
+  shotsHitOf(id: string): number {
+    return this.shotsHit.get(id) ?? 0;
   }
 
   livesOf(id: string): number {
@@ -259,6 +276,8 @@ export class RemotePlayers {
     this.overheated.delete(id);
     this.damageAcc.delete(id);
     this.kills.delete(id);
+    this.shotsFired.delete(id);
+    this.shotsHit.delete(id);
   }
 
   clear(): void {
@@ -274,6 +293,8 @@ export class RemotePlayers {
     this.overheated.clear();
     this.damageAcc.clear();
     this.kills.clear();
+    this.shotsFired.clear();
+    this.shotsHit.clear();
   }
 
   /** Egy beerkezett snapshot feldolgozasa (a sajat jatekos mar ki van szurve). */
@@ -288,6 +309,8 @@ export class RemotePlayers {
       this.names.set(player.id, player.name);
       this.lives.set(player.id, player.lives);
       this.kills.set(player.id, player.kills);
+      this.shotsFired.set(player.id, player.shotsFired);
+      this.shotsHit.set(player.id, player.shotsHit);
       this.cars.set(player.id, player.car);
       this.skins.set(player.id, player.skin);
       this.weapons.set(player.id, player.weapon);

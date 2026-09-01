@@ -145,6 +145,15 @@ export class NetworkClient {
   ownKills = 0;
 
   /**
+   * A sajat lovesink merlege ebben a meccsben (a szerver szerint).
+   *
+   * A meccs vegi eredmenyjelzo talalati aranyahoz -- lasd
+   * PlayerSnapshot.shotsFired.
+   */
+  ownShotsFired = 0;
+  ownShotsHit = 0;
+
+  /**
    * Mennyi eletet vesztettunk a legutobbi kiolvasas ota.
    *
    * Ugyanabbol a szabalybol, mint a tavoli autok folotti szam (lasd
@@ -213,6 +222,8 @@ export class NetworkClient {
   match: MatchSnapshot = {
     phase: "waiting",
     mode: DEFAULT_GAME_MODE,
+    // Meg nem tudjuk, ki a host -- csatlakozas elott nincs is szoba.
+    hostId: null,
     survivors: 0,
     winnerId: null,
     timeLeftMs: 0,
@@ -237,6 +248,23 @@ export class NetworkClient {
    */
   fire(target: [number, number, number]): void {
     this.transport?.send({ type: "fire", target });
+  }
+
+  /**
+   * Jatekos kirugasa -- KERES, nem tény.
+   *
+   * A jogosultsagot a szerver ellenorzi (csak a host rughat ki, es nem
+   * sajat magat). A kliens azert rejti el a gombot masnal, hogy ne
+   * kinaljon fel olyat, ami ugyis elbukna -- de a szabalyt nem ez
+   * tartatja be.
+   */
+  kick(playerId: string): void {
+    this.transport?.send({ type: "kick", playerId });
+  }
+
+  /** A szoba nyitoja vagyunk-e (nekunk latszanak a kirugo gombok). */
+  get isHost(): boolean {
+    return this.playerId !== null && this.match.hostId === this.playerId;
   }
 
   get connected(): boolean {
@@ -501,6 +529,8 @@ export class NetworkClient {
           this.ownProtected = own.protected;
           this.ownHealing = own.healing;
           this.ownKills = own.kills;
+          this.ownShotsFired = own.shotsFired;
+          this.ownShotsHit = own.shotsHit;
           this.ownCar = own.car;
           this.ownSkin = own.skin;
           this.lives = own.lives;

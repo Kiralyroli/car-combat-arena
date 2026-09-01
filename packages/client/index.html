@@ -563,6 +563,40 @@
       #scoreboard .row.out .lv { color: #6e7681; text-decoration: line-through; }
       #scoreboard .lv { color: #f0a020; letter-spacing: 2px; }
       /*
+         KIRUGO GOMB -- csak a szoba nyitojanal jelenik meg.
+
+         A panel maga `pointer-events: none` (tajekoztato reteg), ezert
+         a gombra KULON vissza kell kapcsolni -- kulonben a kattintas
+         atmenne rajta a vaszonra, es lovest sutne el helyette.
+
+         Alapallapotban halvany, es csak a soron athaladva latszik
+         igazan: egy allandoan vilagito x minden jatekosnal ott ulne a
+         kepernyon, holott ritkan kell.
+      */
+      #scoreboard .kick {
+        pointer-events: auto;
+        flex: 0 0 auto;
+        margin-left: 8px;
+        padding: 0 6px;
+        min-width: 20px;
+        border: 1px solid #4d5866;
+        border-radius: 4px;
+        background: transparent;
+        color: #6e7681;
+        font: inherit;
+        font-size: 11px;
+        line-height: 18px;
+        cursor: pointer;
+      }
+      #scoreboard .row:hover .kick { color: #9aa7b5; border-color: #6e7681; }
+      #scoreboard .kick:hover { color: #f85149; border-color: #f85149; }
+      /* MEGEROSITES: a masodik kattintas rug ki -- ez lathatoan mas. */
+      #scoreboard .kick.armed {
+        color: #f85149;
+        border-color: #f85149;
+        background: rgba(248, 81, 73, 0.12);
+      }
+      /*
          KILOVES-SZAM az eletek helyett: idore meno modban ez az allas.
          Ugyanaz a hely a soron, mert ugyanazt a kerdest valaszolja meg
          ("hogy all ez a jatekos") -- csak mas modban mas a merteke.
@@ -1298,6 +1332,14 @@
         color: #f0a020;
         font-variant-numeric: tabular-nums;
       }
+      /* A PONTOSSAG szandekosan halvanyabb, mint a kiloves: nem
+         eredmeny, hanem hatter-adat -- a meccset a kiloves donti el. */
+      #match-result .rows .row .pt {
+        flex: 0 0 92px;
+        text-align: right;
+        color: #8b949e;
+        font-variant-numeric: tabular-nums;
+      }
       #match-result .rows .row .lv {
         flex: 0 0 76px;
         text-align: right;
@@ -1314,6 +1356,7 @@
         margin-bottom: 2px;
       }
       #match-result .rows .row.head .kl,
+      #match-result .rows .row.head .pt,
       #match-result .rows .row.head .lv,
       #match-result .rows .row.head .nm { color: #7d8590; }
       /* A SAJAT sorunk kiemelve -- ezt keresi elsore a szem. */

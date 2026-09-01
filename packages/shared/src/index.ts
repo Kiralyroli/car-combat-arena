@@ -42,3 +42,4 @@ export * from "./physics/arcade";
 export * from "./physics/rapier";
 export * from "./net/protocol";
 export * from "./net/plausibility";
+export * from "./net/aimCheck";

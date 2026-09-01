@@ -25,6 +25,10 @@ const row = (name: string, lives: number, kills = 0): ScoreRow => ({
   name,
   lives,
   kills,
+  // A PONTOSSAG sem befolyasolja a sorrendet: az eredmenyjelzon
+  // megjelenik, de nem rendez -- a meccset a kiloves donti el.
+  shotsFired: 0,
+  shotsHit: 0,
   // A kinezet a sorrendet nem befolyasolja -- ez a teszt a rendezest meri.
   car: "Jeep",
 });

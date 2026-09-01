@@ -319,6 +319,10 @@ async function main(): Promise<void> {
   korulnezes.onValtozas((aktiv) => playerHud.setCameraFree(aktiv));
   playerHud.setCameraFree(korulnezes.isActive);
   const scoreboard = new Scoreboard();
+  // A KIRUGAS keres: a jogosultsagot a szerver ellenorzi (csak a host),
+  // a gomb elrejtese masnal csak annyit er, hogy ne kinaljunk fel
+  // olyat, ami ugyis elbukna.
+  scoreboard.onKick = (playerId) => net.kick(playerId);
   // KILOVES-LISTA a jobb felso sarokban -- minden jatekmodban.
   const killFeed = new KillFeed();
   // ...es ami EPPEN VELUNK tortent, a kep kozepe folott.
@@ -551,6 +555,29 @@ async function main(): Promise<void> {
           return;
         }
       }
+      // KIDOBAS: a jatekosnak LATNIA kell, miert repult ki -- egy
+      // sarokban megjeleno "hiba: kicked" nem magyarazat.
+      //
+      // Ujratoltessel terunk vissza a lobbyba: a lobby-hurok csak
+      // indulaskor fut (lasd lentebb), es meccs kozben visszalepni oda
+      // a teljes jatekallapot lebontasat jelentene. Az uzenetet a
+      // sessionStorage viszi at -- ugyanaz a minta, mint a
+      // bad_protocol ujratoltesenel.
+      //
+      // A SZOBAKODOT is toroljuk az URL-bol: kulonben az ujratoltes
+      // azonnal visszalepne oda, ahonnan az elobb kirugtak.
+      if (code === "kicked" || code === "invalid_data") {
+        try {
+          sessionStorage.setItem("cca.kickMessage", message);
+        } catch {
+          // A tarolas hianya ne akadalyozza meg a visszalepest -- az
+          // uzenet nelkul is jobb a lobby, mint egy nema, halott jatek.
+        }
+        location.hash = "";
+        location.reload();
+        return;
+      }
+
       hud.setNetworkStatus(`hiba: ${code}`, 0);
       if (code === "room_not_found") location.hash = "";
       // Ha eppen belepni probaltunk, a LOBBY kapja meg a hibat --
@@ -636,8 +663,27 @@ async function main(): Promise<void> {
     hud.setNetworkStatus("offline", 0);
   }
 
+  /**
+   * Kidobas-uzenet az elozo menetbol (lasd onError).
+   *
+   * EGYSZER hasznaljuk el: azonnal toroljuk, kulonben minden kesobbi
+   * ujratoltesnel ujra felbukkanna egy reg lezart esemenyrol.
+   */
+  const kickMessage = (() => {
+    try {
+      const uzenet = sessionStorage.getItem("cca.kickMessage");
+      sessionStorage.removeItem("cca.kickMessage");
+      return uzenet;
+    } catch {
+      return null;
+    }
+  })();
+
   if (net.connected) {
-    if (directName !== null) {
+    // KIDOBAS UTAN mindig a lobby jon, meg akkor is, ha az URL
+    // automatikus belepest kerne: kulonben a jatekos ugyanoda esne
+    // vissza, ahonnan kirugtak -- es el sem olvasna, miert.
+    if (directName !== null && kickMessage === null) {
       await joinAndWait(
         roomFromUrl || undefined,
         directName,
@@ -663,7 +709,10 @@ async function main(): Promise<void> {
       requestAnimationFrame(menuKepkocka);
 
       // Amig a belepes nem sikerul, visszaterunk a lobbyba a hibaval.
-      let message: string | undefined;
+      // Az ELSO uzenet johet egy kidobasbol is: onnan ujratoltessel
+      // erkezunk ide, es ez az egyetlen hely, ahol a jatekos elolvassa,
+      // mi tortent (lasd onError).
+      let message: string | undefined = kickMessage ?? undefined;
       try {
         for (;;) {
           const choice = await lobby.open(message);
@@ -1211,6 +1260,8 @@ async function main(): Promise<void> {
               name: net.ownName,
               lives: net.lives ?? 0,
               kills: net.ownKills,
+              shotsFired: net.ownShotsFired,
+              shotsHit: net.ownShotsHit,
               car: net.ownCar,
             },
           ]
@@ -1220,6 +1271,8 @@ async function main(): Promise<void> {
         name: net.remotes.nameOf(id),
         lives: net.remotes.livesOf(id),
         kills: net.remotes.killsOf(id),
+        shotsFired: net.remotes.shotsFiredOf(id),
+        shotsHit: net.remotes.shotsHitOf(id),
         car: net.remotes.carOf(id),
       })),
     ];
@@ -1228,6 +1281,8 @@ async function main(): Promise<void> {
       net.playerId,
       // A MOD donti el, mit jelent az "allas": eletet vagy kilovest.
       net.match.mode,
+      // A KIRUGO GOMBOK csak a szoba nyitojanak latszanak.
+      net.isHost,
     );
     matchHud.update(
       net.match,

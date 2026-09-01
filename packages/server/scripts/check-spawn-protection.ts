@@ -20,10 +20,11 @@ import {
   SPAWN_POINTS,
   RESPAWN_DELAY_MS,
   SPAWN_PROTECTION_MS,
+  weaponPivot,
   type ClientState,
   type ServerMessage,
 } from "@cca/shared";
-import { Room } from "../src/rooms/room";
+import { Room, type ServerPlayer } from "../src/rooms/room";
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -56,6 +57,25 @@ function startedMatch(startedAt: number): Fixture {
   const b = room.add("b", (m) => toB.push(m), "B", "machinegun");
   room.stepMatch(startedAt);
   return { room, a, b, toA, toB };
+}
+
+/**
+ * A jatekos celzasat a megadott pontra allitja.
+ *
+ * A szerver osszeveti a kert loves iranyat a bevallott celzassal, ezert
+ * egy "csak lojunk valamerre" hivas ma mar elbukna -- helyesen: eppen
+ * ezt az ellenorzest epitettuk be.
+ */
+function aimAt(player: ServerPlayer, target: readonly number[]): void {
+  const origin = weaponPivot(player.state.position, player.state.rotation, "cannon", player.car);
+  const dx = target[0] - origin[0];
+  const dy = target[1] - origin[1];
+  const dz = target[2] - origin[2];
+  player.state = {
+    ...player.state,
+    aimYaw: Math.atan2(-dx, -dz),
+    aimPitch: Math.atan2(dy, Math.hypot(dx, dz) || 1e-4),
+  };
 }
 
 function collide(f: Fixture, now: number): void {
@@ -129,7 +149,13 @@ function main(): void {
   // --- Tuzeles megtori a sajat vedelmet ---
   {
     const f = startedMatch(T0);
-    const fired = f.room.tryFire("a", [0, 1, -30], T0 + 500);
+    const target: [number, number, number] = [0, 1, -30];
+    // A CELZAST is be kell allitani, kulonben a szerver elutasitja a
+    // lovest: a kert irany es a bevallott celzas kozotti elteresre
+    // hatar van (lasd aimCheck.ts). Ugyanugy szamoljuk, ahogy a kliens
+    // -- a fegyver forgaspontjabol (lasd main.ts currentAim).
+    aimAt(f.a, target);
+    const fired = f.room.tryFire("a", target, T0 + 500);
     check("a kiloves sikerul", fired, "tryFire = true");
 
     const snapshot = f.room.buildSnapshot(T0 + 600);

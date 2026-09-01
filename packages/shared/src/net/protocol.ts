@@ -61,8 +61,19 @@ export const INTERP_DELAY_MS = 100;
  * valasztani, es -- ami rosszabb -- a deathmatch visszaszamlalojat sem
  * latna: eletekre varna egy olyan meccsben, ahol nem fogynak, es a
  * meccs vege szamara varatlanul jonne.
+ *
+ * 12: TALALATI ARANY az eredmenyjelzon. A regi kliens csak egy
+ * oszloppal kevesebbet mutatna -- ez onmagaban gyengebb ok, mint az
+ * eddigiek. Megis emelunk: ez az oszlop a jatek egyetlen valodi
+ * aimbot-valasza, es egy nyitva felejtett regi lap eppen azt a
+ * meccset mutatna pontossag nelkul, amelyikben szamitana. Inkabb
+ * kerjunk ujratoltest, mint hogy csendben kevesebb latszodjon.
+ *
+ * 13: KIRUGAS. A regi kliens nem tudna kirugni senkit (a host nem
+ * latna a gombokat), es -- ami rosszabb -- kirugva egy magyarazat
+ * nelkuli kapcsolat-bontast latna, mert az uj hibakodokat nem ismeri.
  */
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 13;
 
 /**
  * A kerekek LATVANY-allapota.
@@ -155,6 +166,24 @@ export interface PlayerSnapshot extends WheelVisualState, AimState {
    * Standingben pedig az eredmenyjelzon latszik, ki mennyit tett hozza.
    */
   kills: number;
+  /**
+   * Hany lovest adott le, es abbol hany talalt EBBEN a meccsben.
+   *
+   * A meccs vegi eredmenyjelzo ebbol szamol TALALATI ARANYT. Miert megy
+   * ez mindenkirol mindenkinek: mert ez a szam a jatek egyetlen valodi
+   * valasza az aimbotra. Tokeletes celzast a szerver nem tud
+   * megakadalyozni (a celzas szuksegkeppen kliens-input), de egy 97%-os
+   * arany egy 30%-os mezonyben mindenki szamara lathato -- es ebben a
+   * jatekban, ahol privat szobakoddal ismerosok jatszanak, a tobbi
+   * jatekos erosebb kovetkezmeny, mint barmilyen algoritmus.
+   *
+   * A "talalat" fegyverenkent mast jelent (gepfegyvernel a sugar
+   * eltalalt valakit, agyunal a robbanas sebzett egy masik jatekost) --
+   * ezert megy at a DARABSZAM is, nem csak az arany: a nezo igy latja,
+   * mekkora mintarol van szo.
+   */
+  shotsFired: number;
+  shotsHit: number;
   /** Melyik kepesseget valasztotta ehhez az elethez. */
   ability: AbilityId;
   /**
@@ -421,6 +450,23 @@ export interface ListRoomsMessage {
   type: "listRooms";
 }
 
+/**
+ * Jatekos kirugasa -- CSAK a szoba nyitoja (host) kerheti.
+ *
+ * MIERT EMBER DONT, ES NEM ALGORITMUS: a tokeletes celzast a szerver
+ * nem tudja megkulonboztetni a nagyon jo jatekostol (a celzas
+ * szuksegkeppen kliens-input). Amit a szerver tud, az a MERES -- a
+ * talalati arany --, es azt megmutatja mindenkinek. A kovetkezmenyt
+ * viszont az hozza meg, aki a szobat nyitotta.
+ *
+ * A szerver ellenorzi, hogy a kero tenyleg a host-e: e nelkul barki
+ * kirughatna barkit, ami rosszabb lenne, mint a csalas.
+ */
+export interface KickMessage {
+  type: "kick";
+  playerId: string;
+}
+
 export type ClientMessage =
   | ListRoomsMessage
   | JoinMessage
@@ -430,6 +476,7 @@ export type ClientMessage =
   | SelectAbilityMessage
   | UseAbilityMessage
   | ChooseSpawnMessage
+  | KickMessage
   | FireMessage;
 
 // --- Szerver -> kliens ---
@@ -466,6 +513,16 @@ export interface MatchSnapshot {
    * csatlakozo kliensnek sem kell kulon lekerdeznie.
    */
   mode: GameModeId;
+  /**
+   * Ki a szoba nyitoja (host); null, ha a szoba ures.
+   *
+   * A KIRUGAS jogat ez adja. MINDEN snapshotban ott van -- ugyanabbol
+   * az okbol, mint a mod: a host tavozasakor atszall valakire, es a
+   * kliensnek errol kulon lekerdezes nelkul kell tudnia, kulonben
+   * valakinel ott maradnanak a kirugo gombok, akinek mar nincs joga
+   * hozzajuk (vagy eppen nem jelennenek meg az uj hostnal).
+   */
+  hostId: string | null;
   /**
    * Mennyi van hatra a meccsbol (ms); 0, ha a mod nem idore megy.
    *
@@ -693,7 +750,19 @@ export interface ErrorMessage {
      * tovabbadja a szovegevel egyutt (nem sorolja fel az eseteket),
      * tehat a regi kliens is helyesen jeleniti meg.
      */
-    | "rate_limit";
+    | "rate_limit"
+    /** A szoba nyitoja kirugta a jatekost. */
+    | "kicked"
+    /**
+     * A szerver tartosan ertelmezhetetlen adatot kapott, es bontotta a
+     * kapcsolatot (lasd cheatMonitor.ts).
+     *
+     * A SZOVEG SZANDEKOSAN NEM VADOL CSALASSAL: ugyanezt az allapotot
+     * eloallitja egy szakado kapcsolat is, es a szerver a kettot nem
+     * tudja megkulonboztetni. Egy hamis vad rosszabb, mint a
+     * kovetkezmeny nelkul hagyott csalas.
+     */
+    | "invalid_data";
   message: string;
 }
 
