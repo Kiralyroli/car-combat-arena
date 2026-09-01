@@ -39,15 +39,28 @@ kit lőtt ki.
 npm install
 ```
 
-A szerver és a kliens **külön** fut:
+A játékhoz **két** szerver kell: a játékszerver (8080) és a kliens
+(5173). Ha csak a második megy, a lap betölt, de a lobby nem talál
+szervert; ha csak az első, nincs mit megnyitni. Egy paranccsal
+mindkettő:
 
 ```bash
-npm run dev:server
+npm run dev:all
 ```
 
+Windowson duplakattintásra is: **`inditas.cmd`** a projekt gyökerében.
+
+Leállítás: `Ctrl+C`. Ha egy korábbi indítás bent ragadt (a Ctrl+C nem
+mindig ér el a gyerekfolyamatokig), a következő `dev:all` **magától
+eltakarítja** -- de csak a saját folyamatait; egy idegen programot a
+8080-on nem áll le, hanem szól. Kézzel:
+
 ```bash
-npm run dev
+npm run dev:stop
 ```
+
+A kettő külön is indítható (`npm run dev:server`, illetve `npm run dev`),
+ha egyenként akarod nézni a kimenetüket.
 
 A kliens ezután a <http://localhost:5173> címen érhető el. Az első lap
 nyit egy szobát, és a szobakódot beírja az URL-be (`#ABCD`) -- ezt a

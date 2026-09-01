@@ -12,6 +12,8 @@
   "scripts": {
     "dev": "npm run dev --workspace @cca/client",
     "dev:server": "npm run dev --workspace @cca/server",
+    "dev:all": "node tools/dev.mjs",
+    "dev:stop": "node tools/dev.mjs --stop",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check:node": "npm run check:node --workspace @cca/shared",
